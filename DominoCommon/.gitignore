@@ -1,0 +1,8 @@
+bin/
+obj/
+*.meta
+.idea/
+*.ncrunch*
+.*crunch*.local.xml
+.vs/
+.vscode/

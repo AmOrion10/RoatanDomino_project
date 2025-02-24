@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Web": {
+      "commandName": "Project",
+      "commandLineArgs": "server 10000 5"
+    }
+  }
+}

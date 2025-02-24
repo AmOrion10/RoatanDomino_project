@@ -1,0 +1,25 @@
+﻿using Newtonsoft.Json;
+
+namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
+{
+    public class OtherUserInfoDto
+    {
+        [JsonProperty(PropertyName = "l")]
+        public string Login { get; set; }
+
+        [JsonProperty(PropertyName = "s")]
+        public int Score { get; set; }
+
+        [JsonProperty(PropertyName = "d")]
+        public string DateSignup { get; set; }
+
+        /// <summary>
+        /// Can be null
+        /// </summary>
+        [JsonProperty(PropertyName = "n")]
+        public string Nationality { get; set; }
+
+        [JsonProperty(PropertyName = "st")]
+        public StatisticDto Statistic { get; set; }
+    }
+}

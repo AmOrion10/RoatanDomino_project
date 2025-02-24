@@ -1,0 +1,122 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5b11a58205ec3474ca216360e9fa74a8, type: 3}
+  m_Name: Image Translations Shared Data
+  m_EditorClassIdentifier: 
+  m_TableCollectionName: Image Translations
+  m_TableCollectionNameGuidString: 0ce7fc80668614a0cadd4fb938dcc4f9
+  m_Entries:
+  - m_Id: 944703004672
+    m_Key: tuto1
+    m_Metadata:
+      m_Items: []
+  - m_Id: 21226315776
+    m_Key: Tuto1
+    m_Metadata:
+      m_Items: []
+  - m_Id: 443093606400
+    m_Key: Tuto2
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3843180978176
+    m_Key: tuto2
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4002879102976
+    m_Key: tuto3
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4166494707712
+    m_Key: tuto4
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4274934243328
+    m_Key: tuto5
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4467436019712
+    m_Key: tuto6
+    m_Metadata:
+      m_Items: []
+  m_Metadata:
+    m_Items:
+    - rid: 6556587018664017924
+    - rid: 6556587018664017925
+  m_KeyGenerator:
+    rid: 6556587018664017923
+  references:
+    version: 2
+    RefIds:
+    - rid: 6556587018664017923
+      type: {class: DistributedUIDGenerator, ns: UnityEngine.Localization.Tables, asm: Unity.Localization}
+      data:
+        m_CustomEpoch: 1715089299567
+    - rid: 6556587018664017924
+      type: {class: AssetTypeMetadata, ns: UnityEngine.Localization.Metadata, asm: Unity.Localization}
+      data:
+        m_Entries:
+        - m_KeyId: 21226315776
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 443093606400
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        m_TypeString: UnityEngine.Texture2D, UnityEngine.CoreModule, Version=0.0.0.0,
+          Culture=neutral, PublicKeyToken=null
+    - rid: 6556587018664017925
+      type: {class: AssetTypeMetadata, ns: UnityEngine.Localization.Metadata, asm: Unity.Localization}
+      data:
+        m_Entries:
+        - m_KeyId: 944703004672
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 3843180978176
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 4002879102976
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 4166494707712
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 4274934243328
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        - m_KeyId: 4467436019712
+          m_TableCodes:
+          - en
+          - fr-FR
+          - de
+          - es
+        m_TypeString: UnityEngine.Sprite, UnityEngine.CoreModule, Version=0.0.0.0,
+          Culture=neutral, PublicKeyToken=null

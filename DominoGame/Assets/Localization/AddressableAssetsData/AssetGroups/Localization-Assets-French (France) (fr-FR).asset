@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: Localization-Assets-French (France) (fr-FR)
+  m_EditorClassIdentifier: 
+  m_GroupName: Localization-Assets-French (France) (fr-FR)
+  m_Data:
+    m_SerializedData: []
+  m_GUID: 11cfad41d59b740a8baf5b59e4c98877
+  m_SerializeEntries:
+  - m_GUID: 071e4d9279f614de09d573d01a0a66dc
+    m_Address: tuto1_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 525b5ba5dca2f41d3bdc9a587fff3675
+    m_Address: tuto2_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 872b9cd43e9b247cf880f7de6070b548
+    m_Address: tuto3_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 7bb90c43a1da2431c8ba898dc97ebad7
+    m_Address: tuto4_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: b3a521048ff144d7aa96cd669bd879ba
+    m_Address: tuto5_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: c0d497ffdeabc4076b4291ad2500b7fc
+    m_Address: tuto6_fr
+    m_ReadOnly: 1
+    m_SerializedLabels:
+    - Locale-fr-FR
+    FlaggedDuringContentUpdateRestriction: 0
+  m_ReadOnly: 1
+  m_Settings: {fileID: 11400000, guid: 817829408ab8142d887e09282f6e9d90, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 5fa3decb08c304c12b216f55097a56ae, type: 2}
+    - {fileID: 11400000, guid: d024bf48702864143b3c6bb04b307906, type: 2}

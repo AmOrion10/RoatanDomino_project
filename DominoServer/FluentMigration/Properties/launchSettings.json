@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "FluentMigration": {
+      "commandName": "Project"
+    }
+  }
+}

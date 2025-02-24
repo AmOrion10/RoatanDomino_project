@@ -1,0 +1,568 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e9620f8c34305754d8cc9a7e49e852d9, type: 3}
+  m_Name: UI Strings_de
+  m_EditorClassIdentifier: 
+  m_LocaleId:
+    m_Code: de
+  m_SharedData: {fileID: 11400000, guid: 506172c9ad2184a77be2f6ea2ec81249, type: 2}
+  m_Metadata:
+    m_Items:
+    - rid: 6556586905657147395
+  m_TableData:
+  - m_Id: 2542460336070656
+    m_Localized: Talon
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1928109891772416
+    m_Localized: nutzername
+    m_Metadata:
+      m_Items: []
+  - m_Id: 30929710997504
+    m_Localized: links
+    m_Metadata:
+      m_Items: []
+  - m_Id: 31929675014144
+    m_Localized: rechts
+    m_Metadata:
+      m_Items: []
+  - m_Id: 30663959896064
+    m_Localized: punktzahl
+    m_Metadata:
+      m_Items: []
+  - m_Id: 172233842688
+    m_Localized: wie spielt man
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3005139907502080
+    m_Localized: erstellen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3005304856895488
+    m_Localized: mit code beitreten
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3005510017081344
+    m_Localized: zurueck
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3006338119491584
+    m_Localized: lobby erstellen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1607847632896
+    m_Localized: 'Sie befinden sich im Hauptmenu
+
+      haben Sie die folgenden Moeglichkeiten:
+
+
+      -
+      Treten Sie direkt einem Ranglistenspiel bei, bei dem es darum geht, die hoechste
+      Punktzahl zu erreichen.
+
+      - Gehen Sie in die Lobby und erstellen Sie einen
+      Spielraum oder treten Sie ihm bei
+
+      - Konsultiere dein Profil'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3008137882755072
+    m_Localized: Name der Lobby
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3008422629859328
+    m_Localized: private Lobby
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3009782188335104
+    m_Localized: 'maximale Spielerzahl: 4'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3010083528105984
+    m_Localized: 'Ersteller der Lobby: Joan'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3010626078105600
+    m_Localized: lobbycode
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3011878727966720
+    m_Localized: 'Zeitlimit pro Runde: 30s'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3012582523789312
+    m_Localized: 'Gesamtzeitlimit: 600s'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3013236864573440
+    m_Localized: spieler
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3013416439504896
+    m_Localized: fertige Spieler
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3858259501056
+    m_Localized: profil
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3013999909134336
+    m_Localized: "spieler hinzuf\xFCgen"
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3014277676916736
+    m_Localized: rauswerfen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3014486662307840
+    m_Localized: blockieren
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3015076289175552
+    m_Localized: allgemein
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3015768995258368
+    m_Localized: lobby
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3015920896172032
+    m_Localized: privat
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3016079692521472
+    m_Localized: eine Nachricht senden
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3016244616749056
+    m_Localized: bereit
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3020609075273728
+    m_Localized: einladen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5803590279168
+    m_Localized: Einstellungen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 15507846586368
+    m_Localized: bildaufloesung
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3572065361920
+    m_Localized: ranglistenspiel
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3729251098624
+    m_Localized: lobbys
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6120193122304
+    m_Localized: ausloggen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6293203968000
+    m_Localized: beenden
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3275648394059776
+    m_Localized: melden
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3276077567827968
+    m_Localized: spiel verlassen ?
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3278868579344384
+    m_Localized: "Der Abbruch eines Spiels kann zu Abz\xFCgen bei der Elo-Zahl oder
+      beim Matchmaking f\xFChren."
+    m_Metadata:
+      m_Items:
+      - rid: 6556586905657147395
+  - m_Id: 3279515307466752
+    m_Localized: einen Freund hinzufuegen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 18030871437312
+    m_Localized: abbrechen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3280067412090880
+    m_Localized: senden
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1930987448557568
+    m_Localized: Nachrichten
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1931119090982912
+    m_Localized: stats
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1930684326207488
+    m_Localized: freunde
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1938840213250048
+    m_Localized: spielverlauf
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1928283603066880
+    m_Localized: staatsangehorigkeit
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3285238854705152
+    m_Localized: frankreich
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3285482212417536
+    m_Localized: gewonnene spiele
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3285738404700160
+    m_Localized: verlorene spiele
+    m_Metadata:
+      m_Items: []
+  - m_Id: 18241853317120
+    m_Localized: standard
+    m_Metadata:
+      m_Items: []
+  - m_Id: 18424775303168
+    m_Localized: anwenden
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6964028366848
+    m_Localized: Das Spiel ist beendet !
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7173760344064
+    m_Localized: 1st
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1931341330374656
+    m_Localized: 2nd
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1938629625634816
+    m_Localized: wenn du auf "revanche" klickst, kommst du direkt in eine neue Lobby
+      mit den anderen Spielern des Spiels, die ebenfalls darauf geklickt haben.
+    m_Metadata:
+      m_Items: []
+  - m_Id: 2540024485634048
+    m_Localized: revanche
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3665296085737472
+    m_Localized: Hauptmenu
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3665659706728448
+    m_Localized: beitreten
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3214161207296
+    m_Localized: privat
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3666173823541248
+    m_Localized: "Sie befinden sich im Men\xFC \"Lobbys\".\nSie haben die Wahl zwischen
+      :\n\n- Einer der \xF6ffentlichen Partien beitreten, die in der Liste rechts
+      angezeigt werden.\n- Eine Partie mit Ihren eigenen Einstellungen erstellen\n-
+      Einem Spiel mithilfe eines Codes beitreten"
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3667416860057600
+    m_Localized: 'durchschnittliches elo: 10400'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 15905433051136
+    m_Localized: bildschirmtyp
+    m_Metadata:
+      m_Items: []
+  - m_Id: 17020354551808
+    m_Localized: zugaenglichkeit
+    m_Metadata:
+      m_Items: []
+  - m_Id: 17287678517248
+    m_Localized: lautstaerke
+    m_Metadata:
+      m_Items: []
+  - m_Id: 17674099744768
+    m_Localized: musik
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3671074142150656
+    m_Localized: klaenge
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1929067753365504
+    m_Localized: email adresse
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1928470950043648
+    m_Localized: anmeldedatum
+    m_Metadata:
+      m_Items: []
+  - m_Id: 1930000134561792
+    m_Localized: kennwort veraendern
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3673455231754240
+    m_Localized: elopunktzahl
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4331553990631424
+    m_Localized: 2 aktive Lobbys
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4449678119657472
+    m_Localized: "Um sich zu registrieren, muessen Sie angeben :\n - einen Nickname,
+      den andere Spieler sehen k\xF6nnen\n - eine E-Mail-Adresse\n - ein Passwort
+      (mindestens 8 Zeichen, darunter mindestens eine Zahl), das Sie zweimal schreiben
+      muessen.\n - Ihr Geburtsdatum"
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4450847093153792
+    m_Localized: "Um ein Konto zu erstellen, klicken Sie auf \"Anmelden\".\nWenn
+      Sie bereits eines besitzen, k\xF6nnen Sie auf \"Anmelden\" klicken."
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4451182243209216
+    m_Localized: "Um sich einzuloggen, muessen Sie Folgendes angeben:\n - Den Nickname,
+      den Sie bei der Anmeldung gewaehlt haben, oder Ihre E-Mail-Adresse.\n - Das
+      Passwort, das Sie bei der Anmeldung angegeben haben."
+    m_Metadata:
+      m_Items: []
+  - m_Id: 27648725082112
+    m_Localized: anmeldung
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4463029319098368
+    m_Localized: einloggen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4465502813413376
+    m_Localized: sich einloggen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4465901163241472
+    m_Localized: benutzername
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4466053043183616
+    m_Localized: passwort
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4466329800138752
+    m_Localized: das kennwort bestaetigen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4466518774505472
+    m_Localized: geburtsdatum
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5062484049256448
+    m_Localized: lobby suchen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5062633379061760
+    m_Localized: 'Zustand der Lobby :'
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5063063458799616
+    m_Localized: in Erwartung
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5072596264542208
+    m_Localized: Voller Bildschirm
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5072800397123584
+    m_Localized: keine
+    m_Metadata:
+      m_Items: []
+  - m_Id: 5082108778242048
+    m_Localized: legasthenie
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6286592984473600
+    m_Localized: sprache
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6428925843464192
+    m_Localized: name
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6429104143327232
+    m_Localized: anzahl der spieler
+    m_Metadata:
+      m_Items: []
+  - m_Id: 6439975506665472
+    m_Localized: deutsch
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7277242462756864
+    m_Localized: hoher Kontrast
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7278062688264192
+    m_Localized: Farbenblindheit (Deuteranomalie)
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7282476870262784
+    m_Localized: Farbenblindheit (Deuteranopie)
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7282680180760576
+    m_Localized: Farbenblindheit (Protanomalie)
+    m_Metadata:
+      m_Items: []
+  - m_Id: 2543923598712832
+    m_Localized: Farbenblindheit (Protanopie)
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7284396401876992
+    m_Localized: franzoesisch
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7284638425800704
+    m_Localized: spanisch
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7284850192015360
+    m_Localized: englisch
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7284972892184576
+    m_Localized: deutsch
+    m_Metadata:
+      m_Items: []
+  - m_Id: 21945906094080
+    m_Localized: es laedt...
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7291626815741952
+    m_Localized: Fenster ohne Rand
+    m_Metadata:
+      m_Items: []
+  - m_Id: 7293227953545216
+    m_Localized: mit Fenstern
+    m_Metadata:
+      m_Items: []
+  - m_Id: 27497046466560
+    m_Localized: verbindung
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9030124786671616
+    m_Localized: passwort vergessen?
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9841014339526656
+    m_Localized: punkte
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9841698606669824
+    m_Localized: Spielbeginn in
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9841877074305024
+    m_Localized: Warten auf Spieler
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9847380009541632
+    m_Localized: 3.
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9847896336752640
+    m_Localized: Name dritter Platz
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9848506645733376
+    m_Localized: gewinnername
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9848705556406272
+    m_Localized: ein Spieler hat aufgegeben, das Spiel ist also beendet
+    m_Metadata:
+      m_Items: []
+  - m_Id: 9852670146764800
+    m_Localized: Freundschaftsanfrage
+    m_Metadata:
+      m_Items: []
+  - m_Id: 10128168303190016
+    m_Localized: code
+    m_Metadata:
+      m_Items: []
+  - m_Id: 10450728756699136
+    m_Localized: Lobby mit Code beitreten
+    m_Metadata:
+      m_Items: []
+  - m_Id: 11247423119679488
+    m_Localized: aktuelle Serververbindung...
+    m_Metadata:
+      m_Items: []
+  - m_Id: 11247654565568512
+    m_Localized: ein Fehler ist aufgetreten
+    m_Metadata:
+      m_Items: []
+  - m_Id: 11247870828077056
+    m_Localized: erneut versuchen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 11663698396438528
+    m_Localized: zuruecksetzen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 11664377504587776
+    m_Localized: Passwort zuruecksetzen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3007225013460992
+    m_Localized: gespielte Spiele
+    m_Metadata:
+      m_Items: []
+  - m_Id: 12052112270680064
+    m_Localized: nein
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3014835397713920
+    m_Localized: ja
+    m_Metadata:
+      m_Items: []
+  - m_Id: 12059987491676160
+    m_Localized: spielen
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3020706915803136
+    m_Localized: weiter
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3279708295782400
+    m_Localized: "hallo und willkommen bei \ntile titans\nbereit, einer zu werden?"
+    m_Metadata:
+      m_Items: []
+  - m_Id: 12062329234513920
+    m_Localized: das Tutorial verlassen?
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3280160534028288
+    m_Localized: ich bin bereit
+    m_Metadata:
+      m_Items: []
+  references:
+    version: 2
+    RefIds:
+    - rid: 6556586905657147395
+      type: {class: SmartFormatTag, ns: UnityEngine.Localization.Metadata, asm: Unity.Localization}
+      data:
+        m_Entries: 00e0ef141da60b00

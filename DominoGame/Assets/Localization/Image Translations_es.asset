@@ -1,0 +1,55 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 97269afb30aa84742ae3f3342603618a, type: 3}
+  m_Name: Image Translations_es
+  m_EditorClassIdentifier: 
+  m_LocaleId:
+    m_Code: es
+  m_SharedData: {fileID: 11400000, guid: 0ce7fc80668614a0cadd4fb938dcc4f9, type: 2}
+  m_Metadata:
+    m_Items: []
+  m_TableData:
+  - m_Id: 21226315776
+    m_Localized: f2803eef7255b4460b14b97444b3cd61
+    m_Metadata:
+      m_Items: []
+  - m_Id: 443093606400
+    m_Localized: 98b02b4eef5f34eaa8e3d48ddc8ed874
+    m_Metadata:
+      m_Items: []
+  - m_Id: 944703004672
+    m_Localized: f2803eef7255b4460b14b97444b3cd61[tuto1_es]
+    m_Metadata:
+      m_Items: []
+  - m_Id: 3843180978176
+    m_Localized: 98b02b4eef5f34eaa8e3d48ddc8ed874[tuto2_es]
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4002879102976
+    m_Localized: 8030fbc9ad5e74c8ca498f1243bd7333[tuto3_es]
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4166494707712
+    m_Localized: 267d5317da77f4112b99b8a166b68c90[tuto4_es]
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4274934243328
+    m_Localized: ee2fc231c48734360be668563c94c5f9[tuto5_es]
+    m_Metadata:
+      m_Items: []
+  - m_Id: 4467436019712
+    m_Localized: 77172b1b0e17145e6a60742c24d06b8f[tuto6_es]
+    m_Metadata:
+      m_Items: []
+  references:
+    version: 2
+    RefIds: []

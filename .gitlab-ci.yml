@@ -1,0 +1,91 @@
+stages:
+  - build
+  - tests
+
+.dotnet_default:
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+
+.dotnet_with_database:
+  extends: .dotnet_default
+  before_script:
+    - cd DominoServer/FluentMigration
+    - dotnet run
+    - cd ../..
+  services:
+    - mysql:8.4.0
+  variables:
+    MYSQL_DATABASE: db
+    MYSQL_USER: user
+    MYSQL_PASSWORD: password
+    MYSQL_ROOT_PASSWORD: password
+    MysqlConnectionString: Server=mysql;Port=3306;Database=db;Uid=user;Pwd=password;
+
+build_server:
+  stage: build
+  extends: .dotnet_default
+  script:
+    - cd DominoServer
+    - dotnet build --no-self-contained /m:1 # Max cpu count set to 1 => https://github.com/dotnet/sdk/issues/2076
+  artifacts:
+    name: "DominoServerBuild"
+    paths:
+      - DominoServer/src/Web/bin
+      - DominoServer/src/Web/obj
+      - DominoServer/tests/UnitTests/bin
+      - DominoServer/tests/UnitTests/obj
+      - DominoServer/tests/IntegrationTests/obj
+      - DominoServer/tests/IntegrationTests/obj
+      - DominoServer/tests/AcceptanceTests/bin
+      - DominoServer/tests/AcceptanceTests/obj
+    expire_in: 1 week
+
+.server_tests_base:
+  stage: tests
+  extends: .dotnet_default
+  needs: ["build_server"]
+  dependencies:
+    - build_server
+  script:
+    # Assume variable TESTS_DIR is set
+    - dotnet test DominoServer/tests/$TESTS_DIR --logger:"junit;LogFilePath=..\artifacts\{assembly}-test-result.xml;MethodFormat=Class;FailureBodyFormat=Verbose"
+  artifacts:
+    when: always
+    paths:
+      - ./**/*test-result.xml
+    reports:
+      junit:
+        - ./**/*test-result.xml
+    expire_in: 1 week
+
+.server_tests_base_with_database:
+  stage: tests
+  extends: .dotnet_with_database
+  needs: ["build_server"]
+  dependencies:
+    - build_server
+  script:
+    # Assume variable TESTS_DIR is set
+    - dotnet test DominoServer/tests/$TESTS_DIR --logger:"junit;LogFilePath=..\artifacts\{assembly}-test-result.xml;MethodFormat=Class;FailureBodyFormat=Verbose"
+  artifacts:
+    when: always
+    paths:
+      - ./**/*test-result.xml
+    reports:
+      junit:
+        - ./**/*test-result.xml
+    expire_in: 1 week
+
+server_unit_tests:
+  extends: .server_tests_base
+  variables:
+    TESTS_DIR: UnitTests
+
+server_integration_tests:
+  extends: .server_tests_base_with_database
+  variables:
+    TESTS_DIR: IntegrationTests
+
+server_acceptance_tests:
+  extends: .server_tests_base
+  variables:
+    TESTS_DIR: AcceptanceTests
