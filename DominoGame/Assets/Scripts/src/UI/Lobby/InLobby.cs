@@ -34,6 +34,11 @@ public class InLobby : MonoBehaviour
 
     public static LobbyDto Lobby { get; private set; }
 
+    public static void SetOfflineLobby(LobbyDto lobby)
+    {
+        Lobby = lobby;
+    }
+
     private TMP_Text readyButtonText;
 
     private IClient client;

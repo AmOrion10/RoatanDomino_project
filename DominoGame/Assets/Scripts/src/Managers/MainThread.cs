@@ -35,7 +35,7 @@ public class MainThread : MonoBehaviour
 
     public void AddActionToQueue(Action action)
     {
-        lock (action)
+        lock (actionsQueue)
         {
             actionsQueue.Enqueue(action);
         }

@@ -31,21 +31,40 @@ public class ChatManager : MonoBehaviour
     private void Start()
     {
         FindChatsInScene();
+        RefreshClient();
+        SceneManager.activeSceneChanged += OnActiveSceneChanged;
+    }
+
+    public void RefreshClient()
+    {
+        if (client != null)
+        {
+            client.EventHandlers.ReceiveChatMessageEvent -= ReceiveChatMessageCallback;
+            client.EventHandlers.JoinChatEvent -= JoinChatCallback;
+            client.EventHandlers.LeaveChatEvent -= LeaveChatCallback;
+        }
+
+        if (Networking.Instance == null) return;
 
         client = Networking.Instance.GetClient();
-        client.EventHandlers.ReceiveChatMessageEvent += ReceiveChatMessageCallback;
-        client.EventHandlers.JoinChatEvent += JoinChatCallback;
-        client.EventHandlers.LeaveChatEvent += LeaveChatCallback;
-        SceneManager.activeSceneChanged += OnActiveSceneChanged;
+        if (client != null)
+        {
+            client.EventHandlers.ReceiveChatMessageEvent += ReceiveChatMessageCallback;
+            client.EventHandlers.JoinChatEvent += JoinChatCallback;
+            client.EventHandlers.LeaveChatEvent += LeaveChatCallback;
+        }
     }
 
     private void OnDestroy()
     {
-        if (Instance != null)
+        if (Instance != null && Instance != this)
             return;
-        client.EventHandlers.ReceiveChatMessageEvent -= ReceiveChatMessageCallback;
-        client.EventHandlers.JoinChatEvent -= JoinChatCallback;
-        client.EventHandlers.LeaveChatEvent -= LeaveChatCallback;
+        if (client != null)
+        {
+            client.EventHandlers.ReceiveChatMessageEvent -= ReceiveChatMessageCallback;
+            client.EventHandlers.JoinChatEvent -= JoinChatCallback;
+            client.EventHandlers.LeaveChatEvent -= LeaveChatCallback;
+        }
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
     }
 
@@ -104,7 +123,11 @@ public class ChatManager : MonoBehaviour
     {
         lock (ChatsConnected)
         {
-            ChatsConnected.Remove(ChatsConnected.First(c => c.Id == dto.Id));
+            ChatDto existing = ChatsConnected.FirstOrDefault(c => c.Id == dto.Id);
+            if (existing != null)
+            {
+                ChatsConnected.Remove(existing);
+            }
         }
         foreach (Chat chat in chats)
         {

@@ -32,6 +32,16 @@ public class GameManager : MonoBehaviour
         LocalizationSettings.SelectedLocale = LocalizationSettings.AvailableLocales.Locales[MenuPrincipal.IdLanguageUsed];
 
         playerRankings.gameObject.SetActive(false);
+
+        if (InLobby.Lobby == null)
+        {
+            if (OfflineModeUI.Instance != null)
+            {
+                OfflineModeUI.Instance.OpenSetupModal();
+            }
+            return;
+        }
+
         client = Networking.Instance.GetClient();
         SetUpGameFromLobby(InLobby.Lobby);
 
@@ -71,18 +81,21 @@ public class GameManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        client.EventHandlers.GameStartingTimerEvent -= GameStartingTimerCallback;
-        client.EventHandlers.DominoDistrubitionEvent -= DominoDistrubitionCallback;
-        client.EventHandlers.ChangePlayerTurnEvent -= ChangePlayerTurnCallback;
-        client.EventHandlers.GameGeneralTimerEvent -= GameGeneralTimerCallback;
-        client.EventHandlers.PlayerPlaysEvent -= PlayerPlaysCallback;
-        client.EventHandlers.PlayerPlaysResponseEvent -= PlayerPlaysResponseCallback;
-        client.EventHandlers.PossiblesMovesEvent -= PossiblesMovesCallback;
-        client.EventHandlers.NumberOfDominoPerPlayerEvent -= NumberOfDominoPerPlayerCallback;
-        client.EventHandlers.EndGameEvent -= EndGameCallback;
-        client.EventHandlers.PlayerLeftGameEvent += PlayerLeftGameCallback;
-        client.EventHandlers.PlayerLeftGameEvent -= PlayerLeftGameCallback;
-        client.EventHandlers.GetOtherUserInfoResponseEvent -= GetOtherUserInfoCallback;
+        if (client != null)
+        {
+            client.EventHandlers.GameStartingTimerEvent -= GameStartingTimerCallback;
+            client.EventHandlers.DominoDistrubitionEvent -= DominoDistrubitionCallback;
+            client.EventHandlers.ChangePlayerTurnEvent -= ChangePlayerTurnCallback;
+            client.EventHandlers.GameGeneralTimerEvent -= GameGeneralTimerCallback;
+            client.EventHandlers.PlayerPlaysEvent -= PlayerPlaysCallback;
+            client.EventHandlers.PlayerPlaysResponseEvent -= PlayerPlaysResponseCallback;
+            client.EventHandlers.PossiblesMovesEvent -= PossiblesMovesCallback;
+            client.EventHandlers.NumberOfDominoPerPlayerEvent -= NumberOfDominoPerPlayerCallback;
+            client.EventHandlers.EndGameEvent -= EndGameCallback;
+            client.EventHandlers.PlayerLeftGameEvent -= PlayerLeftGameCallback;
+            client.EventHandlers.LeaveGameResponseEvent -= LeaveGameCallback;
+            client.EventHandlers.GetOtherUserInfoResponseEvent -= GetOtherUserInfoCallback;
+        }
         gameGrid.PossibleMoveSelectedEvent -= PossibleMoveSelectedCallback;
         handManager.DominoSelectedEvent -= DominoSelectedCallback;
     }
@@ -92,6 +105,12 @@ public class GameManager : MonoBehaviour
         if (!dto.OkResult)
         {
             Debug.LogError($"LeaveGameCallback failed : {dto.ErrorType}");
+        }
+        if (Networking.Instance != null && Networking.Instance.IsOfflineMode)
+        {
+            Networking.Instance.StopOfflineMode();
+            SceneManager.LoadScene(0);
+            return;
         }
         SceneManager.LoadScene(1);
     }
@@ -152,7 +171,7 @@ public class GameManager : MonoBehaviour
         {
             //TODO: animation si le player qui draw n'est pas nous
 
-            if (dto.IdUserPlayed == client.User!.Id)
+            if (dto.IdUserPlayed == client.User!.Id && dto.Moves != null && dto.Moves.Domino != null)
             {
                 handManager.AddDomino(dto.Moves.Domino);
             }
@@ -274,6 +293,12 @@ public class GameManager : MonoBehaviour
 
     public void QuitScene()
     {
+        if (Networking.Instance != null && Networking.Instance.IsOfflineMode)
+        {
+            Networking.Instance.StopOfflineMode();
+            SceneManager.LoadScene(0);
+            return;
+        }
         SceneManager.LoadScene(1);
     }
 }
