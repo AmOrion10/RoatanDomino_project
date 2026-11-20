@@ -27,19 +27,35 @@ public class RoatanMobileApp : MonoBehaviour
     private GameObject matchScreen;
     private GameObject howToPlayModal;
     private GameObject roundSummaryOverlay;
+    private RoatanOnlineController onlineController;
 
     // Home UI refs
+    private TMP_Text subtitleLabel;
     private TMP_Text statsLabel;
+    private TMP_Text modeHeadingLabel;
+    private TMP_Text cerradoTitleLabel;
+    private TMP_Text cerradoDescLabel;
+    private TMP_Text drawTitleLabel;
+    private TMP_Text drawDescLabel;
+    private TMP_Text diffHeadingLabel;
     private TMP_Text diffDescLabel;
     private TMP_Text opponentsHeaderLabel;
     private GameObject opponentsRowObj;
+    private TMP_Text playNowBtnLabel;
+    private TMP_Text homeSoundBtnLabel;
+    private TMP_Text howToPlayBtnLabel;
+    private TMP_Text onlineModeBtnLabel;
+
     private readonly Dictionary<RoatanGameMode, Image> modeCardImages = new Dictionary<RoatanGameMode, Image>();
     private readonly Dictionary<BotDifficulty, Image> diffBtnImages = new Dictionary<BotDifficulty, Image>();
+    private readonly Dictionary<BotDifficulty, TMP_Text> diffBtnLabels = new Dictionary<BotDifficulty, TMP_Text>();
     private readonly Dictionary<int, Image> botCountBtnImages = new Dictionary<int, Image>();
-    private TMP_Text homeSoundBtnLabel;
+    private readonly Dictionary<RoatanLanguage, Image> langBtnImages = new Dictionary<RoatanLanguage, Image>();
 
     // Match UI refs
     private RoatanBoardView boardView;
+    private TMP_Text matchBackBtnLabel;
+    private TMP_Text matchFitBtnLabel;
     private TMP_Text matchHeaderPill;
     private TMP_Text matchStatusBanner;
     private TMP_Text matchSoundBtnLabel;
@@ -55,6 +71,8 @@ public class RoatanMobileApp : MonoBehaviour
     private TMP_Text summaryBodyLabel;
     private Button summaryNextBtn;
     private TMP_Text summaryNextBtnLabel;
+    private TMP_Text summaryMenuBtnLabel;
+    private TMP_Text rulesGotItLabel;
 
     // Selection & Match State
     private RoatanGameMode selectedMode = RoatanGameMode.BlockedCerrado;
@@ -68,7 +86,6 @@ public class RoatanMobileApp : MonoBehaviour
     private List<RoatanMatchEngine.LegalMove> currentHumanMoves = new List<RoatanMatchEngine.LegalMove>();
     private readonly List<GameObject> spawnedHandTiles = new List<GameObject>();
     private bool waitingForHumanInput;
-    private bool showingOnlineLegacy;
 
     private class OpponentSeatUI
     {
@@ -109,6 +126,7 @@ public class RoatanMobileApp : MonoBehaviour
             Screen.autorotateToLandscapeRight = false;
         }
 
+        RoatanLocalization.Initialize();
         RoatanVisualAssets.EnsureInitialized();
         gameObject.AddComponent<RoatanSoundFX>();
         uiFont = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
@@ -120,6 +138,10 @@ public class RoatanMobileApp : MonoBehaviour
         BuildHowToPlayModal();
         BuildRoundSummaryOverlay();
 
+        onlineController = gameObject.AddComponent<RoatanOnlineController>();
+        onlineController.Initialize(safeAreaRoot, uiFont, ShowHomeScreen);
+
+        RoatanLocalization.LanguageChanged += OnLanguageChanged;
         SceneManager.activeSceneChanged += OnSceneChanged;
     }
 
@@ -130,16 +152,24 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void OnDestroy()
     {
+        RoatanLocalization.LanguageChanged -= OnLanguageChanged;
         SceneManager.activeSceneChanged -= OnSceneChanged;
     }
 
     private void OnSceneChanged(Scene oldScene, Scene newScene)
     {
         EnsureEventSystem();
-        if (!showingOnlineLegacy && rootCanvas != null)
+        if (rootCanvas != null)
         {
             rootCanvas.gameObject.SetActive(true);
         }
+    }
+
+    private void OnLanguageChanged()
+    {
+        RefreshHomeSelections();
+        RefreshSoundLabels();
+        RefreshStaticLabels();
     }
 
     private static void EnsureEventSystem()
@@ -157,12 +187,13 @@ public class RoatanMobileApp : MonoBehaviour
     private void ShowHomeScreen()
     {
         StopMatchRoutine();
-        showingOnlineLegacy = false;
         rootCanvas.gameObject.SetActive(true);
+        onlineController?.HideOnline();
         homeScreen.SetActive(true);
         matchScreen.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
+        RefreshStaticLabels();
         RefreshHomeSelections();
         RefreshSoundLabels();
     }
@@ -176,6 +207,7 @@ public class RoatanMobileApp : MonoBehaviour
         engine = new RoatanMatchEngine(selectedMode, selectedDifficulty, bots);
         botBrain = new RoatanBotBrain();
 
+        onlineController?.HideOnline();
         homeScreen.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
@@ -208,15 +240,15 @@ public class RoatanMobileApp : MonoBehaviour
         turnRoutine = StartCoroutine(DriveTurnsCoroutine());
     }
 
-    private void OpenOnlineMultiplayerFallback()
+    private void OpenOnlineScreen()
     {
         RoatanSoundFX.Instance?.PlayTap();
-        showingOnlineLegacy = true;
-        rootCanvas.gameObject.SetActive(false);
-        if (SceneManager.GetActiveScene().name != "MenuScene")
-        {
-            SceneManager.LoadScene("MenuScene");
-        }
+        StopMatchRoutine();
+        homeScreen.SetActive(false);
+        matchScreen.SetActive(false);
+        howToPlayModal.SetActive(false);
+        roundSummaryOverlay.SetActive(false);
+        onlineController.ShowOnline();
     }
 
     // ==================== GAMEPLAY LOOP ====================
@@ -256,15 +288,15 @@ public class RoatanMobileApp : MonoBehaviour
                 {
                     actionButton.gameObject.SetActive(true);
                     actionButton.GetComponent<Image>().color = RoatanVisualAssets.IslandGold;
-                    actionButtonLabel.text = $"Draw Tile ({engine.BoneyardCount} left)";
+                    actionButtonLabel.text = RoatanLocalization.Tf("draw_tile", engine.BoneyardCount);
                     UpdateStatusBanner("No matching tile — tap Draw Tile!");
                 }
                 else
                 {
                     actionButton.gameObject.SetActive(true);
                     actionButton.GetComponent<Image>().color = RoatanVisualAssets.SunsetCoral;
-                    actionButtonLabel.text = "Pass Turn (Paso!)";
-                    UpdateStatusBanner("No matching tile — tap Pass Turn");
+                    actionButtonLabel.text = RoatanLocalization.T("pass_turn");
+                    UpdateStatusBanner("No matching tile — tap Pass Turn (Paso!)");
                 }
 
                 yield break;
@@ -276,7 +308,7 @@ public class RoatanMobileApp : MonoBehaviour
             actionButton.gameObject.SetActive(false);
             RebuildHumanHand();
 
-            UpdateStatusBanner($"{active.Name} ({engine.Difficulty}) is thinking...");
+            UpdateStatusBanner($"{active.Name} ({RoatanLocalization.DifficultyLabel(engine.Difficulty)}) is thinking...");
             float thinkTime = engine.Difficulty == BotDifficulty.Beginner ? 0.7f : (engine.Difficulty == BotDifficulty.Novice ? 0.85f : 0.95f);
             yield return new WaitForSeconds(thinkTime);
 
@@ -301,7 +333,6 @@ public class RoatanMobileApp : MonoBehaviour
                     RoatanSoundFX.Instance?.PlayDraw();
                     UpdateStatusBanner($"{active.Name} drew from the boneyard");
                 }
-                // After drawing in Classic Draw, check if bot can now play or pass
                 List<RoatanMatchEngine.LegalMove> afterDraw = engine.GetLegalMoves(active);
                 if (afterDraw.Count == 0 && !engine.CanCurrentPlayerDraw())
                 {
@@ -342,7 +373,6 @@ public class RoatanMobileApp : MonoBehaviour
 
         RoatanSoundFX.Instance?.PlayTap();
 
-        // If user taps an already-selected tile that has only 1 valid end, place it immediately!
         bool alreadySelected = selectedHandDomino != null &&
                                selectedHandDomino.Side1 == domino.Side1 &&
                                selectedHandDomino.Side2 == domino.Side2;
@@ -360,14 +390,9 @@ public class RoatanMobileApp : MonoBehaviour
         bool canRight = tileMoves.Any(m => m.End == BoardEnd.Right);
         boardView.ShowEndSlots(canLeft, canRight);
 
-        if (tileMoves.Count == 1)
-        {
-            UpdateStatusBanner("Tap the glowing gold slot (or tap tile again) to place!");
-        }
-        else
-        {
-            UpdateStatusBanner("Choose which glowing end on the table to place on!");
-        }
+        UpdateStatusBanner(tileMoves.Count == 1
+            ? "Tap the glowing gold slot (or tap tile again) to place!"
+            : "Choose which glowing end on the table to place on!");
     }
 
     private void OnBoardEndSlotClicked(BoardEnd end)
@@ -426,7 +451,6 @@ public class RoatanMobileApp : MonoBehaviour
                 UpdateStatusBanner($"Drew [{drawn.Side1}|{drawn.Side2}] from boneyard");
             }
 
-            // Refresh playable moves immediately so user can play if the drawn tile matches!
             currentHumanMoves = engine.GetLegalMoves(human);
             RebuildHumanHand();
             RefreshMatchHeader();
@@ -438,13 +462,13 @@ public class RoatanMobileApp : MonoBehaviour
             }
             else if (engine.CanCurrentPlayerDraw())
             {
-                actionButtonLabel.text = $"Draw Tile ({engine.BoneyardCount} left)";
+                actionButtonLabel.text = RoatanLocalization.Tf("draw_tile", engine.BoneyardCount);
             }
             else
             {
                 actionButton.GetComponent<Image>().color = RoatanVisualAssets.SunsetCoral;
-                actionButtonLabel.text = "Pass Turn (Paso!)";
-                UpdateStatusBanner("Boneyard empty — tap Pass Turn");
+                actionButtonLabel.text = RoatanLocalization.T("pass_turn");
+                UpdateStatusBanner("Boneyard empty — tap Pass Turn (Paso!)");
             }
         }
         else
@@ -488,7 +512,7 @@ public class RoatanMobileApp : MonoBehaviour
 
         RefreshOpponentSeats();
 
-        string reason = result.WasBlocked ? "Board Blocked (Trancado!)" : "Domino! Hand Cleared";
+        string reason = result.WasBlocked ? RoatanLocalization.T("blocked_reason") : RoatanLocalization.T("domino_reason");
         summaryTitleLabel.text = hasChampion
             ? (champion.Id == 0 ? "MATCH CHAMPION!" : $"{champion.Name} WINS MATCH")
             : (result.Winner.Id == 0 ? $"YOU WON ROUND {engine.RoundNumber}!" : $"{result.Winner.Name} WON ROUND {engine.RoundNumber}");
@@ -503,7 +527,9 @@ public class RoatanMobileApp : MonoBehaviour
         }
 
         summaryBodyLabel.text = sb.ToString();
-        summaryNextBtnLabel.text = hasChampion ? "New Match" : $"Next Round ({engine.RoundNumber + 1})";
+        summaryNextBtnLabel.text = hasChampion
+            ? RoatanLocalization.T("new_match")
+            : RoatanLocalization.Tf("next_round", engine.RoundNumber + 1);
         summaryNextBtn.onClick.RemoveAllListeners();
         summaryNextBtn.onClick.AddListener(() =>
         {
@@ -525,6 +551,29 @@ public class RoatanMobileApp : MonoBehaviour
     }
 
     // ==================== UI REFRESH HELPERS ====================
+
+    private void RefreshStaticLabels()
+    {
+        if (subtitleLabel != null) subtitleLabel.text = RoatanLocalization.T("subtitle");
+        if (modeHeadingLabel != null) modeHeadingLabel.text = RoatanLocalization.T("choose_mode");
+        if (cerradoTitleLabel != null) cerradoTitleLabel.text = RoatanLocalization.T("mode_cerrado_title");
+        if (cerradoDescLabel != null) cerradoDescLabel.text = RoatanLocalization.T("mode_cerrado_desc");
+        if (drawTitleLabel != null) drawTitleLabel.text = RoatanLocalization.T("mode_draw_title");
+        if (drawDescLabel != null) drawDescLabel.text = RoatanLocalization.T("mode_draw_desc");
+        if (diffHeadingLabel != null) diffHeadingLabel.text = RoatanLocalization.T("bot_difficulty");
+        if (playNowBtnLabel != null) playNowBtnLabel.text = RoatanLocalization.T("play_now");
+        if (howToPlayBtnLabel != null) howToPlayBtnLabel.text = RoatanLocalization.T("how_to_play");
+        if (onlineModeBtnLabel != null) onlineModeBtnLabel.text = RoatanLocalization.T("online_mode");
+        if (matchBackBtnLabel != null) matchBackBtnLabel.text = RoatanLocalization.T("menu_back");
+        if (matchFitBtnLabel != null) matchFitBtnLabel.text = RoatanLocalization.T("fit");
+        if (summaryMenuBtnLabel != null) summaryMenuBtnLabel.text = RoatanLocalization.T("main_menu");
+        if (rulesGotItLabel != null) rulesGotItLabel.text = RoatanLocalization.T("got_it");
+
+        foreach (KeyValuePair<BotDifficulty, TMP_Text> kv in diffBtnLabels)
+        {
+            kv.Value.text = RoatanLocalization.DifficultyLabel(kv.Key);
+        }
+    }
 
     private void RefreshHomeSelections()
     {
@@ -549,8 +598,22 @@ public class RoatanMobileApp : MonoBehaviour
             }
         }
 
+        foreach (KeyValuePair<RoatanLanguage, Image> kv in langBtnImages)
+        {
+            kv.Value.color = kv.Key == RoatanLocalization.CurrentLanguage
+                ? RoatanVisualAssets.IslandGold
+                : new Color(0.10f, 0.24f, 0.30f, 0.95f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = kv.Key == RoatanLocalization.CurrentLanguage
+                    ? new Color(0.08f, 0.10f, 0.12f, 1f)
+                    : Color.white;
+            }
+        }
+
         bool isClassic = selectedMode == RoatanGameMode.ClassicDraw;
-        opponentsHeaderLabel.text = isClassic ? "OPPONENTS" : "ROATAN CERRADO  •  4 PLAYERS (28 TILES, NO BONEYARD)";
+        opponentsHeaderLabel.text = isClassic ? RoatanLocalization.T("opponents") : RoatanLocalization.T("cerrado_opp_banner");
         opponentsRowObj.SetActive(isClassic);
 
         foreach (KeyValuePair<int, Image> kv in botCountBtnImages)
@@ -561,13 +624,13 @@ public class RoatanMobileApp : MonoBehaviour
         switch (selectedDifficulty)
         {
             case BotDifficulty.Beginner:
-                diffDescLabel.text = "Beginner: Friendly & relaxed moves — ideal for learning dominoes.";
+                diffDescLabel.text = RoatanLocalization.T("diff_beginner_desc");
                 break;
             case BotDifficulty.Novice:
-                diffDescLabel.text = "Novice: Drops heavy pips & doubles while keeping its hand open.";
+                diffDescLabel.text = RoatanLocalization.T("diff_novice_desc");
                 break;
             case BotDifficulty.Pro:
-                diffDescLabel.text = "Pro: Counts played tiles, tracks your passes, and locks your suits.";
+                diffDescLabel.text = RoatanLocalization.T("diff_pro_desc");
                 break;
         }
 
@@ -582,7 +645,7 @@ public class RoatanMobileApp : MonoBehaviour
         string modeShort = engine.Mode == RoatanGameMode.BlockedCerrado ? "Cerrado" : "Classic Draw";
         string boneyardPart = engine.Mode == RoatanGameMode.ClassicDraw ? $"  •  Boneyard: {engine.BoneyardCount}" : "";
         int humanScore = engine.Players[0].MatchScore;
-        matchHeaderPill.text = $"{modeShort} ({engine.Difficulty})  •  Rd {engine.RoundNumber}  •  You: {humanScore}/{engine.TargetMatchScore}{boneyardPart}";
+        matchHeaderPill.text = $"{modeShort} ({RoatanLocalization.DifficultyLabel(engine.Difficulty)})  •  Rd {engine.RoundNumber}  •  You: {humanScore}/{engine.TargetMatchScore}{boneyardPart}";
     }
 
     private void RefreshOpponentSeats()
@@ -590,7 +653,6 @@ public class RoatanMobileApp : MonoBehaviour
         if (engine == null) return;
         List<RoatanMatchEngine.MatchPlayer> bots = engine.Players.Where(p => p.IsBot).ToList();
 
-        // Map bots cleanly: 1 bot -> Top; 2 bots -> Left & Right; 3 bots -> Left, Top, Right
         int[] seatMap = bots.Count == 1 ? new[] { 0 }
                       : bots.Count == 2 ? new[] { 1, 2 }
                       : new[] { 1, 0, 2 };
@@ -650,7 +712,6 @@ public class RoatanMobileApp : MonoBehaviour
             rect.sizeDelta = new Vector2(tileW, tileH);
             rect.anchoredPosition = new Vector2(0f, isSelected ? 22f : (isPlayable ? 10f : -6f));
 
-            // Golden highlight ring for playable/selected tiles
             if (isPlayable || isSelected)
             {
                 GameObject ringObj = new GameObject("GlowRing");
@@ -689,9 +750,9 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void RefreshSoundLabels()
     {
-        string txt = (RoatanSoundFX.Instance != null && RoatanSoundFX.Instance.IsMuted) ? "Sound: OFF" : "Sound: ON";
-        if (homeSoundBtnLabel != null) homeSoundBtnLabel.text = txt;
-        if (matchSoundBtnLabel != null) matchSoundBtnLabel.text = (RoatanSoundFX.Instance != null && RoatanSoundFX.Instance.IsMuted) ? "Muted" : "SFX";
+        bool muted = RoatanSoundFX.Instance != null && RoatanSoundFX.Instance.IsMuted;
+        if (homeSoundBtnLabel != null) homeSoundBtnLabel.text = muted ? RoatanLocalization.T("sound_off") : RoatanLocalization.T("sound_on");
+        if (matchSoundBtnLabel != null) matchSoundBtnLabel.text = muted ? "Muted" : "SFX";
     }
 
     // ==================== UI CONSTRUCTION (PORTRAIT 1080x1920) ====================
@@ -713,7 +774,6 @@ public class RoatanMobileApp : MonoBehaviour
 
         canvasObj.AddComponent<GraphicRaycaster>();
 
-        // Full-screen tropical tabletop background
         Image bg = canvasObj.AddComponent<Image>();
         bg.sprite = RoatanVisualAssets.TableSurfaceSprite;
         bg.type = Image.Type.Simple;
@@ -732,78 +792,95 @@ public class RoatanMobileApp : MonoBehaviour
     {
         homeScreen = CreateStretchPanel(safeAreaRoot, "HomeScreen", Color.clear);
 
-        // Top Logo Banner (Roatan Domino + decorative dominoes)
-        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.05f, 0.19f, 0.25f, 0.92f), new Vector2(0f, 670f), new Vector2(960f, 270f));
+        // Compact Language Switcher Row at very top (EN default, ES, FR, DE)
+        RoatanLanguage[] langs = { RoatanLanguage.English, RoatanLanguage.Spanish, RoatanLanguage.French, RoatanLanguage.German };
+        float[] langXs = { -210f, -70f, 70f, 210f };
+        for (int i = 0; i < langs.Length; i++)
+        {
+            RoatanLanguage lang = langs[i];
+            Button lb = CreatePillButton(homeScreen.transform, $"Lang_{lang}", RoatanLocalization.CodeFor(lang), new Color(0.10f, 0.24f, 0.30f, 0.95f), new Vector2(langXs[i], 855f), new Vector2(124f, 56f), 24, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                RoatanLocalization.SetLanguage(lang);
+            });
+            langBtnImages[lang] = lb.GetComponent<Image>();
+        }
 
-        // Left decorative domino
+        // Top Logo Banner
+        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.05f, 0.19f, 0.25f, 0.92f), new Vector2(0f, 675f), new Vector2(960f, 260f));
+
         GameObject leftDom = new GameObject("LogoDomLeft");
         leftDom.transform.SetParent(headerCard.transform, false);
         RectTransform lRect = leftDom.AddComponent<RectTransform>();
         lRect.sizeDelta = new Vector2(82f, 164f);
-        lRect.anchoredPosition = new Vector2(-365f, 10f);
+        lRect.anchoredPosition = new Vector2(-365f, 8f);
         lRect.localRotation = Quaternion.Euler(0f, 0f, 16f);
         leftDom.AddComponent<Image>().sprite = RoatanVisualAssets.GetDominoSprite(6, 6);
 
-        // Right decorative domino
         GameObject rightDom = new GameObject("LogoDomRight");
         rightDom.transform.SetParent(headerCard.transform, false);
         RectTransform rRect = rightDom.AddComponent<RectTransform>();
         rRect.sizeDelta = new Vector2(82f, 164f);
-        rRect.anchoredPosition = new Vector2(365f, 10f);
+        rRect.anchoredPosition = new Vector2(365f, 8f);
         rRect.localRotation = Quaternion.Euler(0f, 0f, -16f);
         rightDom.AddComponent<Image>().sprite = RoatanVisualAssets.GetDominoSprite(5, 3);
 
-        CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 64, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 52f), new Vector2(640f, 84f));
-        CreateText(headerCard.transform, "Subtitle", "Caribbean Edition  •  Play Offline Anytime", 28, FontStyles.Normal, new Color(0.84f, 0.95f, 0.96f), new Vector2(0f, -14f), new Vector2(660f, 44f));
-        statsLabel = CreateText(headerCard.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches", 25, FontStyles.Bold, Color.white, new Vector2(0f, -74f), new Vector2(620f, 40f));
+        CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 62, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 52f), new Vector2(640f, 80f));
+        subtitleLabel = CreateText(headerCard.transform, "Subtitle", RoatanLocalization.T("subtitle"), 27, FontStyles.Normal, new Color(0.84f, 0.95f, 0.96f), new Vector2(0f, -14f), new Vector2(660f, 44f));
+        statsLabel = CreateText(headerCard.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches", 25, FontStyles.Bold, Color.white, new Vector2(0f, -72f), new Vector2(620f, 40f));
 
         // Mode Selection Section
-        CreateText(homeScreen.transform, "ModeHeading", "CHOOSE GAME MODE", 30, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 470f), new Vector2(920f, 44f));
+        modeHeadingLabel = CreateText(homeScreen.transform, "ModeHeading", RoatanLocalization.T("choose_mode"), 30, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 480f), new Vector2(920f, 44f));
 
         Button cerrBtn = CreateModeCard(
             homeScreen.transform,
             "CardCerrado",
-            "Roatan Cerrado (Blocked)",
-            "4 Players  •  All 28 tiles dealt  •  No boneyard  •  Classic island strategy",
-            new Vector2(0f, 345f),
-            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.BlockedCerrado; RefreshHomeSelections(); });
+            RoatanLocalization.T("mode_cerrado_title"),
+            RoatanLocalization.T("mode_cerrado_desc"),
+            new Vector2(0f, 355f),
+            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.BlockedCerrado; RefreshHomeSelections(); },
+            out cerradoTitleLabel,
+            out cerradoDescLabel);
         modeCardImages[RoatanGameMode.BlockedCerrado] = cerrBtn.GetComponent<Image>();
 
         Button drawBtn = CreateModeCard(
             homeScreen.transform,
             "CardClassicDraw",
-            "Classic Draw Dominoes",
-            "Draw from boneyard when blocked  •  Choose 1v1, 3P, or 4P",
-            new Vector2(0f, 165f),
-            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.ClassicDraw; RefreshHomeSelections(); });
+            RoatanLocalization.T("mode_draw_title"),
+            RoatanLocalization.T("mode_draw_desc"),
+            new Vector2(0f, 175f),
+            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.ClassicDraw; RefreshHomeSelections(); },
+            out drawTitleLabel,
+            out drawDescLabel);
         modeCardImages[RoatanGameMode.ClassicDraw] = drawBtn.GetComponent<Image>();
 
         // Bot Difficulty Section
-        CreateText(homeScreen.transform, "DiffHeading", "BOT DIFFICULTY", 30, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 12f), new Vector2(920f, 44f));
+        diffHeadingLabel = CreateText(homeScreen.transform, "DiffHeading", RoatanLocalization.T("bot_difficulty"), 30, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 22f), new Vector2(920f, 44f));
 
         BotDifficulty[] diffs = { BotDifficulty.Beginner, BotDifficulty.Novice, BotDifficulty.Pro };
         float[] diffXs = { -310f, 0f, 310f };
         for (int i = 0; i < diffs.Length; i++)
         {
             BotDifficulty d = diffs[i];
-            Button b = CreatePillButton(homeScreen.transform, $"BtnDiff_{d}", d.ToString(), new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(diffXs[i], -78f), new Vector2(285f, 92f), 34, () =>
+            Button b = CreatePillButton(homeScreen.transform, $"BtnDiff_{d}", RoatanLocalization.DifficultyLabel(d), new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(diffXs[i], -68f), new Vector2(285f, 92f), 32, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 selectedDifficulty = d;
                 RefreshHomeSelections();
             });
             diffBtnImages[d] = b.GetComponent<Image>();
+            diffBtnLabels[d] = b.GetComponentInChildren<TMP_Text>();
         }
 
-        diffDescLabel = CreateText(homeScreen.transform, "DiffDesc", "", 25, FontStyles.Italic, new Color(0.88f, 0.96f, 0.98f), new Vector2(0f, -168f), new Vector2(920f, 62f));
+        diffDescLabel = CreateText(homeScreen.transform, "DiffDesc", "", 25, FontStyles.Italic, new Color(0.88f, 0.96f, 0.98f), new Vector2(0f, -158f), new Vector2(920f, 62f));
 
-        // Opponents Section (dynamic for Classic Draw)
-        opponentsHeaderLabel = CreateText(homeScreen.transform, "OppHeading", "OPPONENTS", 26, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, -245f), new Vector2(940f, 44f));
+        // Opponents Section
+        opponentsHeaderLabel = CreateText(homeScreen.transform, "OppHeading", RoatanLocalization.T("opponents"), 26, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, -238f), new Vector2(940f, 44f));
 
         opponentsRowObj = new GameObject("OpponentsRow");
         opponentsRowObj.transform.SetParent(homeScreen.transform, false);
         RectTransform oppRowRect = opponentsRowObj.AddComponent<RectTransform>();
-        oppRowRect.anchoredPosition = new Vector2(0f, -325f);
+        oppRowRect.anchoredPosition = new Vector2(0f, -318f);
         oppRowRect.sizeDelta = new Vector2(940f, 92f);
 
         int[] botCounts = { 1, 2, 3 };
@@ -820,11 +897,12 @@ public class RoatanMobileApp : MonoBehaviour
             botCountBtnImages[c] = b.GetComponent<Image>();
         }
 
-        // Big Golden Play CTA (Jogatina-style prominent action button)
-        CreatePillButton(homeScreen.transform, "BtnPlayNow", "PLAY NOW", RoatanVisualAssets.PalmGreen, new Vector2(0f, -510f), new Vector2(720f, 128f), 46, StartNewMatch);
+        // Big Play CTA
+        Button playBtn = CreatePillButton(homeScreen.transform, "BtnPlayNow", RoatanLocalization.T("play_now"), RoatanVisualAssets.PalmGreen, new Vector2(0f, -505f), new Vector2(720f, 128f), 46, StartNewMatch);
+        playNowBtnLabel = playBtn.GetComponentInChildren<TMP_Text>();
 
         // Bottom Utility Row
-        Button soundBtn = CreatePillButton(homeScreen.transform, "BtnHomeSound", "Sound: ON", new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(-315f, -720f), new Vector2(280f, 78f), 26, () =>
+        Button soundBtn = CreatePillButton(homeScreen.transform, "BtnHomeSound", RoatanLocalization.T("sound_on"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(-315f, -715f), new Vector2(280f, 78f), 26, () =>
         {
             RoatanSoundFX.Instance?.ToggleMute();
             RoatanSoundFX.Instance?.PlayTap();
@@ -832,20 +910,21 @@ public class RoatanMobileApp : MonoBehaviour
         });
         homeSoundBtnLabel = soundBtn.GetComponentInChildren<TMP_Text>();
 
-        CreatePillButton(homeScreen.transform, "BtnHowToPlay", "How to Play", new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(0f, -720f), new Vector2(280f, 78f), 26, () =>
+        Button howBtn = CreatePillButton(homeScreen.transform, "BtnHowToPlay", RoatanLocalization.T("how_to_play"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(0f, -715f), new Vector2(280f, 78f), 26, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             howToPlayModal.SetActive(true);
         });
+        howToPlayBtnLabel = howBtn.GetComponentInChildren<TMP_Text>();
 
-        CreatePillButton(homeScreen.transform, "BtnOnlineLogin", "Online Mode", new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(315f, -720f), new Vector2(280f, 78f), 26, OpenOnlineMultiplayerFallback);
+        Button onlineBtn = CreatePillButton(homeScreen.transform, "BtnOnlineLogin", RoatanLocalization.T("online_mode"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(315f, -715f), new Vector2(280f, 78f), 26, OpenOnlineScreen);
+        onlineModeBtnLabel = onlineBtn.GetComponentInChildren<TMP_Text>();
     }
 
     private void BuildMatchScreen()
     {
         matchScreen = CreateStretchPanel(safeAreaRoot, "MatchScreen", Color.clear);
 
-        // Top HUD bar
         GameObject topBar = new GameObject("TopHudBar");
         topBar.transform.SetParent(matchScreen.transform, false);
         RectTransform topRect = topBar.AddComponent<RectTransform>();
@@ -855,20 +934,22 @@ public class RoatanMobileApp : MonoBehaviour
         topRect.sizeDelta = new Vector2(0f, 108f);
         topRect.anchoredPosition = new Vector2(0f, -6f);
 
-        CreatePillButton(topBar.transform, "BtnBack", "< Menu", new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(-410f, 0f), new Vector2(168f, 74f), 26, () =>
+        Button backBtn = CreatePillButton(topBar.transform, "BtnBack", RoatanLocalization.T("menu_back"), new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(-410f, 0f), new Vector2(168f, 74f), 26, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             ShowHomeScreen();
         });
+        matchBackBtnLabel = backBtn.GetComponentInChildren<TMP_Text>();
 
         GameObject pillCard = CreateCard(topBar.transform, "MatchHeaderCard", new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(-35f, 0f), new Vector2(540f, 74f));
         matchHeaderPill = CreateText(pillCard.transform, "HeaderText", "", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(516f, 64f));
 
-        CreatePillButton(topBar.transform, "BtnFit", "Fit", new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(310f, 0f), new Vector2(115f, 74f), 26, () =>
+        Button fitBtn = CreatePillButton(topBar.transform, "BtnFit", RoatanLocalization.T("fit"), new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(310f, 0f), new Vector2(115f, 74f), 26, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             boardView?.RecenterBoard();
         });
+        matchFitBtnLabel = fitBtn.GetComponentInChildren<TMP_Text>();
 
         Button sfxBtn = CreatePillButton(topBar.transform, "BtnMatchSfx", "SFX", new Color(0.06f, 0.17f, 0.22f, 0.92f), new Vector2(440f, 0f), new Vector2(120f, 74f), 25, () =>
         {
@@ -878,7 +959,7 @@ public class RoatanMobileApp : MonoBehaviour
         });
         matchSoundBtnLabel = sfxBtn.GetComponentInChildren<TMP_Text>();
 
-        // Board Viewport (center stretch between top bar and hand dock)
+        // Board Viewport
         GameObject boardViewportObj = new GameObject("BoardViewport");
         boardViewportObj.transform.SetParent(matchScreen.transform, false);
         RectTransform vpRect = boardViewportObj.AddComponent<RectTransform>();
@@ -892,12 +973,12 @@ public class RoatanMobileApp : MonoBehaviour
         boardView.Initialize(vpRect);
         boardView.EndSlotClicked += OnBoardEndSlotClicked;
 
-        // Opponent Seats (Top = 0, Left = 1, Right = 2)
+        // Opponent Seats
         opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatTop", new Vector2(0.5f, 1f), new Vector2(0f, -172f), new Vector2(310f, 92f)));
         opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatLeft", new Vector2(0f, 0.56f), new Vector2(122f, 0f), new Vector2(215f, 118f)));
         opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatRight", new Vector2(1f, 0.56f), new Vector2(-122f, 0f), new Vector2(215f, 118f)));
 
-        // Floating Status Banner above player hand
+        // Floating Status Banner
         GameObject statusCard = CreateCard(matchScreen.transform, "StatusBanner", new Color(0.05f, 0.16f, 0.22f, 0.90f), Vector2.zero, new Vector2(960f, 64f));
         RectTransform statusRect = statusCard.GetComponent<RectTransform>();
         statusRect.anchorMin = new Vector2(0.5f, 0f);
@@ -906,7 +987,7 @@ public class RoatanMobileApp : MonoBehaviour
         statusRect.anchoredPosition = new Vector2(0f, 344f);
         matchStatusBanner = CreateText(statusCard.transform, "StatusText", "", 25, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(920f, 54f));
 
-        // Floating Draw / Pass Action Button (only shown when human is blocked!)
+        // Floating Draw / Pass Action Button
         actionButton = CreatePillButton(matchScreen.transform, "BtnDrawOrPass", "Draw Tile", RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(440f, 92f), 34, OnActionButtonClicked);
         RectTransform actRect = actionButton.GetComponent<RectTransform>();
         actRect.anchorMin = new Vector2(0.5f, 0f);
@@ -930,7 +1011,6 @@ public class RoatanMobileApp : MonoBehaviour
         Image dockImg = handDock.AddComponent<Image>();
         dockImg.sprite = RoatanVisualAssets.WoodFrameSprite;
 
-        // Horizontal ScrollRect inside hand tray so large Classic Draw hands scroll smoothly on mobile!
         GameObject scrollObj = new GameObject("HandScroll");
         scrollObj.transform.SetParent(handDock.transform, false);
         RectTransform scrollRectTransform = scrollObj.AddComponent<RectTransform>();
@@ -983,7 +1063,7 @@ public class RoatanMobileApp : MonoBehaviour
             "<b>2. Tap to Place</b>\n" +
             "Tap a glowing domino in your hand, then tap the glowing gold slot on the table (or tap the same domino twice if only one end fits).\n\n" +
             "<b>3. Two Game Modes</b>\n" +
-            "• <b>Roatan Cerrado:</b> 4 players, all 28 tiles dealt (no boneyard). Pass when blocked. Lowest remaining pips wins a blocked board!\n" +
+            "• <b>Roatan Cerrado (Blocked):</b> 4 players, all 28 tiles dealt (no boneyard). Pass (Paso!) when blocked. Lowest remaining pips wins a locked (Trancado!) board!\n" +
             "• <b>Classic Draw:</b> Draw from the boneyard when you have no match.\n\n" +
             "<b>4. Touch Controls</b>\n" +
             "Drag with 1 finger to pan the table, pinch with 2 fingers to zoom, or tap <b>Fit</b> to re-center. First to 100 points wins the match!";
@@ -991,11 +1071,12 @@ public class RoatanMobileApp : MonoBehaviour
         TMP_Text body = CreateText(card.transform, "RulesBody", rules, 28, FontStyles.Normal, Color.white, new Vector2(0f, 20f), new Vector2(820f, 700f));
         body.alignment = TextAlignmentOptions.TopLeft;
 
-        CreatePillButton(card.transform, "BtnCloseRules", "Got It!", RoatanVisualAssets.PalmGreen, new Vector2(0f, -420f), new Vector2(360f, 92f), 34, () =>
+        Button gotItBtn = CreatePillButton(card.transform, "BtnCloseRules", RoatanLocalization.T("got_it"), RoatanVisualAssets.PalmGreen, new Vector2(0f, -420f), new Vector2(360f, 92f), 34, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             howToPlayModal.SetActive(false);
         });
+        rulesGotItLabel = gotItBtn.GetComponentInChildren<TMP_Text>();
 
         howToPlayModal.SetActive(false);
     }
@@ -1012,11 +1093,12 @@ public class RoatanMobileApp : MonoBehaviour
         summaryNextBtn = CreatePillButton(card.transform, "BtnNextRound", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -210f), new Vector2(540f, 102f), 36, BeginRound);
         summaryNextBtnLabel = summaryNextBtn.GetComponentInChildren<TMP_Text>();
 
-        CreatePillButton(card.transform, "BtnSummaryMenu", "Main Menu", new Color(0.18f, 0.25f, 0.34f, 1f), new Vector2(0f, -330f), new Vector2(380f, 84f), 30, () =>
+        Button menuBtn = CreatePillButton(card.transform, "BtnSummaryMenu", RoatanLocalization.T("main_menu"), new Color(0.18f, 0.25f, 0.34f, 1f), new Vector2(0f, -330f), new Vector2(380f, 84f), 30, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             ShowHomeScreen();
         });
+        summaryMenuBtnLabel = menuBtn.GetComponentInChildren<TMP_Text>();
 
         roundSummaryOverlay.SetActive(false);
     }
@@ -1065,7 +1147,15 @@ public class RoatanMobileApp : MonoBehaviour
         };
     }
 
-    private Button CreateModeCard(Transform parent, string name, string title, string desc, Vector2 pos, UnityEngine.Events.UnityAction onClick)
+    private Button CreateModeCard(
+        Transform parent,
+        string name,
+        string title,
+        string desc,
+        Vector2 pos,
+        UnityEngine.Events.UnityAction onClick,
+        out TMP_Text titleText,
+        out TMP_Text descText)
     {
         GameObject card = CreateCard(parent, name, new Color(0.08f, 0.21f, 0.27f, 0.92f), pos, new Vector2(920f, 152f));
         Button btn = card.AddComponent<Button>();
@@ -1085,10 +1175,10 @@ public class RoatanMobileApp : MonoBehaviour
         bImg.color = new Color(0.95f, 0.74f, 0.24f, 0.55f);
         bImg.raycastTarget = false;
 
-        TMP_Text t = CreateText(card.transform, "Title", title, 34, FontStyles.Bold, Color.white, new Vector2(0f, 28f), new Vector2(850f, 48f));
-        t.raycastTarget = false;
-        TMP_Text d = CreateText(card.transform, "Desc", desc, 23, FontStyles.Normal, new Color(0.84f, 0.94f, 0.96f), new Vector2(0f, -26f), new Vector2(850f, 48f));
-        d.raycastTarget = false;
+        titleText = CreateText(card.transform, "Title", title, 34, FontStyles.Bold, Color.white, new Vector2(0f, 28f), new Vector2(850f, 48f));
+        titleText.raycastTarget = false;
+        descText = CreateText(card.transform, "Desc", desc, 23, FontStyles.Normal, new Color(0.84f, 0.94f, 0.96f), new Vector2(0f, -26f), new Vector2(850f, 48f));
+        descText.raycastTarget = false;
         return btn;
     }
 

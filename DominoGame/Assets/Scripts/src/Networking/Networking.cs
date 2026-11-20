@@ -83,6 +83,51 @@ public class Networking : MonoBehaviour
         }
     }
 
+    public void ConnectOnline(string newHost, int newPort, bool newUseSsl = false)
+    {
+        StopOfflineMode();
+
+        if (onlineClient != null && IsConnected)
+        {
+            try { onlineClient.Stop(); } catch { }
+        }
+
+        host = string.IsNullOrWhiteSpace(newHost) ? "127.0.0.1" : newHost.Trim();
+        port = newPort > 0 ? newPort : 10000;
+        useSsl = newUseSsl;
+
+        onlineClient = mock ? new ClientMock() : new Client(port, host, useSsl, targetHost);
+        client = onlineClient;
+
+        try
+        {
+            client.Start();
+            IsConnected = true;
+        }
+        catch (Exception ex)
+        {
+            Debug.Log($"Error while connecting to {host}:{port} : {ex.Message}");
+            IsConnected = false;
+        }
+
+        if (ChatManager.Instance != null)
+        {
+            ChatManager.Instance.RefreshClient();
+        }
+
+        if (MainThread.Instance != null)
+        {
+            MainThread.Instance.AddActionToQueue(() => ConnectionEvent?.Invoke());
+        }
+        else
+        {
+            ConnectionEvent?.Invoke();
+        }
+    }
+
+    public string CurrentHost => host;
+    public int CurrentPort => port;
+
     private void OnDisable()
     {
         if (!isActive || !IsConnected)

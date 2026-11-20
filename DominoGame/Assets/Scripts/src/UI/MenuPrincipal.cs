@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
@@ -27,7 +27,7 @@ public class MenuPrincipal : MonoBehaviour
 
     private IClient client;
 
-    public static int IdLanguageUsed = 1;
+    public static int IdLanguageUsed = 0;
 
     private void Start()
     {

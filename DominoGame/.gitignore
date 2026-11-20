@@ -94,14 +94,10 @@ x64/
 # build folder is nowadays used for build scripts and should not be ignored
 #build/
 
-# NuGet Packages
+# NuGet Packages (keep Unity Package Manager /Packages/manifest.json & packages-lock.json tracked)
 *.nupkg
-# The packages folder can be ignored because of Package Restore
-**/packages/*
-# except build/, which is used as an MSBuild target.
-!**/packages/build/
-# Uncomment if necessary however generally it will be regenerated when needed
-#!**/packages/repositories.config
+/Assets/Packages/*
+!/Assets/Packages/build/
 
 # MSTest test Results
 [Tt]est[Rr]esult*/
@@ -110,17 +106,7 @@ x64/
 *_i.c
 *_p.c
 *.ilk
-*.meta
-!*.png.meta
-!*.jpg.meta
-!*.prefab.meta
-!*.asset.meta
-!*.ttf.meta
-!*.cs.meta
-!*.anim
-!*.anim.meta
-!*.controller
-!*.controller.meta
+# Unity .meta files must be tracked (generated IDE meta files are ignored above)
 *.obj
 *.pch
 *.pdb

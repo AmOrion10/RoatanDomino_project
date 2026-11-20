@@ -74,7 +74,7 @@ StyleCopReport.xml
 *_p.c
 *_h.h
 *.ilk
-*.meta
+# Unity .meta files must be tracked so asset/shader GUIDs stay consistent across machines
 *.obj
 *.iobj
 *.pch
@@ -200,8 +200,11 @@ PublishScripts/
 *.snupkg
 # The packages folder can be ignored because of Package Restore
 **/[Pp]ackages/*
-# except build/, which is used as an MSBuild target.
+# except build/, which is used as an MSBuild target, and Unity's Packages manifest
 !**/[Pp]ackages/build/
+!DominoGame/Packages/
+!DominoGame/Packages/manifest.json
+!DominoGame/Packages/packages-lock.json
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files
