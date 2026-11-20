@@ -23,7 +23,7 @@ public class OfflineBotClient : IClient
     private const int GeneralMatchDurationSeconds = 600;
     private const int PlayerTurnDurationSeconds = 60;
 
-    private static readonly string[] BotNames = { "Mateo", "Sofia", "Carlos" };
+    private static readonly string[] BotNames = { "Anthony", "Patrik", "Astor" };
 
     public MessageFrameEventHandler EventHandlers { get; } = new MessageFrameEventHandler();
     public UserDto User { get; }

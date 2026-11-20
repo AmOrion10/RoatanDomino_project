@@ -81,7 +81,7 @@ public class RoatanMatchEngine
     private int consecutivePasses;
     private int lastRoundWinnerIndex = -1;
 
-    private static readonly string[] IslandBotNames = { "Mateo", "Sofia", "Carlos" };
+    private static readonly string[] IslandBotNames = { "Anthony", "Patrik", "Astor" };
 
     public RoatanMatchEngine(RoatanGameMode mode, BotDifficulty difficulty, int botCount, int? seed = null)
     {
