@@ -12,6 +12,7 @@ public static class RoatanVisualAssets
     public static Sprite WoodFrameSprite { get; private set; }
     public static Sprite DominoBackSprite { get; private set; }
     public static Sprite GlowSlotSprite { get; private set; }
+    public static Sprite ShockwaveRingSprite { get; private set; }
 
     private static readonly Dictionary<string, Sprite> DominoFaceCache = new Dictionary<string, Sprite>();
 
@@ -21,6 +22,7 @@ public static class RoatanVisualAssets
     public static readonly Color WarmTeak = new Color(0.36f, 0.20f, 0.10f, 1f);
     public static readonly Color RichMahogany = new Color(0.24f, 0.13f, 0.06f, 1f);
     public static readonly Color IslandGold = new Color(0.95f, 0.74f, 0.24f, 1f);
+    public static readonly Color AmberHighlight = new Color(0.95f, 0.62f, 0.12f, 1f);
     public static readonly Color SunsetCoral = new Color(0.91f, 0.38f, 0.28f, 1f);
     public static readonly Color PalmGreen = new Color(0.14f, 0.66f, 0.39f, 1f);
     public static readonly Color IvoryTile = new Color(0.98f, 0.96f, 0.91f, 1f);
@@ -38,6 +40,7 @@ public static class RoatanVisualAssets
         WoodFrameSprite = CreateWoodStripSprite(128, 128);
         DominoBackSprite = CreateDominoBackSprite(128, 256);
         GlowSlotSprite = CreateGlowSlotSprite(128, 256);
+        ShockwaveRingSprite = CreateShockwaveRingSprite(192);
     }
 
     public static Sprite GetDominoSprite(int topPip, int bottomPip)
@@ -114,6 +117,38 @@ public static class RoatanVisualAssets
                 float dist = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
                 float alpha = Mathf.Clamp01(r - dist + 1f);
                 pixels[y * size + x] = new Color(color.r, color.g, color.b, alpha);
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    private static Sprite CreateShockwaveRingSprite(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        Color[] pixels = new Color[size * size];
+        float c = (size - 1) * 0.5f;
+        float maxR = c - 2f;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dist = Vector2.Distance(new Vector2(x, y), new Vector2(c, c)) / maxR;
+                if (dist > 1f)
+                {
+                    pixels[y * size + x] = Color.clear;
+                    continue;
+                }
+
+                // Crisp outer shockwave ring + softer inner dust ripple
+                float outerRing = Mathf.Exp(-Mathf.Pow((dist - 0.84f) / 0.11f, 2f));
+                float innerRipple = Mathf.Exp(-Mathf.Pow((dist - 0.52f) / 0.18f, 2f)) * 0.42f;
+                float alpha = Mathf.Clamp01(outerRing * 0.92f + innerRipple);
+                pixels[y * size + x] = new Color(1f, 0.96f, 0.84f, alpha);
             }
         }
 

@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 
 using TMPro;
@@ -62,6 +63,11 @@ public class RoatanMobileApp : MonoBehaviour
     private RectTransform handContainer;
     private Button actionButton;
     private TMP_Text actionButtonLabel;
+    private Button slamButton;
+    private Button emoteWheelBtn;
+    private RoatanTableTalkUI tableTalkUI;
+    private RoatanBlockedPipRevealOverlay pipRevealOverlay;
+    private bool slamArmed;
 
     // Opponent seat badges (Top = index 0, Left = index 1, Right = index 2)
     private readonly List<OpponentSeatUI> opponentSeats = new List<OpponentSeatUI>();
@@ -187,6 +193,9 @@ public class RoatanMobileApp : MonoBehaviour
     private void ShowHomeScreen()
     {
         StopMatchRoutine();
+        ChatManager.Instance?.SetActiveRoundChatLocked(false);
+        tableTalkUI?.HideAllOverlays();
+        pipRevealOverlay?.HideImmediate();
         rootCanvas.gameObject.SetActive(true);
         onlineController?.HideOnline();
         homeScreen.SetActive(true);
@@ -202,6 +211,9 @@ public class RoatanMobileApp : MonoBehaviour
     {
         RoatanSoundFX.Instance?.PlayTap();
         StopMatchRoutine();
+        ChatManager.Instance?.SetActiveRoundChatLocked(true);
+        tableTalkUI?.HideAllOverlays();
+        pipRevealOverlay?.HideImmediate();
 
         int bots = selectedBotCount;
         engine = new RoatanMatchEngine(selectedMode, selectedDifficulty, bots);
@@ -220,7 +232,11 @@ public class RoatanMobileApp : MonoBehaviour
     {
         StopMatchRoutine();
         roundSummaryOverlay.SetActive(false);
+        tableTalkUI?.HideAllOverlays();
+        pipRevealOverlay?.HideImmediate();
         selectedHandDomino = null;
+        slamArmed = false;
+        if (slamButton != null) slamButton.gameObject.SetActive(false);
         waitingForHumanInput = false;
         currentHumanMoves.Clear();
         botBrain.ResetForRound();
@@ -318,9 +334,23 @@ public class RoatanMobileApp : MonoBehaviour
                 RoatanMatchEngine.PlacedTile placed = engine.PlayMove(chosen);
                 if (placed != null)
                 {
-                    boardView.RebuildFromEngine(engine, animateLastTile: true);
-                    RoatanSoundFX.Instance?.PlayPlace();
-                    UpdateStatusBanner($"{active.Name} played [{placed.Domino.Side1}|{placed.Domino.Side2}]");
+                    bool botDominoWin = active.Hand.Count == 0;
+                    bool forcesNextPass = !botDominoWin && engine.GetLegalMoves(engine.CurrentPlayer).Count == 0 && !engine.CanCurrentPlayerDraw();
+                    bool botSlam = botDominoWin || (forcesNextPass && engine.Difficulty == BotDifficulty.Pro);
+
+                    boardView.RebuildFromEngine(engine, animateLastTile: true, slammedLastTile: botSlam);
+                    if (botSlam)
+                    {
+                        RoatanSoundFX.Instance?.PlaySlam(heavy: true);
+                        boardView.PlaySlamImpact(boardView.LastPlacedTilePos, highImpact: true);
+                        ShowBotEmoteBubble(active, botDominoWin ? "Game Bruk!" : "Slam it!");
+                        UpdateStatusBanner($"{active.Name} SLAMMED [{placed.Domino.Side1}|{placed.Domino.Side2}]!");
+                    }
+                    else
+                    {
+                        RoatanSoundFX.Instance?.PlayPlace();
+                        UpdateStatusBanner($"{active.Name} played [{placed.Domino.Side1}|{placed.Domino.Side2}]");
+                    }
                 }
             }
             else if (engine.CanCurrentPlayerDraw())
@@ -338,6 +368,7 @@ public class RoatanMobileApp : MonoBehaviour
                 {
                     engine.PassTurn();
                     RoatanSoundFX.Instance?.PlayPass();
+                    ShowBotEmoteBubble(active, "Pass!");
                     UpdateStatusBanner($"{active.Name} passed (Paso!)");
                 }
             }
@@ -346,6 +377,7 @@ public class RoatanMobileApp : MonoBehaviour
                 botBrain.RecordBlocked(active.Id, engine.LeftEndPip, engine.RightEndPip);
                 engine.PassTurn();
                 RoatanSoundFX.Instance?.PlayPass();
+                ShowBotEmoteBubble(active, "Pass!");
                 UpdateStatusBanner($"{active.Name} passed (Paso!)");
             }
 
@@ -379,11 +411,13 @@ public class RoatanMobileApp : MonoBehaviour
 
         if (tileMoves.Count == 1 && alreadySelected)
         {
-            ExecuteHumanMove(tileMoves[0]);
+            ExecuteHumanMove(tileMoves[0], isSlam: slamArmed);
             return;
         }
 
         selectedHandDomino = domino;
+        slamArmed = false;
+        if (slamButton != null) slamButton.gameObject.SetActive(true);
         RebuildHumanHand();
 
         bool canLeft = tileMoves.Any(m => m.End == BoardEnd.Left);
@@ -391,8 +425,57 @@ public class RoatanMobileApp : MonoBehaviour
         boardView.ShowEndSlots(canLeft, canRight);
 
         UpdateStatusBanner(tileMoves.Count == 1
-            ? "Tap the glowing gold slot (or tap tile again) to place!"
-            : "Choose which glowing end on the table to place on!");
+            ? "Tap glowing slot, tap again to place — or flick down / tap SLAM!"
+            : "Choose a glowing end (or tap SLAM! then pick an end)");
+    }
+
+    private void OnHumanTileSlamFlicked(DominoDto domino)
+    {
+        if (!waitingForHumanInput || engine == null || domino == null) return;
+
+        List<RoatanMatchEngine.LegalMove> tileMoves = currentHumanMoves
+            .Where(m => (m.Domino.Side1 == domino.Side1 && m.Domino.Side2 == domino.Side2) ||
+                        (m.Domino.Side1 == domino.Side2 && m.Domino.Side2 == domino.Side1))
+            .ToList();
+
+        if (tileMoves.Count == 0) return;
+
+        if (tileMoves.Count == 1)
+        {
+            ExecuteHumanMove(tileMoves[0], isSlam: true);
+            return;
+        }
+
+        // Matches both ends: arm slam and highlight slots so user picks which end to slam onto
+        selectedHandDomino = domino;
+        slamArmed = true;
+        if (slamButton != null) slamButton.gameObject.SetActive(true);
+        RebuildHumanHand();
+        boardView.ShowEndSlots(true, true);
+        UpdateStatusBanner("SLAM ARMED! Tap either glowing end to SLAM!");
+    }
+
+    private void OnSlamButtonClicked()
+    {
+        if (!waitingForHumanInput || selectedHandDomino == null || engine == null) return;
+
+        List<RoatanMatchEngine.LegalMove> tileMoves = currentHumanMoves
+            .Where(m => (m.Domino.Side1 == selectedHandDomino.Side1 && m.Domino.Side2 == selectedHandDomino.Side2) ||
+                        (m.Domino.Side1 == selectedHandDomino.Side2 && m.Domino.Side2 == selectedHandDomino.Side1))
+            .ToList();
+
+        if (tileMoves.Count == 0) return;
+
+        if (tileMoves.Count == 1 || slamArmed)
+        {
+            ExecuteHumanMove(tileMoves[0], isSlam: true);
+        }
+        else
+        {
+            slamArmed = true;
+            RoatanSoundFX.Instance?.PlayTap();
+            UpdateStatusBanner("SLAM ARMED! Tap a glowing end (or tap SLAM again)!");
+        }
     }
 
     private void OnBoardEndSlotClicked(BoardEnd end)
@@ -406,24 +489,43 @@ public class RoatanMobileApp : MonoBehaviour
 
         if (chosen != null)
         {
-            ExecuteHumanMove(chosen);
+            ExecuteHumanMove(chosen, isSlam: slamArmed);
         }
     }
 
-    private void ExecuteHumanMove(RoatanMatchEngine.LegalMove move)
+    private void ExecuteHumanMove(RoatanMatchEngine.LegalMove move, bool isSlam = false)
     {
         waitingForHumanInput = false;
         selectedHandDomino = null;
+        slamArmed = false;
         currentHumanMoves.Clear();
         boardView.ClearSlots();
         actionButton.gameObject.SetActive(false);
+        if (slamButton != null) slamButton.gameObject.SetActive(false);
 
         RoatanMatchEngine.PlacedTile placed = engine.PlayMove(move);
         if (placed != null)
         {
-            boardView.RebuildFromEngine(engine, animateLastTile: true);
-            RoatanSoundFX.Instance?.PlayPlace();
-            UpdateStatusBanner($"You played [{placed.Domino.Side1}|{placed.Domino.Side2}]");
+            bool isDominoWin = engine.Players[0].Hand.Count == 0;
+            bool forcesNextPass = !isDominoWin && engine.GetLegalMoves(engine.CurrentPlayer).Count == 0 && !engine.CanCurrentPlayerDraw();
+            bool highImpact = isDominoWin || forcesNextPass;
+
+            boardView.RebuildFromEngine(engine, animateLastTile: true, slammedLastTile: isSlam);
+            if (isSlam)
+            {
+                RoatanSoundFX.Instance?.PlaySlam(heavy: highImpact);
+                boardView.PlaySlamImpact(boardView.LastPlacedTilePos, highImpact);
+                UpdateStatusBanner(isDominoWin
+                    ? $"DOMINO SLAM!! [{placed.Domino.Side1}|{placed.Domino.Side2}]"
+                    : (forcesNextPass
+                        ? $"HEAVY SLAM [{placed.Domino.Side1}|{placed.Domino.Side2}] — {engine.CurrentPlayer.Name} forced to PASS!"
+                        : $"SLAMMED [{placed.Domino.Side1}|{placed.Domino.Side2}]!"));
+            }
+            else
+            {
+                RoatanSoundFX.Instance?.PlayPlace();
+                UpdateStatusBanner($"You played [{placed.Domino.Side1}|{placed.Domino.Side2}]");
+            }
         }
 
         RebuildHumanHand();
@@ -486,10 +588,86 @@ public class RoatanMobileApp : MonoBehaviour
     private void FinishCurrentRound()
     {
         waitingForHumanInput = false;
+        slamArmed = false;
         actionButton.gameObject.SetActive(false);
+        if (slamButton != null) slamButton.gameObject.SetActive(false);
         boardView.ClearSlots();
 
+        turnRoutine = StartCoroutine(FinishCurrentRoundCoroutine());
+    }
+
+    private IEnumerator FinishCurrentRoundCoroutine()
+    {
         RoatanMatchEngine.RoundResult result = engine.CompleteRound();
+
+        // 1. Blocked-Board Pip Reveal Overlay (flips all remaining hands, counts pips, holds 3.5s)
+        if (result.WasBlocked && pipRevealOverlay != null)
+        {
+            yield return StartCoroutine(pipRevealOverlay.ShowRevealCoroutine(engine, result));
+        }
+
+        // 2. Major state event celebratory banners + audio stings
+        if (result.BreakTriggered)
+        {
+            RoatanSoundFX.Instance?.PlayBreakSting();
+            boardView?.TriggerBoardShake(18f, 0.35f);
+            tableTalkUI?.ShowCelebrationBanner(
+                "GAME BRUK! (BREAK)",
+                $"{result.Winner?.Name} broke the streak! Scores reset to 0 — [6|6] poses next",
+                new Color(0.56f, 0.16f, 0.14f, 0.96f),
+                2.2f);
+            yield return new WaitForSeconds(1.8f);
+        }
+        else if (result.MatchOver && engine.MatchFormat == MatchFormat.SIX_LOV)
+        {
+            RoatanSoundFX.Instance?.PlaySixLovSting();
+            tableTalkUI?.ShowCelebrationBanner(
+                "SIX-LOV! (6–0)",
+                "Clean sweep — Six consecutive hand wins!",
+                new Color(0.08f, 0.44f, 0.30f, 0.96f),
+                2.6f);
+            yield return new WaitForSeconds(1.8f);
+        }
+        else if (result.MatchOver && engine.MatchFormat == MatchFormat.CUT_THROAT && result.CutThroatedPlayers.Count > 0)
+        {
+            RoatanSoundFX.Instance?.PlayCutThroatSting();
+            string victims = string.Join(", ", result.CutThroatedPlayers.Select(p => p.Name));
+            tableTalkUI?.ShowCelebrationBanner(
+                "CUT-THROAT!",
+                $"{result.MatchWinner?.Name} hit 6 wins • Cut-Throated at 0: {victims}",
+                new Color(0.54f, 0.12f, 0.18f, 0.96f),
+                2.6f);
+            yield return new WaitForSeconds(1.8f);
+        }
+
+        // 3. "Call Your Padna" (CHOOSE_POSER) state handoff before summary/next hand
+        if (result.RequiresChoosePoser && tableTalkUI != null)
+        {
+            if (result.PoserChooserIndex == 0 && result.PartnerCandidateIndex >= 0 && result.PartnerCandidateIndex < engine.Players.Count)
+            {
+                bool choiceDone = false;
+                string partnerName = engine.Players[result.PartnerCandidateIndex].Name;
+                tableTalkUI.ShowChoosePoserPrompt(partnerName, RoatanMatchEngine.ChoosePoserTimeoutSeconds, choice =>
+                {
+                    engine.ConfirmPoserChoice(0, choice);
+                    choiceDone = true;
+                });
+                while (!choiceDone)
+                {
+                    yield return null;
+                }
+            }
+            else if (result.PoserChooserIndex >= 0 && result.PoserChooserIndex < engine.Players.Count)
+            {
+                engine.ConfirmPoserChoice(engine.Players[result.PoserChooserIndex].Id, PoserChoice.POSE_MYSELF);
+            }
+        }
+
+        ShowRoundSummaryCard(result);
+    }
+
+    private void ShowRoundSummaryCard(RoatanMatchEngine.RoundResult result)
+    {
         RoatanMatchEngine.MatchPlayer champion = null;
         bool hasChampion = !result.IsDraw && engine.HasMatchChampion(out champion);
 
@@ -497,7 +675,7 @@ public class RoatanMobileApp : MonoBehaviour
         {
             RoatanSoundFX.Instance?.PlayWin();
         }
-        else
+        else if (!result.BreakTriggered)
         {
             RoatanSoundFX.Instance?.PlayPass();
         }
@@ -520,7 +698,7 @@ public class RoatanMobileApp : MonoBehaviour
         }
         else if (result.BreakTriggered)
         {
-            summaryTitleLabel.text = $"GAME BRUK! (BREAK)";
+            summaryTitleLabel.text = "GAME BRUK! (BREAK)";
         }
         else
         {
@@ -570,6 +748,25 @@ public class RoatanMobileApp : MonoBehaviour
         });
 
         roundSummaryOverlay.SetActive(true);
+    }
+
+    private void ShowBotEmoteBubble(RoatanMatchEngine.MatchPlayer bot, string phrase)
+    {
+        if (tableTalkUI == null || engine == null || bot == null) return;
+        List<RoatanMatchEngine.MatchPlayer> bots = engine.Players.Where(p => p.IsBot).ToList();
+        int idx = bots.FindIndex(b => b.Id == bot.Id);
+        if (idx < 0) return;
+
+        int[] seatMap = bots.Count == 1 ? new[] { 0 }
+                      : bots.Count == 2 ? new[] { 1, 2 }
+                      : new[] { 1, 0, 2 };
+        int seatSlot = idx < seatMap.Length ? seatMap[idx] : 0;
+
+        Vector2 bubblePos = seatSlot == 0 ? new Vector2(0f, 560f)
+                          : seatSlot == 1 ? new Vector2(-240f, 190f)
+                          : new Vector2(240f, 190f);
+
+        tableTalkUI.ShowSpeechBubble(bot.Name, phrase, bubblePos);
     }
 
     private void StopMatchRoutine()
@@ -764,9 +961,20 @@ public class RoatanMobileApp : MonoBehaviour
             faceImg.sprite = RoatanVisualAssets.GetDominoSprite(tile.Side1, tile.Side2);
             faceImg.color = (!waitingForHumanInput || isPlayable) ? Color.white : new Color(0.72f, 0.76f, 0.80f, 0.85f);
 
+            RoatanTileSlamGesture slamGesture = tileBtnObj.AddComponent<RoatanTileSlamGesture>();
+            slamGesture.Configure(captured, isPlayable, OnHumanTileSlamFlicked);
+
             Button btn = tileBtnObj.AddComponent<Button>();
             btn.targetGraphic = faceImg;
-            btn.onClick.AddListener(() => OnHumanHandTileClicked(captured));
+            btn.onClick.AddListener(() =>
+            {
+                if (slamGesture.SuppressNextClick)
+                {
+                    slamGesture.ConsumeSuppressedClick();
+                    return;
+                }
+                OnHumanHandTileClicked(captured);
+            });
 
             spawnedHandTiles.Add(slot);
         }
@@ -1029,6 +1237,38 @@ public class RoatanMobileApp : MonoBehaviour
         actionButtonLabel = actionButton.GetComponentInChildren<TMP_Text>();
         actionButtonLabel.color = new Color(0.10f, 0.10f, 0.12f, 1f);
         actionButton.gameObject.SetActive(false);
+
+        // Dedicated SLAM Button (appears when a valid playable tile is selected)
+        slamButton = CreatePillButton(matchScreen.transform, "BtnSlamTile", "SLAM TILE!", RoatanVisualAssets.SunsetCoral, Vector2.zero, new Vector2(310f, 84f), 30, OnSlamButtonClicked);
+        RectTransform slamRect = slamButton.GetComponent<RectTransform>();
+        slamRect.anchorMin = new Vector2(0.5f, 0f);
+        slamRect.anchorMax = new Vector2(0.5f, 0f);
+        slamRect.pivot = new Vector2(0.5f, 0f);
+        slamRect.anchoredPosition = new Vector2(-120f, 424f);
+        slamButton.gameObject.SetActive(false);
+
+        // Fast-Access Anti-Cheating Table Talk / Quick-Emote Wheel Button
+        emoteWheelBtn = CreatePillButton(matchScreen.transform, "BtnTableTalk", "Table Talk", new Color(0.08f, 0.28f, 0.34f, 0.96f), Vector2.zero, new Vector2(215f, 72f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            tableTalkUI?.ToggleEmoteWheel();
+        });
+        RectTransform emoteRect = emoteWheelBtn.GetComponent<RectTransform>();
+        emoteRect.anchorMin = new Vector2(1f, 0f);
+        emoteRect.anchorMax = new Vector2(1f, 0f);
+        emoteRect.pivot = new Vector2(1f, 0f);
+        emoteRect.anchoredPosition = new Vector2(-24f, 424f);
+
+        // Attach Table Talk UI (Emote Wheel, Speech Bubbles, Celebratory Banners, Call Your Padna Modal)
+        tableTalkUI = matchScreen.AddComponent<RoatanTableTalkUI>();
+        tableTalkUI.Initialize(matchScreen.transform, uiFont, phrase =>
+        {
+            UpdateStatusBanner($"You called: \"{phrase}\"");
+        });
+
+        // Attach Blocked-Board Pip Reveal Overlay
+        pipRevealOverlay = matchScreen.AddComponent<RoatanBlockedPipRevealOverlay>();
+        pipRevealOverlay.Initialize(matchScreen.transform, uiFont);
 
         // Bottom Wood-Rimmed Player Hand Tray
         GameObject handDock = new GameObject("HandDock");

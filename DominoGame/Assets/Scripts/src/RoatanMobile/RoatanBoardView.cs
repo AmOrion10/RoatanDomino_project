@@ -14,9 +14,11 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
     private const float MaxArmX = 315f;
 
     public event Action<BoardEnd> EndSlotClicked;
+    public Vector2 LastPlacedTilePos { get; private set; }
 
     private RectTransform viewportRect;
     private RectTransform boardContent;
+    private RectTransform effectsLayer;
     private RectTransform tilesLayer;
     private RectTransform slotsLayer;
 
@@ -40,6 +42,9 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
     private float lastPinchDistance;
     private bool isPinching;
 
+    private Vector2 shakeOffset = Vector2.zero;
+    private Coroutine shakeRoutine;
+
     public void Initialize(RectTransform parentViewport)
     {
         viewportRect = parentViewport;
@@ -62,6 +67,12 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         boardContent.sizeDelta = new Vector2(100f, 100f);
         boardContent.anchoredPosition = Vector2.zero;
 
+        // Effects layer sits underneath tiles so shockwaves and dust ripples radiate beneath slammed tiles
+        GameObject effectsObj = new GameObject("EffectsLayer");
+        effectsObj.transform.SetParent(boardContent, false);
+        effectsLayer = effectsObj.AddComponent<RectTransform>();
+        effectsLayer.anchoredPosition = Vector2.zero;
+
         GameObject tilesObj = new GameObject("TilesLayer");
         tilesObj.transform.SetParent(boardContent, false);
         tilesLayer = tilesObj.AddComponent<RectTransform>();
@@ -83,6 +94,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         currentZoom = 1f;
         targetZoom = 1f;
         targetPan = Vector2.zero;
+        shakeOffset = Vector2.zero;
+        LastPlacedTilePos = Vector2.zero;
         userHasPannedOrZoomed = false;
 
         if (boardContent != null)
@@ -92,7 +105,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         }
     }
 
-    public void RebuildFromEngine(RoatanMatchEngine engine, bool animateLastTile)
+    public void RebuildFromEngine(RoatanMatchEngine engine, bool animateLastTile, bool slammedLastTile = false)
     {
         foreach (GameObject go in spawnedTiles) Destroy(go);
         spawnedTiles.Clear();
@@ -109,7 +122,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         Sprite centerSprite = RoatanVisualAssets.GetDominoSprite(center.Domino.Side2, center.Domino.Side1);
 
         bool animateCenter = animateLastTile && engine.LeftChain.Count == 0 && engine.RightChain.Count == 0;
-        SpawnBoardTile(centerSprite, Vector2.zero, centerRot, animateCenter);
+        if (animateCenter) LastPlacedTilePos = Vector2.zero;
+        SpawnBoardTile(centerSprite, Vector2.zero, centerRot, animateCenter, slammedLastTile && animateCenter);
 
         float centerHalfX = centerIsDouble ? TileW * 0.5f : TileH * 0.5f;
         float centerHalfY = centerIsDouble ? TileH * 0.5f : TileW * 0.5f;
@@ -124,25 +138,160 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         rightTipDir = Vector2.right;
         rightTipHalfExtent = centerHalfX;
 
+        // Determine which arm received the very last tile
+        BoardEnd lastPlayedEnd = BoardEnd.Center;
+        if (engine.LeftChain.Count > 0 || engine.RightChain.Count > 0)
+        {
+            if (engine.PlayedDominoes.Count > 1)
+            {
+                var lastDom = engine.PlayedDominoes[engine.PlayedDominoes.Count - 1];
+                if (engine.LeftChain.Count > 0)
+                {
+                    var lt = engine.LeftChain[engine.LeftChain.Count - 1].Domino;
+                    if ((lt.Side1 == lastDom.Side1 && lt.Side2 == lastDom.Side2) || (lt.Side1 == lastDom.Side2 && lt.Side2 == lastDom.Side1))
+                    {
+                        lastPlayedEnd = BoardEnd.Left;
+                    }
+                }
+                if (lastPlayedEnd == BoardEnd.Center && engine.RightChain.Count > 0)
+                {
+                    lastPlayedEnd = BoardEnd.Right;
+                }
+            }
+        }
+
         // Lay out Left Arm (snakes DOWNWARD when wrapping near edges -> never collides with Right arm)
         for (int i = 0; i < engine.LeftChain.Count; i++)
         {
             RoatanMatchEngine.PlacedTile tile = engine.LeftChain[i];
-            bool isLast = animateLastTile && i == engine.LeftChain.Count - 1 && tile.EndPlaced == BoardEnd.Left;
-            PlaceTileAlongArm(tile, isUpperArm: false, ref leftTipPos, ref leftTipDir, ref leftTipHalfExtent, isLast);
+            bool isLast = animateLastTile && lastPlayedEnd == BoardEnd.Left && i == engine.LeftChain.Count - 1;
+            PlaceTileAlongArm(tile, isUpperArm: false, ref leftTipPos, ref leftTipDir, ref leftTipHalfExtent, isLast, slammedLastTile && isLast);
         }
 
         // Lay out Right Arm (snakes UPWARD when wrapping near edges -> never collides with Left arm)
         for (int i = 0; i < engine.RightChain.Count; i++)
         {
             RoatanMatchEngine.PlacedTile tile = engine.RightChain[i];
-            bool isLast = animateLastTile && i == engine.RightChain.Count - 1 && tile.EndPlaced == BoardEnd.Right;
-            PlaceTileAlongArm(tile, isUpperArm: true, ref rightTipPos, ref rightTipDir, ref rightTipHalfExtent, isLast);
+            bool isLast = animateLastTile && lastPlayedEnd == BoardEnd.Right && i == engine.RightChain.Count - 1;
+            PlaceTileAlongArm(tile, isUpperArm: true, ref rightTipPos, ref rightTipDir, ref rightTipHalfExtent, isLast, slammedLastTile && isLast);
         }
 
         if (!userHasPannedOrZoomed)
         {
             AutoFitCamera();
+        }
+    }
+
+    public void PlaySlamImpact(Vector2 boardLocalPos, bool highImpact)
+    {
+        if (effectsLayer != null)
+        {
+            StartCoroutine(SpawnShockwaveAndDustCoroutine(boardLocalPos, highImpact));
+        }
+
+        TriggerBoardShake(highImpact ? 22f : 11f, highImpact ? 0.38f : 0.24f);
+    }
+
+    public void TriggerBoardShake(float amplitude, float duration)
+    {
+        if (shakeRoutine != null)
+        {
+            StopCoroutine(shakeRoutine);
+        }
+        shakeRoutine = StartCoroutine(ShakeBoardCoroutine(amplitude, duration));
+    }
+
+    private IEnumerator ShakeBoardCoroutine(float amplitude, float duration)
+    {
+        float t = 0f;
+        while (t < duration)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / duration);
+            float damp = (1f - p) * (1f - p);
+            float angle = t * 62f;
+            shakeOffset = new Vector2(
+                Mathf.Sin(angle) * amplitude * damp,
+                Mathf.Cos(angle * 1.35f) * amplitude * 0.72f * damp
+            );
+            yield return null;
+        }
+        shakeOffset = Vector2.zero;
+        shakeRoutine = null;
+    }
+
+    private IEnumerator SpawnShockwaveAndDustCoroutine(Vector2 pos, bool highImpact)
+    {
+        // Primary shockwave ring
+        GameObject ringObj = new GameObject("SlamShockwave");
+        ringObj.transform.SetParent(effectsLayer, false);
+        RectTransform ringRect = ringObj.AddComponent<RectTransform>();
+        ringRect.anchoredPosition = pos;
+        ringRect.sizeDelta = new Vector2(highImpact ? 190f : 145f, highImpact ? 190f : 145f);
+        Image ringImg = ringObj.AddComponent<Image>();
+        ringImg.sprite = RoatanVisualAssets.ShockwaveRingSprite;
+        ringImg.color = highImpact ? new Color(1f, 0.86f, 0.34f, 0.95f) : new Color(1f, 0.96f, 0.85f, 0.85f);
+        ringImg.raycastTarget = false;
+
+        // Spawn 6 radial dust puffs under the slammed tile
+        int puffCount = highImpact ? 8 : 6;
+        RectTransform[] puffRects = new RectTransform[puffCount];
+        Image[] puffImgs = new Image[puffCount];
+        Vector2[] puffDirs = new Vector2[puffCount];
+
+        for (int i = 0; i < puffCount; i++)
+        {
+            float rad = (i / (float)puffCount) * Mathf.PI * 2f + 0.25f;
+            puffDirs[i] = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+
+            GameObject puff = new GameObject("SlamDust");
+            puff.transform.SetParent(effectsLayer, false);
+            RectTransform pr = puff.AddComponent<RectTransform>();
+            pr.anchoredPosition = pos + puffDirs[i] * 18f;
+            float sz = highImpact ? 22f : 16f;
+            pr.sizeDelta = new Vector2(sz, sz);
+            Image pi = puff.AddComponent<Image>();
+            pi.sprite = RoatanVisualAssets.CircleSprite;
+            pi.color = new Color(0.95f, 0.90f, 0.76f, 0.65f);
+            pi.raycastTarget = false;
+
+            puffRects[i] = pr;
+            puffImgs[i] = pi;
+        }
+
+        float t = 0f;
+        float dur = highImpact ? 0.46f : 0.36f;
+        float maxScale = highImpact ? 2.45f : 1.85f;
+        float puffTravel = highImpact ? 95f : 68f;
+
+        while (t < dur && ringRect != null)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / dur);
+            float easeOut = 1f - (1f - p) * (1f - p);
+
+            ringRect.localScale = Vector3.one * Mathf.Lerp(0.35f, maxScale, easeOut);
+            Color rc = ringImg.color;
+            rc.a = (1f - p) * (highImpact ? 0.95f : 0.82f);
+            ringImg.color = rc;
+
+            for (int i = 0; i < puffCount; i++)
+            {
+                if (puffRects[i] == null) continue;
+                puffRects[i].anchoredPosition = pos + puffDirs[i] * Mathf.Lerp(18f, puffTravel, easeOut);
+                puffRects[i].localScale = Vector3.one * Mathf.Lerp(1f, 0.3f, p);
+                Color pc = puffImgs[i].color;
+                pc.a = (1f - p) * 0.65f;
+                puffImgs[i].color = pc;
+            }
+
+            yield return null;
+        }
+
+        if (ringObj != null) Destroy(ringObj);
+        for (int i = 0; i < puffCount; i++)
+        {
+            if (puffRects[i] != null) Destroy(puffRects[i].gameObject);
         }
     }
 
@@ -185,7 +334,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         ref Vector2 tipPos,
         ref Vector2 tipDir,
         ref float tipHalfExtent,
-        bool animate)
+        bool animate,
+        bool slammed)
     {
         Vector2 nextPos;
         float rot;
@@ -194,9 +344,11 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
 
         ComputeNextPlacement(tile.IsDouble, isUpperArm, tipPos, tipDir, tipHalfExtent, out nextPos, out rot, out newDir, out newHalfExtent);
 
+        if (animate) LastPlacedTilePos = nextPos;
+
         // Top half of sprite is OuterPip (faces +dir), bottom half is InnerPip (faces -dir)
         Sprite sprite = RoatanVisualAssets.GetDominoSprite(tile.OuterPip, tile.InnerPip);
-        SpawnBoardTile(sprite, nextPos, rot, animate);
+        SpawnBoardTile(sprite, nextPos, rot, animate, slammed);
 
         bool horizontalVisual = Mathf.Abs(Mathf.DeltaAngle(rot, 90f)) < 5f || Mathf.Abs(Mathf.DeltaAngle(rot, -90f)) < 5f;
         ExpandBounds(nextPos, horizontalVisual ? TileH * 0.5f : TileW * 0.5f, horizontalVisual ? TileW * 0.5f : TileH * 0.5f);
@@ -220,14 +372,12 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         Vector2 bendDir = isUpperArm ? Vector2.up : Vector2.down;
         Vector2 moveDir = tipDir;
 
-        // If moving horizontally and approaching portrait screen edge, turn cleanly into bendDir (Up for Right arm, Down for Left arm)
         bool movingHoriz = Mathf.Abs(tipDir.x) > 0.5f;
         bool atEdge = (tipDir.x > 0.5f && tipPos.x + tipHalfExtent + TileH > MaxArmX) ||
                       (tipDir.x < -0.5f && tipPos.x - tipHalfExtent - TileH < -MaxArmX);
 
         if (movingHoriz && atEdge)
         {
-            // Corner step: step vertically in bendDir aligned to the outer half of the previous tile
             moveDir = bendDir;
             float offsetAlongPrev = Mathf.Max(0f, tipHalfExtent - TileW * 0.5f);
             float prevVertHalf = (tipHalfExtent > TileW * 0.6f) ? TileW * 0.5f : TileH * 0.5f;
@@ -240,7 +390,6 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
             return;
         }
 
-        // If the previous tile was a vertical corner step, immediately turn back inward horizontally!
         if (!movingHoriz)
         {
             Vector2 inwardDir = tipPos.x >= 0f ? Vector2.left : Vector2.right;
@@ -254,7 +403,6 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
             return;
         }
 
-        // Standard straight extension along moveDir
         float myExtent = isDouble ? TileW * 0.5f : TileH * 0.5f;
         nextPos = tipPos + moveDir * (tipHalfExtent + TileGap + myExtent);
         rotZ = DirectionToRotation(moveDir, isDouble);
@@ -276,9 +424,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         }
     }
 
-    private void SpawnBoardTile(Sprite sprite, Vector2 pos, float rotZ, bool animate)
+    private void SpawnBoardTile(Sprite sprite, Vector2 pos, float rotZ, bool animate, bool slammed)
     {
-        // Shadow + tile container
         GameObject tileObj = new GameObject("BoardTile");
         tileObj.transform.SetParent(tilesLayer, false);
         RectTransform rect = tileObj.AddComponent<RectTransform>();
@@ -286,7 +433,6 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         rect.anchoredPosition = pos;
         rect.localRotation = Quaternion.Euler(0f, 0f, rotZ);
 
-        // Soft drop shadow behind tile
         GameObject shadowObj = new GameObject("Shadow");
         shadowObj.transform.SetParent(tileObj.transform, false);
         RectTransform shadowRect = shadowObj.AddComponent<RectTransform>();
@@ -314,7 +460,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
 
         if (animate)
         {
-            StartCoroutine(AnimateTilePop(rect));
+            StartCoroutine(slammed ? AnimateTileSlam(rect) : AnimateTilePop(rect));
         }
     }
 
@@ -352,6 +498,33 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
             rect.localScale = Vector3.one * scale;
             yield return null;
         }
+        if (rect != null) rect.localScale = Vector3.one;
+    }
+
+    private IEnumerator AnimateTileSlam(RectTransform rect)
+    {
+        float t = 0f;
+        const float dropDur = 0.11f;
+        while (t < dropDur && rect != null)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / dropDur);
+            float scale = Mathf.Lerp(1.70f, 0.92f, p * p);
+            rect.localScale = Vector3.one * scale;
+            yield return null;
+        }
+
+        t = 0f;
+        const float settleDur = 0.12f;
+        while (t < settleDur && rect != null)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / settleDur);
+            float scale = Mathf.Lerp(0.92f, 1f, 1f - (1f - p) * (1f - p));
+            rect.localScale = Vector3.one * scale;
+            yield return null;
+        }
+
         if (rect != null) rect.localScale = Vector3.one;
     }
 
@@ -396,7 +569,6 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
     {
         if (boardContent == null) return;
 
-        // Touch pinch-to-zoom on mobile
         if (Input.touchCount == 2)
         {
             Touch t0 = Input.GetTouch(0);
@@ -421,7 +593,6 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
             isPinching = false;
         }
 
-        // Mouse wheel zoom in Unity Editor
         float scroll = Input.mouseScrollDelta.y;
         if (Mathf.Abs(scroll) > 0.01f)
         {
@@ -431,7 +602,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
 
         currentZoom = Mathf.Lerp(currentZoom, targetZoom, Time.deltaTime * 10f);
         boardContent.localScale = Vector3.one * currentZoom;
-        boardContent.anchoredPosition = Vector2.Lerp(boardContent.anchoredPosition, targetPan, Time.deltaTime * 10f);
+        Vector2 smoothPan = Vector2.Lerp(boardContent.anchoredPosition - shakeOffset, targetPan, Time.deltaTime * 10f);
+        boardContent.anchoredPosition = smoothPan + shakeOffset;
     }
 
     public void OnBeginDrag(PointerEventData eventData)

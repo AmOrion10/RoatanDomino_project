@@ -11,6 +11,7 @@ using UnityEngine.SceneManagement;
 public class ChatManager : MonoBehaviour
 {
     public static ChatManager Instance { get; private set; }
+    public bool IsActiveRoundChatLocked { get; private set; }
 
     private IClient client;
     private List<Chat> chats = new();
@@ -135,8 +136,27 @@ public class ChatManager : MonoBehaviour
         }
     }
 
+    public void SetActiveRoundChatLocked(bool locked)
+    {
+        IsActiveRoundChatLocked = locked;
+        foreach (Chat chat in chats)
+        {
+            if (chat != null)
+            {
+                chat.gameObject.SetActive(!locked);
+            }
+        }
+    }
+
     public void SendMessage(int chatId, string message)
     {
+        // Anti-cheating policy: block free-text chat during active rounds; allow whitelisted quick-emotes only
+        if (IsActiveRoundChatLocked && !RoatanQuickEmotes.IsAllowedQuickEmote(message))
+        {
+            Debug.Log("[ChatManager] Free-text chat is disabled during active rounds (anti-cheating). Use Quick-Emotes instead.");
+            return;
+        }
+
         client.AddToSendQueue(MessageFrameBuilder.SendMessageFrame(new SendChatMessageDto
         {
             ChatId = chatId,

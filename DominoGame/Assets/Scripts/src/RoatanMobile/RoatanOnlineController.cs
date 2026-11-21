@@ -150,6 +150,7 @@ public class RoatanOnlineController : MonoBehaviour
 
     public void HideOnline()
     {
+        ChatManager.Instance?.SetActiveRoundChatLocked(false);
         onlineRoot.SetActive(false);
     }
 
@@ -522,6 +523,7 @@ public class RoatanOnlineController : MonoBehaviour
             }
         }
 
+        ChatManager.Instance?.SetActiveRoundChatLocked(true);
         ShowSubView(onlineGameView);
         onlineMatchHeader.text = currentLobby != null ? $"ONLINE  •  {currentLobby.Name}" : "ONLINE MATCH";
         onlineMatchStatus.text = "Waiting for server to deal dominoes...";
@@ -602,6 +604,7 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineEndGame(EndGameDto dto)
     {
+        ChatManager.Instance?.SetActiveRoundChatLocked(false);
         RoatanSoundFX.Instance?.PlayWin();
         string winnerName = "Match Complete";
         if (dto?.Rankings != null && dto.Rankings.Count > 0 && currentLobby != null)
@@ -615,6 +618,7 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineLeaveGameResponse(ResponseDto dto)
     {
+        ChatManager.Instance?.SetActiveRoundChatLocked(false);
         ShowSubView(hubView);
         RequestLobbiesList();
     }
