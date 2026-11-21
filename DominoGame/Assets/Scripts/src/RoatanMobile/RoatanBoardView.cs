@@ -13,8 +13,28 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
     private const float TileGap = 5f;
     private const float MaxArmX = 315f;
 
+    [Serializable]
+    public struct BoardSafeMargins
+    {
+        public float Left;
+        public float Right;
+        public float Top;
+        public float Bottom;
+
+        public BoardSafeMargins(float left, float right, float top, float bottom)
+        {
+            Left = left;
+            Right = right;
+            Top = top;
+            Bottom = bottom;
+        }
+    }
+
     public event Action<BoardEnd> EndSlotClicked;
     public Vector2 LastPlacedTilePos { get; private set; }
+    public BoardSafeMargins SafeMargins => boardSafeMargins;
+
+    [SerializeField] private BoardSafeMargins boardSafeMargins = new BoardSafeMargins(48f, 48f, 210f, 120f);
 
     private RectTransform viewportRect;
     private RectTransform boardContent;
@@ -303,7 +323,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         {
             Vector2 pos;
             float rot;
-            ComputeNextPlacement(isDouble: false, isUpperArm: false, leftTipPos, leftTipDir, leftTipHalfExtent, out pos, out rot, out _, out _);
+            ComputeNextPlacement(isDouble: false, isUpperArm: false, leftTipPos, leftTipDir, leftTipHalfExtent, GetEffectiveMaxArmX(), out pos, out rot, out _, out _);
             SpawnSlot(BoardEnd.Left, pos, rot);
         }
 
@@ -311,7 +331,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         {
             Vector2 pos;
             float rot;
-            ComputeNextPlacement(isDouble: false, isUpperArm: true, rightTipPos, rightTipDir, rightTipHalfExtent, out pos, out rot, out _, out _);
+            ComputeNextPlacement(isDouble: false, isUpperArm: true, rightTipPos, rightTipDir, rightTipHalfExtent, GetEffectiveMaxArmX(), out pos, out rot, out _, out _);
             SpawnSlot(BoardEnd.Right, pos, rot);
         }
     }
@@ -322,10 +342,32 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         spawnedSlots.Clear();
     }
 
+    public void SetSafeMargins(float left, float right, float top, float bottom)
+    {
+        boardSafeMargins = new BoardSafeMargins(
+            Mathf.Max(0f, left),
+            Mathf.Max(0f, right),
+            Mathf.Max(0f, top),
+            Mathf.Max(0f, bottom));
+
+        if (!userHasPannedOrZoomed)
+        {
+            AutoFitCamera();
+        }
+    }
+
     public void RecenterBoard()
     {
         userHasPannedOrZoomed = false;
         AutoFitCamera();
+    }
+
+    private float GetEffectiveMaxArmX()
+    {
+        if (viewportRect == null) return MaxArmX;
+        float safeHalfW = (viewportRect.rect.width - boardSafeMargins.Left - boardSafeMargins.Right) * 0.5f;
+        if (safeHalfW <= 160f) return MaxArmX;
+        return Mathf.Clamp(safeHalfW - 44f, 230f, MaxArmX);
     }
 
     private void PlaceTileAlongArm(
@@ -342,7 +384,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         Vector2 newDir;
         float newHalfExtent;
 
-        ComputeNextPlacement(tile.IsDouble, isUpperArm, tipPos, tipDir, tipHalfExtent, out nextPos, out rot, out newDir, out newHalfExtent);
+        ComputeNextPlacement(tile.IsDouble, isUpperArm, tipPos, tipDir, tipHalfExtent, GetEffectiveMaxArmX(), out nextPos, out rot, out newDir, out newHalfExtent);
 
         if (animate) LastPlacedTilePos = nextPos;
 
@@ -364,6 +406,7 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         Vector2 tipPos,
         Vector2 tipDir,
         float tipHalfExtent,
+        float maxArmX,
         out Vector2 nextPos,
         out float rotZ,
         out Vector2 outDir,
@@ -373,8 +416,8 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
         Vector2 moveDir = tipDir;
 
         bool movingHoriz = Mathf.Abs(tipDir.x) > 0.5f;
-        bool atEdge = (tipDir.x > 0.5f && tipPos.x + tipHalfExtent + TileH > MaxArmX) ||
-                      (tipDir.x < -0.5f && tipPos.x - tipHalfExtent - TileH < -MaxArmX);
+        bool atEdge = (tipDir.x > 0.5f && tipPos.x + tipHalfExtent + TileH > maxArmX) ||
+                      (tipDir.x < -0.5f && tipPos.x - tipHalfExtent - TileH < -maxArmX);
 
         if (movingHoriz && atEdge)
         {
@@ -552,17 +595,22 @@ public class RoatanBoardView : MonoBehaviour, IBeginDragHandler, IDragHandler
     {
         if (viewportRect == null) return;
 
-        float viewW = Mathf.Max(300f, viewportRect.rect.width - 110f);
-        float viewH = Mathf.Max(300f, viewportRect.rect.height - 140f);
+        float safeW = Mathf.Max(260f, viewportRect.rect.width - boardSafeMargins.Left - boardSafeMargins.Right);
+        float safeH = Mathf.Max(260f, viewportRect.rect.height - boardSafeMargins.Top - boardSafeMargins.Bottom);
 
-        float contentW = Mathf.Max(260f, (maxX - minX) + 180f);
-        float contentH = Mathf.Max(260f, (maxY - minY) + 180f);
+        float contentW = Mathf.Max(240f, (maxX - minX) + 120f);
+        float contentH = Mathf.Max(240f, (maxY - minY) + 120f);
 
-        float fitZoom = Mathf.Min(viewW / contentW, viewH / contentH);
-        targetZoom = Mathf.Clamp(fitZoom, 0.45f, 1.15f);
+        float fitZoom = Mathf.Min(safeW / contentW, safeH / contentH);
+        targetZoom = Mathf.Clamp(fitZoom, 0.42f, 1.12f);
 
-        Vector2 center = new Vector2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f);
-        targetPan = -center * targetZoom;
+        // Shift center into the unobstructed safe-area rectangle (away from upper-flank nameplates and bottom HUD)
+        Vector2 safeCenterOffset = new Vector2(
+            (boardSafeMargins.Left - boardSafeMargins.Right) * 0.5f,
+            (boardSafeMargins.Bottom - boardSafeMargins.Top) * 0.5f);
+
+        Vector2 contentCenter = new Vector2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f);
+        targetPan = safeCenterOffset - contentCenter * targetZoom;
     }
 
     private void Update()

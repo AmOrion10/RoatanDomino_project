@@ -16,6 +16,11 @@ public class RoatanMobileApp : MonoBehaviour
 {
     private const string PrefWinsKey = "RoatanDomino_Wins";
     private const string PrefGamesKey = "RoatanDomino_Games";
+    private const string PrefPresetModeKey = "RoatanDomino_PresetMode";
+    private const string PrefPresetFormatKey = "RoatanDomino_PresetFormat";
+    private const string PrefPresetOneOneKey = "RoatanDomino_PresetOneOne";
+    private const string PrefPresetDiffKey = "RoatanDomino_PresetDiff";
+    private const string PrefPresetBotsKey = "RoatanDomino_PresetBots";
 
     public static RoatanMobileApp Instance { get; private set; }
 
@@ -23,15 +28,20 @@ public class RoatanMobileApp : MonoBehaviour
     private Canvas rootCanvas;
     private RectTransform safeAreaRoot;
 
-    // Screens
+    // Screens & Modals
     private GameObject homeScreen;
+    private GameObject matchSetupSheet;
+    private GameObject utilityDrawerOverlay;
     private GameObject matchScreen;
     private GameObject howToPlayModal;
     private GameObject roundSummaryOverlay;
     private RoatanOnlineController onlineController;
 
-    // Home UI refs
+    // Home UI refs (Decluttered 2-step lobby + compact top bar + utility drawer)
     private TMP_Text subtitleLabel;
+    private TMP_Text activePresetPillLabel;
+    private TMP_Text topLangPillLabel;
+    private TMP_Text drawerStatsLabel;
     private TMP_Text statsLabel;
     private TMP_Text modeHeadingLabel;
     private TMP_Text cerradoTitleLabel;
@@ -41,6 +51,8 @@ public class RoatanMobileApp : MonoBehaviour
     private TMP_Text diffHeadingLabel;
     private TMP_Text diffDescLabel;
     private TMP_Text formatDescLabel;
+    private GameObject setupRuleTooltipCard;
+    private TMP_Text setupRuleTooltipText;
     private Button oneOnePlayoffBtn;
     private Image oneOnePlayoffBtnImg;
     private TMP_Text oneOnePlayoffBtnLabel;
@@ -52,13 +64,17 @@ public class RoatanMobileApp : MonoBehaviour
     private TMP_Text howToPlayBtnLabel;
     private TMP_Text onlineModeBtnLabel;
 
+    // Tabbed How-To-Play refs (Six-Lov, Two-Best, Cut-Throat, Game Bruk)
+    private TMP_Text rulesBodyLabel;
+    private readonly Dictionary<string, Image> rulesTabImages = new Dictionary<string, Image>();
+    private string activeRulesTab = "Six-Lov";
+
     private readonly Dictionary<RoatanGameMode, Image> modeCardImages = new Dictionary<RoatanGameMode, Image>();
     private readonly Dictionary<MatchFormat, Image> formatBtnImages = new Dictionary<MatchFormat, Image>();
     private readonly Dictionary<BotDifficulty, Image> diffBtnImages = new Dictionary<BotDifficulty, Image>();
     private readonly Dictionary<BotDifficulty, TMP_Text> diffBtnLabels = new Dictionary<BotDifficulty, TMP_Text>();
     private readonly Dictionary<int, Image> botCountBtnImages = new Dictionary<int, Image>();
     private readonly Dictionary<int, GameObject> botCountBtnObjs = new Dictionary<int, GameObject>();
-    private readonly Dictionary<RoatanLanguage, Image> langBtnImages = new Dictionary<RoatanLanguage, Image>();
 
     // Match UI refs
     private RoatanBoardView boardView;
@@ -85,8 +101,11 @@ public class RoatanMobileApp : MonoBehaviour
     private Button resumeControlBtn;
     private Coroutine humanTimerRoutine;
 
-    // Opponent seat badges (Top = index 0, Left = index 1, Right = index 2)
+    // Opponent seat badges (Top = index 0, Upper-Left = index 1, Upper-Right = index 2)
     private readonly List<OpponentSeatUI> opponentSeats = new List<OpponentSeatUI>();
+    private readonly Dictionary<int, HashSet<int>> playerPassedPips = new Dictionary<int, HashSet<int>>();
+    private RectTransform humanPassedPipsRow;
+    private readonly List<GameObject> humanPassedPipObjs = new List<GameObject>();
 
     // Summary overlay refs
     private TMP_Text summaryTitleLabel;
@@ -121,6 +140,8 @@ public class RoatanMobileApp : MonoBehaviour
         public TMP_Text NameText;
         public TMP_Text CountText;
         public TMP_Text ScoreText;
+        public RectTransform PassedPipsRow;
+        public List<GameObject> PassedPipObjs = new List<GameObject>();
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -153,6 +174,7 @@ public class RoatanMobileApp : MonoBehaviour
         }
 
         RoatanLocalization.Initialize();
+        LoadSavedMatchPreset();
         RoatanVisualAssets.EnsureInitialized();
         gameObject.AddComponent<RoatanSoundFX>();
         uiFont = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
@@ -160,6 +182,8 @@ public class RoatanMobileApp : MonoBehaviour
         EnsureEventSystem();
         BuildRootCanvas();
         BuildHomeScreen();
+        BuildMatchSetupSheet();
+        BuildUtilityDrawer();
         BuildMatchScreen();
         BuildHowToPlayModal();
         BuildRoundSummaryOverlay();
@@ -181,9 +205,39 @@ public class RoatanMobileApp : MonoBehaviour
     {
         StopMatchRoutine();
         homeScreen.SetActive(false);
+        if (matchSetupSheet != null) matchSetupSheet.SetActive(false);
+        if (utilityDrawerOverlay != null) utilityDrawerOverlay.SetActive(false);
         matchScreen.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
+    }
+
+    private void LoadSavedMatchPreset()
+    {
+        selectedMode = (RoatanGameMode)PlayerPrefs.GetInt(PrefPresetModeKey, (int)RoatanGameMode.BlockedCerrado);
+        selectedFormat = (MatchFormat)PlayerPrefs.GetInt(PrefPresetFormatKey, (int)MatchFormat.SIX_LOV);
+        selectedOneOnePlayoff = PlayerPrefs.GetInt(PrefPresetOneOneKey, 0) == 1;
+        selectedDifficulty = (BotDifficulty)PlayerPrefs.GetInt(PrefPresetDiffKey, (int)BotDifficulty.Novice);
+        selectedBotCount = Mathf.Clamp(PlayerPrefs.GetInt(PrefPresetBotsKey, 3), 1, 3);
+    }
+
+    private void SaveMatchPreset()
+    {
+        PlayerPrefs.SetInt(PrefPresetModeKey, (int)selectedMode);
+        PlayerPrefs.SetInt(PrefPresetFormatKey, (int)selectedFormat);
+        PlayerPrefs.SetInt(PrefPresetOneOneKey, selectedOneOnePlayoff ? 1 : 0);
+        PlayerPrefs.SetInt(PrefPresetDiffKey, (int)selectedDifficulty);
+        PlayerPrefs.SetInt(PrefPresetBotsKey, selectedBotCount);
+        PlayerPrefs.Save();
+    }
+
+    private void CycleLanguage()
+    {
+        RoatanLanguage[] langs = { RoatanLanguage.English, RoatanLanguage.Spanish, RoatanLanguage.French, RoatanLanguage.German };
+        int idx = System.Array.IndexOf(langs, RoatanLocalization.CurrentLanguage);
+        RoatanLanguage next = langs[(idx + 1) % langs.Length];
+        RoatanSoundFX.Instance?.PlayTap();
+        RoatanLocalization.SetLanguage(next);
     }
 
     private void OnDestroy()
@@ -229,6 +283,8 @@ public class RoatanMobileApp : MonoBehaviour
         rootCanvas.gameObject.SetActive(true);
         onlineController?.HideOnline();
         homeScreen.SetActive(true);
+        if (matchSetupSheet != null) matchSetupSheet.SetActive(false);
+        if (utilityDrawerOverlay != null) utilityDrawerOverlay.SetActive(false);
         matchScreen.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
@@ -240,6 +296,7 @@ public class RoatanMobileApp : MonoBehaviour
     private void StartNewMatch()
     {
         RoatanSoundFX.Instance?.PlayTap();
+        SaveMatchPreset();
         StopMatchRoutine();
         ChatManager.Instance?.SetActiveRoundChatLocked(true);
         tableTalkUI?.HideAllOverlays();
@@ -260,6 +317,8 @@ public class RoatanMobileApp : MonoBehaviour
 
         onlineController?.HideOnline();
         homeScreen.SetActive(false);
+        if (matchSetupSheet != null) matchSetupSheet.SetActive(false);
+        if (utilityDrawerOverlay != null) utilityDrawerOverlay.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
         matchScreen.SetActive(true);
@@ -289,6 +348,7 @@ public class RoatanMobileApp : MonoBehaviour
         if (slamButton != null) slamButton.gameObject.SetActive(false);
         waitingForHumanInput = false;
         currentHumanMoves.Clear();
+        playerPassedPips.Clear();
         botBrain.ResetForRound();
 
         boardView.ClearBoard();
@@ -298,10 +358,12 @@ public class RoatanMobileApp : MonoBehaviour
         RoatanMatchEngine.MatchPlayer starter = engine.Players.First(p => p.Id == opener.PlayerId);
 
         boardView.RebuildFromEngine(engine, animateLastTile: true);
+        RoatanSoundFX.Instance?.PlayDeal();
         RoatanSoundFX.Instance?.PlayPlace();
 
         RefreshMatchHeader();
         RefreshOpponentSeats();
+        RefreshHumanPassedPips();
         RefreshHumanTakeoverIndicators();
         RebuildHumanHand();
         UpdateStatusBanner(rematchAfterBreak
@@ -316,6 +378,8 @@ public class RoatanMobileApp : MonoBehaviour
         RoatanSoundFX.Instance?.PlayTap();
         StopMatchRoutine();
         homeScreen.SetActive(false);
+        if (matchSetupSheet != null) matchSetupSheet.SetActive(false);
+        if (utilityDrawerOverlay != null) utilityDrawerOverlay.SetActive(false);
         matchScreen.SetActive(false);
         howToPlayModal.SetActive(false);
         roundSummaryOverlay.SetActive(false);
@@ -387,6 +451,7 @@ public class RoatanMobileApp : MonoBehaviour
                     }
                     else if (botPassed)
                     {
+                        RecordPlayerPassedOpenEnds(active.Id);
                         RoatanSoundFX.Instance?.PlayPass();
                         UpdateStatusBanner("Bot Auto-Passed (Paso!)");
                     }
@@ -478,6 +543,7 @@ public class RoatanMobileApp : MonoBehaviour
                 List<RoatanMatchEngine.LegalMove> afterDraw = engine.GetLegalMoves(active);
                 if (afterDraw.Count == 0 && !engine.CanCurrentPlayerDraw())
                 {
+                    RecordPlayerPassedOpenEnds(active.Id);
                     engine.PassTurn();
                     RoatanSoundFX.Instance?.PlayPass();
                     ShowBotEmoteBubble(active, "Pass!");
@@ -487,6 +553,7 @@ public class RoatanMobileApp : MonoBehaviour
             else
             {
                 botBrain.RecordBlocked(active.Id, engine.LeftEndPip, engine.RightEndPip);
+                RecordPlayerPassedOpenEnds(active.Id);
                 engine.PassTurn();
                 RoatanSoundFX.Instance?.PlayPass();
                 ShowBotEmoteBubble(active, "Pass!");
@@ -708,6 +775,7 @@ public class RoatanMobileApp : MonoBehaviour
         {
             StopHumanTurnTimer();
             botBrain.RecordBlocked(human.Id, engine.LeftEndPip, engine.RightEndPip);
+            RecordPlayerPassedOpenEnds(human.Id);
             waitingForHumanInput = false;
             actionButton.gameObject.SetActive(false);
             engine.PassTurn();
@@ -989,6 +1057,7 @@ public class RoatanMobileApp : MonoBehaviour
         {
             // 5s Auto-Pass: MUST NOT increment AFK counter
             botBrain.RecordBlocked(0, engine.LeftEndPip, engine.RightEndPip);
+            RecordPlayerPassedOpenEnds(0);
             engine.ExecuteAutoPassNoPenalty();
             RoatanSoundFX.Instance?.PlayPass();
             UpdateStatusBanner("Auto-passed (0s) — no AFK strike");
@@ -1015,6 +1084,7 @@ public class RoatanMobileApp : MonoBehaviour
             }
             else if (autoPassed)
             {
+                RecordPlayerPassedOpenEnds(0);
                 RoatanSoundFX.Instance?.PlayPass();
                 UpdateStatusBanner(triggeredBotTakeover
                     ? "3 AFK Timeouts — Bot Auto-Playing! Tap any tile or Resume Control."
@@ -1067,10 +1137,110 @@ public class RoatanMobileApp : MonoBehaviour
         int seatSlot = idx < seatMap.Length ? seatMap[idx] : 0;
 
         Vector2 bubblePos = seatSlot == 0 ? new Vector2(0f, 560f)
-                          : seatSlot == 1 ? new Vector2(-240f, 190f)
-                          : new Vector2(240f, 190f);
+                          : seatSlot == 1 ? new Vector2(-280f, 445f)
+                          : new Vector2(280f, 445f);
 
         tableTalkUI.ShowSpeechBubble(bot.Name, phrase, bubblePos);
+    }
+
+    private void RecordPlayerPassedOpenEnds(int playerId)
+    {
+        if (engine == null || !engine.HasBoardStarted) return;
+
+        if (!playerPassedPips.TryGetValue(playerId, out HashSet<int> set))
+        {
+            set = new HashSet<int>();
+            playerPassedPips[playerId] = set;
+        }
+
+        if (engine.LeftEndPip >= 0 && engine.LeftEndPip <= 6) set.Add(engine.LeftEndPip);
+        if (engine.RightEndPip >= 0 && engine.RightEndPip <= 6) set.Add(engine.RightEndPip);
+
+        if (playerId == 0)
+        {
+            RefreshHumanPassedPips();
+        }
+        else
+        {
+            RefreshOpponentSeats();
+        }
+    }
+
+    private void RefreshHumanPassedPips()
+    {
+        foreach (GameObject go in humanPassedPipObjs) Destroy(go);
+        humanPassedPipObjs.Clear();
+
+        if (humanPassedPipsRow == null) return;
+        if (!playerPassedPips.TryGetValue(0, out HashSet<int> passed) || passed.Count == 0)
+        {
+            humanPassedPipsRow.gameObject.SetActive(false);
+            return;
+        }
+
+        humanPassedPipsRow.gameObject.SetActive(true);
+        foreach (int pip in passed.OrderBy(p => p))
+        {
+            humanPassedPipObjs.Add(CreateMutedPipIcon(humanPassedPipsRow, pip));
+        }
+    }
+
+    private GameObject CreateMutedPipIcon(Transform parent, int pip)
+    {
+        GameObject chip = new GameObject($"PassedPip_{pip}");
+        chip.transform.SetParent(parent, false);
+        RectTransform rect = chip.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(26f, 26f);
+        LayoutElement le = chip.AddComponent<LayoutElement>();
+        le.preferredWidth = 26f;
+        le.preferredHeight = 26f;
+
+        Image bg = chip.AddComponent<Image>();
+        bg.sprite = RoatanVisualAssets.RoundedCardSprite;
+        bg.type = Image.Type.Sliced;
+        bg.color = new Color(0.11f, 0.21f, 0.26f, 0.86f);
+        bg.raycastTarget = false;
+
+        // Draw authentic muted mini pip dots (0 = hollow subtle dash, 1..6 = classic domino dot layout)
+        Vector2[] dots = GetMiniPipDotOffsets(pip);
+        if (dots.Length == 0)
+        {
+            TMP_Text zeroLbl = CreateText(chip.transform, "Zero", "0", 14, FontStyles.Bold, new Color(0.60f, 0.72f, 0.76f, 0.80f), Vector2.zero, new Vector2(22f, 22f));
+            zeroLbl.raycastTarget = false;
+        }
+        else
+        {
+            Color dotColor = new Color(0.68f, 0.79f, 0.83f, 0.85f);
+            for (int i = 0; i < dots.Length; i++)
+            {
+                GameObject dot = new GameObject("Dot");
+                dot.transform.SetParent(chip.transform, false);
+                RectTransform dr = dot.AddComponent<RectTransform>();
+                dr.sizeDelta = new Vector2(5f, 5f);
+                dr.anchoredPosition = dots[i];
+                Image di = dot.AddComponent<Image>();
+                di.sprite = RoatanVisualAssets.CircleSprite;
+                di.color = dotColor;
+                di.raycastTarget = false;
+            }
+        }
+
+        return chip;
+    }
+
+    private static Vector2[] GetMiniPipDotOffsets(int pip)
+    {
+        const float o = 6.2f;
+        switch (pip)
+        {
+            case 1: return new[] { Vector2.zero };
+            case 2: return new[] { new Vector2(-o, o), new Vector2(o, -o) };
+            case 3: return new[] { new Vector2(-o, o), Vector2.zero, new Vector2(o, -o) };
+            case 4: return new[] { new Vector2(-o, o), new Vector2(o, o), new Vector2(-o, -o), new Vector2(o, -o) };
+            case 5: return new[] { new Vector2(-o, o), new Vector2(o, o), Vector2.zero, new Vector2(-o, -o), new Vector2(o, -o) };
+            case 6: return new[] { new Vector2(-o, o), new Vector2(o, o), new Vector2(-o, 0f), new Vector2(o, 0f), new Vector2(-o, -o), new Vector2(o, -o) };
+            default: return new Vector2[0];
+        }
     }
 
     private void StopMatchRoutine()
@@ -1088,15 +1258,16 @@ public class RoatanMobileApp : MonoBehaviour
     private void RefreshStaticLabels()
     {
         if (subtitleLabel != null) subtitleLabel.text = RoatanLocalization.T("subtitle");
-        if (modeHeadingLabel != null) modeHeadingLabel.text = RoatanLocalization.T("choose_mode");
-        if (cerradoTitleLabel != null) cerradoTitleLabel.text = RoatanLocalization.T("mode_cerrado_title");
-        if (cerradoDescLabel != null) cerradoDescLabel.text = RoatanLocalization.T("mode_cerrado_desc");
-        if (drawTitleLabel != null) drawTitleLabel.text = RoatanLocalization.T("mode_draw_title");
-        if (drawDescLabel != null) drawDescLabel.text = RoatanLocalization.T("mode_draw_desc");
+        if (topLangPillLabel != null) topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} ▾";
+        if (modeHeadingLabel != null) modeHeadingLabel.text = "TABLE STYLE";
+        if (cerradoTitleLabel != null) cerradoTitleLabel.text = "Roatan Blocked";
+        if (cerradoDescLabel != null) cerradoDescLabel.text = "No drawing • Pure strategy";
+        if (drawTitleLabel != null) drawTitleLabel.text = "Classic Draw";
+        if (drawDescLabel != null) drawDescLabel.text = "Draw from boneyard";
         if (diffHeadingLabel != null) diffHeadingLabel.text = RoatanLocalization.T("bot_difficulty");
-        if (playNowBtnLabel != null) playNowBtnLabel.text = RoatanLocalization.T("play_now");
+        if (playNowBtnLabel != null) playNowBtnLabel.text = "PLAY OFFLINE";
         if (howToPlayBtnLabel != null) howToPlayBtnLabel.text = RoatanLocalization.T("how_to_play");
-        if (onlineModeBtnLabel != null) onlineModeBtnLabel.text = RoatanLocalization.T("online_mode");
+        if (onlineModeBtnLabel != null) onlineModeBtnLabel.text = "PLAY ONLINE";
         if (matchBackBtnLabel != null) matchBackBtnLabel.text = RoatanLocalization.T("menu_back");
         if (matchFitBtnLabel != null) matchFitBtnLabel.text = RoatanLocalization.T("fit");
         if (summaryMenuBtnLabel != null) summaryMenuBtnLabel.text = "Leave";
@@ -1110,6 +1281,11 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void RefreshHomeSelections()
     {
+        if (topLangPillLabel != null)
+        {
+            topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} ▾";
+        }
+
         foreach (KeyValuePair<RoatanGameMode, Image> kv in modeCardImages)
         {
             bool active = kv.Key == selectedMode;
@@ -1127,23 +1303,23 @@ public class RoatanMobileApp : MonoBehaviour
             }
         }
 
-        if (formatDescLabel != null)
+        string tooltipRule;
+        switch (selectedFormat)
         {
-            switch (selectedFormat)
-            {
-                case MatchFormat.SIX_LOV:
-                    formatDescLabel.text = selectedOneOnePlayoff
-                        ? "Six-Lov (2v2): First pair to 6-0 wins! 1-1 Playoff ON (1-1 -> 2-0, Break from 2-0+)."
-                        : "Six-Lov (2v2): First pair to 6 consecutive wins (6-0)! Trailing win triggers Game Bruk.";
-                    break;
-                case MatchFormat.TWO_BEST:
-                    formatDescLabel.text = "Two-Best (Best of 3): First player or pair to 2 hand wins! No Break rule.";
-                    break;
-                default:
-                    formatDescLabel.text = "Cut-Throat (FFA): Individual race to 6 wins! Break triggers if everyone scores >= 1.";
-                    break;
-            }
+            case MatchFormat.SIX_LOV:
+                tooltipRule = selectedOneOnePlayoff
+                    ? "Six-Lov (2v2): First pair to 6-0 wins! 1-1 Playoff ON: trailing win at 1-0 sets 1-1; winner of 1-1 jumps to 2-0 (loss from 2-0+ triggers Game Bruk)."
+                    : "Six-Lov (2v2): First pair to 6 consecutive hand wins (6-0) wins! Any trailing win triggers Game Bruk (scores reset to 0-0, [6|6] poses next).";
+                break;
+            case MatchFormat.TWO_BEST:
+                tooltipRule = "Two-Best (Best of 3): First player or 2v2 pair to win 2 hands wins the match. No Break rule (1-1 plays a deciding 3rd hand).";
+                break;
+            default:
+                tooltipRule = "Cut-Throat (FFA): Individual race to 6 wins! Wins needn't be consecutive while someone sits at 0. Once every player has >= 1 win, Game Bruk resets all to 0.";
+                break;
         }
+        if (formatDescLabel != null) formatDescLabel.text = tooltipRule;
+        if (setupRuleTooltipText != null) setupRuleTooltipText.text = tooltipRule;
 
         if (oneOnePlayoffBtn != null)
         {
@@ -1173,26 +1349,12 @@ public class RoatanMobileApp : MonoBehaviour
             }
         }
 
-        foreach (KeyValuePair<RoatanLanguage, Image> kv in langBtnImages)
-        {
-            kv.Value.color = kv.Key == RoatanLocalization.CurrentLanguage
-                ? RoatanVisualAssets.IslandGold
-                : new Color(0.10f, 0.24f, 0.30f, 0.95f);
-            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
-            if (lbl != null)
-            {
-                lbl.color = kv.Key == RoatanLocalization.CurrentLanguage
-                    ? new Color(0.08f, 0.10f, 0.12f, 1f)
-                    : Color.white;
-            }
-        }
-
-        // Enforce valid player counts per Match Format
+        // Enforce valid player counts per Match Format & update Padna lineup preview
         if (selectedFormat == MatchFormat.SIX_LOV)
         {
             selectedBotCount = 3;
-            opponentsHeaderLabel.text = "PLAYERS  •  2v2 PARTNERS";
-            opponentsRowObj.SetActive(false);
+            if (opponentsHeaderLabel != null) opponentsHeaderLabel.text = "PADNA TABLE LINEUP (2v2)";
+            if (opponentsRowObj != null) opponentsRowObj.SetActive(false);
             if (fixed2v2NoteLabel != null)
             {
                 fixed2v2NoteLabel.gameObject.SetActive(true);
@@ -1202,18 +1364,30 @@ public class RoatanMobileApp : MonoBehaviour
         else if (selectedFormat == MatchFormat.TWO_BEST)
         {
             if (selectedBotCount == 2) selectedBotCount = 1;
-            opponentsHeaderLabel.text = "MATCH SIZE (1v1 OR 2v2)";
-            opponentsRowObj.SetActive(true);
-            if (fixed2v2NoteLabel != null) fixed2v2NoteLabel.gameObject.SetActive(false);
+            if (opponentsHeaderLabel != null) opponentsHeaderLabel.text = "MATCH SIZE (1v1 OR 2v2)";
+            if (opponentsRowObj != null) opponentsRowObj.SetActive(true);
+            if (fixed2v2NoteLabel != null)
+            {
+                fixed2v2NoteLabel.gameObject.SetActive(true);
+                fixed2v2NoteLabel.text = selectedBotCount == 3
+                    ? "Padna 2v2: You & Patrik  vs  Anthony & Astor"
+                    : "Head-to-Head 1v1: You  vs  Anthony";
+            }
             if (botCountBtnObjs.ContainsKey(1)) botCountBtnObjs[1].SetActive(true);
             if (botCountBtnObjs.ContainsKey(2)) botCountBtnObjs[2].SetActive(false);
             if (botCountBtnObjs.ContainsKey(3)) botCountBtnObjs[3].SetActive(true);
         }
         else
         {
-            opponentsHeaderLabel.text = RoatanLocalization.T("opponents");
-            opponentsRowObj.SetActive(true);
-            if (fixed2v2NoteLabel != null) fixed2v2NoteLabel.gameObject.SetActive(false);
+            if (opponentsHeaderLabel != null) opponentsHeaderLabel.text = "PLAYERS (FREE-FOR-ALL)";
+            if (opponentsRowObj != null) opponentsRowObj.SetActive(true);
+            if (fixed2v2NoteLabel != null)
+            {
+                fixed2v2NoteLabel.gameObject.SetActive(true);
+                fixed2v2NoteLabel.text = selectedBotCount == 1
+                    ? "1v1 FFA: You vs Anthony"
+                    : (selectedBotCount == 2 ? "3P FFA: You vs Anthony & Patrik" : "4P FFA: You vs Anthony, Patrik & Astor");
+            }
             if (botCountBtnObjs.ContainsKey(1)) botCountBtnObjs[1].SetActive(true);
             if (botCountBtnObjs.ContainsKey(2)) botCountBtnObjs[2].SetActive(true);
             if (botCountBtnObjs.ContainsKey(3)) botCountBtnObjs[3].SetActive(true);
@@ -1224,22 +1398,37 @@ public class RoatanMobileApp : MonoBehaviour
             kv.Value.color = kv.Key == selectedBotCount ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
         }
 
-        switch (selectedDifficulty)
+        if (diffDescLabel != null)
         {
-            case BotDifficulty.Beginner:
-                diffDescLabel.text = RoatanLocalization.T("diff_beginner_desc");
-                break;
-            case BotDifficulty.Novice:
-                diffDescLabel.text = RoatanLocalization.T("diff_novice_desc");
-                break;
-            case BotDifficulty.Pro:
-                diffDescLabel.text = RoatanLocalization.T("diff_pro_desc");
-                break;
+            switch (selectedDifficulty)
+            {
+                case BotDifficulty.Beginner:
+                    diffDescLabel.text = RoatanLocalization.T("diff_beginner_desc");
+                    break;
+                case BotDifficulty.Novice:
+                    diffDescLabel.text = RoatanLocalization.T("diff_novice_desc");
+                    break;
+                case BotDifficulty.Pro:
+                    diffDescLabel.text = RoatanLocalization.T("diff_pro_desc");
+                    break;
+            }
+        }
+
+        if (activePresetPillLabel != null)
+        {
+            string fmtName = selectedFormat == MatchFormat.SIX_LOV ? "Six-Lov 2v2"
+                           : (selectedFormat == MatchFormat.TWO_BEST ? "Two-Best" : "Cut-Throat");
+            string tblName = selectedMode == RoatanGameMode.BlockedCerrado ? "Roatan Blocked" : "Classic Draw";
+            string diffName = RoatanLocalization.DifficultyLabel(selectedDifficulty);
+            activePresetPillLabel.text = $"Saved Preset:  {fmtName}  •  {tblName}  •  {diffName}";
         }
 
         int wins = PlayerPrefs.GetInt(PrefWinsKey, 0);
         int games = PlayerPrefs.GetInt(PrefGamesKey, 0);
-        statsLabel.text = $"Offline Record: {wins} Wins  •  {games} Matches";
+        int winPct = games > 0 ? Mathf.RoundToInt((wins * 100f) / games) : 0;
+        string statsSummary = $"Offline Record: {wins} Wins  •  {games} Matches  ({winPct}%)";
+        if (statsLabel != null) statsLabel.text = statsSummary;
+        if (drawerStatsLabel != null) drawerStatsLabel.text = $"Wins: {wins}\nMatches Played: {games}\nWin Rate: {winPct}%";
     }
 
     private void RefreshMatchHeader()
@@ -1285,7 +1474,27 @@ public class RoatanMobileApp : MonoBehaviour
 
             bool isTurn = engine.CurrentPlayer.Id == bot.Id;
             seat.TurnRing.color = isTurn ? RoatanVisualAssets.IslandGold : (isPartner ? RoatanVisualAssets.PalmGreen : new Color(1f, 1f, 1f, 0.14f));
-            seat.Background.color = isTurn ? new Color(0.12f, 0.36f, 0.38f, 0.96f) : new Color(0.06f, 0.17f, 0.22f, 0.90f);
+            seat.Background.color = isTurn ? new Color(0.12f, 0.36f, 0.38f, 0.96f) : new Color(0.06f, 0.17f, 0.22f, 0.88f);
+
+            // Render small muted pip icons beneath nameplate for suits passed on in the current hand
+            foreach (GameObject oldPip in seat.PassedPipObjs) Destroy(oldPip);
+            seat.PassedPipObjs.Clear();
+
+            if (seat.PassedPipsRow != null)
+            {
+                if (playerPassedPips.TryGetValue(bot.Id, out HashSet<int> passed) && passed.Count > 0)
+                {
+                    seat.PassedPipsRow.gameObject.SetActive(true);
+                    foreach (int pip in passed.OrderBy(p => p))
+                    {
+                        seat.PassedPipObjs.Add(CreateMutedPipIcon(seat.PassedPipsRow, pip));
+                    }
+                }
+                else
+                {
+                    seat.PassedPipsRow.gameObject.SetActive(false);
+                }
+            }
         }
     }
 
@@ -1415,150 +1624,278 @@ public class RoatanMobileApp : MonoBehaviour
     {
         homeScreen = CreateStretchPanel(safeAreaRoot, "HomeScreen", Color.clear);
 
-        // Compact Language Switcher Row at very top (EN default, ES, FR, DE)
-        RoatanLanguage[] langs = { RoatanLanguage.English, RoatanLanguage.Spanish, RoatanLanguage.French, RoatanLanguage.German };
-        float[] langXs = { -210f, -70f, 70f, 210f };
-        for (int i = 0; i < langs.Length; i++)
-        {
-            RoatanLanguage lang = langs[i];
-            Button lb = CreatePillButton(homeScreen.transform, $"Lang_{lang}", RoatanLocalization.CodeFor(lang), new Color(0.10f, 0.24f, 0.30f, 0.95f), new Vector2(langXs[i], 865f), new Vector2(124f, 52f), 24, () =>
-            {
-                RoatanSoundFX.Instance?.PlayTap();
-                RoatanLocalization.SetLanguage(lang);
-            });
-            langBtnImages[lang] = lb.GetComponent<Image>();
-        }
+        // Compact Top Header Bar: Top-Left Language Pill (EN ▾) + Top-Right Utility Drawer Button (☰ Menu)
+        GameObject topBar = new GameObject("HomeTopBar");
+        topBar.transform.SetParent(homeScreen.transform, false);
+        RectTransform topBarRect = topBar.AddComponent<RectTransform>();
+        topBarRect.anchorMin = new Vector2(0f, 1f);
+        topBarRect.anchorMax = new Vector2(1f, 1f);
+        topBarRect.pivot = new Vector2(0.5f, 1f);
+        topBarRect.sizeDelta = new Vector2(0f, 92f);
+        topBarRect.anchoredPosition = new Vector2(0f, -12f);
 
-        // Top Logo Banner (compact & crisp)
-        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.05f, 0.19f, 0.25f, 0.92f), new Vector2(0f, 715f), new Vector2(960f, 215f));
+        Button langPillBtn = CreatePillButton(topBar.transform, "BtnTopLang", "EN ▾", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(-392f, 0f), new Vector2(168f, 68f), 26, CycleLanguage);
+        topLangPillLabel = langPillBtn.GetComponentInChildren<TMP_Text>();
+        topLangPillLabel.color = RoatanVisualAssets.IslandGold;
+
+        CreatePillButton(topBar.transform, "BtnUtilityMenu", "☰ Menu", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(376f, 0f), new Vector2(196f, 68f), 26, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RefreshHomeSelections();
+            RefreshSoundLabels();
+            if (utilityDrawerOverlay != null)
+            {
+                utilityDrawerOverlay.transform.SetAsLastSibling();
+                utilityDrawerOverlay.SetActive(true);
+            }
+        });
+
+        // Clean ROATAN DOMINO Logo Banner
+        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.05f, 0.19f, 0.25f, 0.94f), new Vector2(0f, 470f), new Vector2(940f, 270f));
 
         GameObject leftDom = new GameObject("LogoDomLeft");
         leftDom.transform.SetParent(headerCard.transform, false);
         RectTransform lRect = leftDom.AddComponent<RectTransform>();
-        lRect.sizeDelta = new Vector2(72f, 144f);
-        lRect.anchoredPosition = new Vector2(-375f, 4f);
+        lRect.sizeDelta = new Vector2(82f, 164f);
+        lRect.anchoredPosition = new Vector2(-368f, 6f);
         lRect.localRotation = Quaternion.Euler(0f, 0f, 16f);
-        leftDom.AddComponent<Image>().sprite = RoatanVisualAssets.GetDominoSprite(6, 6);
+        Image lImg = leftDom.AddComponent<Image>();
+        lImg.sprite = RoatanVisualAssets.GetDominoSprite(6, 6);
+        lImg.raycastTarget = false;
 
         GameObject rightDom = new GameObject("LogoDomRight");
         rightDom.transform.SetParent(headerCard.transform, false);
         RectTransform rRect = rightDom.AddComponent<RectTransform>();
-        rRect.sizeDelta = new Vector2(72f, 144f);
-        rRect.anchoredPosition = new Vector2(375f, 4f);
+        rRect.sizeDelta = new Vector2(82f, 164f);
+        rRect.anchoredPosition = new Vector2(368f, 6f);
         rRect.localRotation = Quaternion.Euler(0f, 0f, -16f);
-        rightDom.AddComponent<Image>().sprite = RoatanVisualAssets.GetDominoSprite(5, 3);
+        Image rImg = rightDom.AddComponent<Image>();
+        rImg.sprite = RoatanVisualAssets.GetDominoSprite(5, 3);
+        rImg.raycastTarget = false;
 
-        CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 58, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 46f), new Vector2(640f, 74f));
-        subtitleLabel = CreateText(headerCard.transform, "Subtitle", RoatanLocalization.T("subtitle"), 25, FontStyles.Normal, new Color(0.84f, 0.95f, 0.96f), new Vector2(0f, -12f), new Vector2(660f, 40f));
-        statsLabel = CreateText(headerCard.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches", 23, FontStyles.Bold, Color.white, new Vector2(0f, -62f), new Vector2(620f, 36f));
+        CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 62, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 52f), new Vector2(640f, 78f));
+        subtitleLabel = CreateText(headerCard.transform, "Subtitle", RoatanLocalization.T("subtitle"), 26, FontStyles.Normal, new Color(0.84f, 0.95f, 0.96f), new Vector2(0f, -14f), new Vector2(660f, 44f));
+        statsLabel = CreateText(headerCard.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches (0%)", 23, FontStyles.Bold, Color.white, new Vector2(0f, -72f), new Vector2(680f, 38f));
 
-        // 1. Table Style (Side-by-Side: Block Cerrado | Classic Draw)
-        modeHeadingLabel = CreateText(homeScreen.transform, "ModeHeading", "TABLE STYLE", 26, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 572f), new Vector2(920f, 38f));
+        // Active Preset Summary Chip
+        GameObject presetChip = CreateCard(homeScreen.transform, "ActivePresetChip", new Color(0.06f, 0.22f, 0.28f, 0.88f), new Vector2(0f, 250f), new Vector2(860f, 68f));
+        activePresetPillLabel = CreateText(presetChip.transform, "PresetText", "Saved Preset: Six-Lov 2v2 • Roatan Blocked • Novice", 24, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), Vector2.zero, new Vector2(820f, 54f));
+
+        // 3 Focused Primary Buttons: PLAY OFFLINE | CUSTOM MATCH | PLAY ONLINE
+        Button playOfflineBtn = CreatePillButton(homeScreen.transform, "BtnPlayOffline", "PLAY OFFLINE", RoatanVisualAssets.PalmGreen, new Vector2(0f, 65f), new Vector2(780f, 136f), 44, StartNewMatch);
+        playNowBtnLabel = playOfflineBtn.GetComponentInChildren<TMP_Text>();
+
+        Button customMatchBtn = CreatePillButton(homeScreen.transform, "BtnCustomMatch", "CUSTOM MATCH", new Color(0.11f, 0.44f, 0.50f, 1f), new Vector2(0f, -110f), new Vector2(780f, 124f), 38, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RefreshHomeSelections();
+            if (setupRuleTooltipCard != null) setupRuleTooltipCard.SetActive(false);
+            if (matchSetupSheet != null)
+            {
+                matchSetupSheet.transform.SetAsLastSibling();
+                matchSetupSheet.SetActive(true);
+            }
+        });
+        GameObject cmOutline = new GameObject("Outline");
+        cmOutline.transform.SetParent(customMatchBtn.transform, false);
+        RectTransform cmoRect = cmOutline.AddComponent<RectTransform>();
+        cmoRect.anchorMin = Vector2.zero;
+        cmoRect.anchorMax = Vector2.one;
+        cmoRect.offsetMin = Vector2.zero;
+        cmoRect.offsetMax = Vector2.zero;
+        Image cmoImg = cmOutline.AddComponent<Image>();
+        cmoImg.sprite = RoatanVisualAssets.RoundedOutlineSprite;
+        cmoImg.type = Image.Type.Sliced;
+        cmoImg.color = new Color(0.95f, 0.74f, 0.24f, 0.75f);
+        cmoImg.raycastTarget = false;
+
+        Button playOnlineBtn = CreatePillButton(homeScreen.transform, "BtnPlayOnline", "PLAY ONLINE", RoatanVisualAssets.IslandGold, new Vector2(0f, -280f), new Vector2(780f, 124f), 38, OpenOnlineScreen);
+        onlineModeBtnLabel = playOnlineBtn.GetComponentInChildren<TMP_Text>();
+        onlineModeBtnLabel.color = new Color(0.08f, 0.11f, 0.14f, 1f);
+
+        CreateText(homeScreen.transform, "HomeFooterTip", "Tap CUSTOM MATCH to switch Six-Lov, Two-Best, Cut-Throat, or 1-1 Playoff", 22, FontStyles.Italic, new Color(0.80f, 0.92f, 0.94f, 0.88f), new Vector2(0f, -430f), new Vector2(860f, 52f));
+    }
+
+    private void BuildMatchSetupSheet()
+    {
+        matchSetupSheet = CreateStretchPanel(safeAreaRoot, "MatchSetupSheet", new Color(0f, 0f, 0f, 0.76f));
+
+        GameObject sheet = CreateCard(matchSetupSheet.transform, "SetupCard", RoatanVisualAssets.DarkSlate, new Vector2(0f, -18f), new Vector2(960f, 1460f));
+
+        CreateText(sheet.transform, "SheetTitle", "CUSTOM MATCH SETUP", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-45f, 655f), new Vector2(680f, 58f));
+
+        // Compact (?) Rule Tooltip Button + Close Button
+        CreatePillButton(sheet.transform, "BtnRuleTooltip", "?", RoatanVisualAssets.BrightLagoon, new Vector2(315f, 655f), new Vector2(68f, 64f), 32, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            if (setupRuleTooltipCard != null)
+            {
+                setupRuleTooltipCard.SetActive(!setupRuleTooltipCard.activeSelf);
+                if (setupRuleTooltipCard.activeSelf) setupRuleTooltipCard.transform.SetAsLastSibling();
+            }
+        });
+
+        CreatePillButton(sheet.transform, "BtnCloseSetup", "✕", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(400f, 655f), new Vector2(68f, 64f), 30, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SaveMatchPreset();
+            matchSetupSheet.SetActive(false);
+        });
+
+        // 1. Table Style (Roatan Blocked | Classic Draw)
+        modeHeadingLabel = CreateText(sheet.transform, "ModeHeading", "TABLE STYLE", 25, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 565f), new Vector2(880f, 36f));
 
         Button cerrBtn = CreateCompactModeCard(
-            homeScreen.transform,
+            sheet.transform,
             "CardCerrado",
-            "Block (Cerrado)",
+            "Roatan Blocked",
             "No drawing • Pure strategy",
-            new Vector2(-240f, 492f),
-            new Vector2(460f, 110f),
-            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.BlockedCerrado; RefreshHomeSelections(); },
+            new Vector2(-225f, 480f),
+            new Vector2(430f, 114f),
+            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.BlockedCerrado; SaveMatchPreset(); RefreshHomeSelections(); },
             out cerradoTitleLabel,
             out cerradoDescLabel);
         modeCardImages[RoatanGameMode.BlockedCerrado] = cerrBtn.GetComponent<Image>();
 
         Button drawBtn = CreateCompactModeCard(
-            homeScreen.transform,
+            sheet.transform,
             "CardClassicDraw",
             "Classic Draw",
             "Draw from boneyard",
-            new Vector2(240f, 492f),
-            new Vector2(460f, 110f),
-            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.ClassicDraw; RefreshHomeSelections(); },
+            new Vector2(225f, 480f),
+            new Vector2(430f, 114f),
+            () => { RoatanSoundFX.Instance?.PlayTap(); selectedMode = RoatanGameMode.ClassicDraw; SaveMatchPreset(); RefreshHomeSelections(); },
             out drawTitleLabel,
             out drawDescLabel);
         modeCardImages[RoatanGameMode.ClassicDraw] = drawBtn.GetComponent<Image>();
 
-        // 2. Match Format Selector (Six-Lov 2v2 | Two-Best | Cut-Throat)
-        CreateText(homeScreen.transform, "FormatHeading", "MATCH FORMAT", 26, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 396f), new Vector2(920f, 38f));
+        // 2. Match Format (Six-Lov | Two-Best | Cut-Throat)
+        CreateText(sheet.transform, "FormatHeading", "MATCH FORMAT", 25, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 378f), new Vector2(880f, 36f));
 
         MatchFormat[] formats = { MatchFormat.SIX_LOV, MatchFormat.TWO_BEST, MatchFormat.CUT_THROAT };
         string[] fmtLabels = { "Six-Lov\n(2v2 • 6-0)", "Two-Best\n(Best of 3)", "Cut-Throat\n(FFA • 6 W)" };
-        float[] triXs = { -310f, 0f, 310f };
+        float[] triXs = { -295f, 0f, 295f };
         for (int i = 0; i < formats.Length; i++)
         {
             MatchFormat fmt = formats[i];
-            Button fb = CreatePillButton(homeScreen.transform, $"BtnFmt_{fmt}", fmtLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], 314f), new Vector2(292f, 96f), 25, () =>
+            Button fb = CreatePillButton(sheet.transform, $"BtnFmt_{fmt}", fmtLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], 292f), new Vector2(276f, 96f), 25, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 selectedFormat = fmt;
+                SaveMatchPreset();
                 RefreshHomeSelections();
             });
             formatBtnImages[fmt] = fb.GetComponent<Image>();
         }
 
-        formatDescLabel = CreateText(homeScreen.transform, "FormatDesc", "", 22, FontStyles.Italic, new Color(0.88f, 0.96f, 0.98f), new Vector2(0f, 224f), new Vector2(920f, 54f));
+        formatDescLabel = CreateText(sheet.transform, "FormatDesc", "", 21, FontStyles.Italic, new Color(0.86f, 0.95f, 0.97f), new Vector2(0f, 194f), new Vector2(860f, 66f));
 
-        oneOnePlayoffBtn = CreatePillButton(homeScreen.transform, "BtnOneOnePlayoff", "1-1 Playoff Rule: OFF", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(0f, 152f), new Vector2(460f, 58f), 24, () =>
+        // 1-1 Playoff Toggle (Six-Lov only)
+        oneOnePlayoffBtn = CreatePillButton(sheet.transform, "BtnOneOnePlayoff", "1-1 Playoff Rule: OFF", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(0f, 114f), new Vector2(460f, 62f), 24, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             selectedOneOnePlayoff = !selectedOneOnePlayoff;
+            SaveMatchPreset();
             RefreshHomeSelections();
         });
         oneOnePlayoffBtnImg = oneOnePlayoffBtn.GetComponent<Image>();
         oneOnePlayoffBtnLabel = oneOnePlayoffBtn.GetComponentInChildren<TMP_Text>();
 
-        // 3. Bot Difficulty Section
-        diffHeadingLabel = CreateText(homeScreen.transform, "DiffHeading", RoatanLocalization.T("bot_difficulty"), 26, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 66f), new Vector2(920f, 38f));
+        // 3. Bot Difficulty
+        diffHeadingLabel = CreateText(sheet.transform, "DiffHeading", RoatanLocalization.T("bot_difficulty"), 25, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, 22f), new Vector2(880f, 36f));
 
         BotDifficulty[] diffs = { BotDifficulty.Beginner, BotDifficulty.Novice, BotDifficulty.Pro };
         for (int i = 0; i < diffs.Length; i++)
         {
             BotDifficulty d = diffs[i];
-            Button b = CreatePillButton(homeScreen.transform, $"BtnDiff_{d}", RoatanLocalization.DifficultyLabel(d), new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], -12f), new Vector2(285f, 82f), 30, () =>
+            Button b = CreatePillButton(sheet.transform, $"BtnDiff_{d}", RoatanLocalization.DifficultyLabel(d), new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], -56f), new Vector2(274f, 82f), 29, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 selectedDifficulty = d;
+                SaveMatchPreset();
                 RefreshHomeSelections();
             });
             diffBtnImages[d] = b.GetComponent<Image>();
             diffBtnLabels[d] = b.GetComponentInChildren<TMP_Text>();
         }
 
-        diffDescLabel = CreateText(homeScreen.transform, "DiffDesc", "", 22, FontStyles.Italic, new Color(0.88f, 0.96f, 0.98f), new Vector2(0f, -86f), new Vector2(920f, 52f));
+        diffDescLabel = CreateText(sheet.transform, "DiffDesc", "", 21, FontStyles.Italic, new Color(0.86f, 0.95f, 0.97f), new Vector2(0f, -132f), new Vector2(860f, 52f));
 
-        // 4. Opponents / Match Size Section
-        opponentsHeaderLabel = CreateText(homeScreen.transform, "OppHeading", RoatanLocalization.T("opponents"), 25, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, -162f), new Vector2(940f, 38f));
+        // 4. Padna Table Lineup Preview & Match Size Selector
+        opponentsHeaderLabel = CreateText(sheet.transform, "OppHeading", "PADNA TABLE LINEUP (2v2)", 25, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), new Vector2(0f, -214f), new Vector2(880f, 36f));
 
-        fixed2v2NoteLabel = CreateText(homeScreen.transform, "Fixed2v2Note", "You & Patrik (Padna)  vs  Anthony & Astor", 26, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, -236f), new Vector2(920f, 64f));
+        GameObject lineupCard = CreateCard(sheet.transform, "LineupPreviewCard", new Color(0.06f, 0.19f, 0.25f, 0.94f), new Vector2(0f, -286f), new Vector2(860f, 76f));
+        fixed2v2NoteLabel = CreateText(lineupCard.transform, "Fixed2v2Note", "You & Patrik (Padna)  vs  Anthony & Astor", 25, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 60f));
 
         opponentsRowObj = new GameObject("OpponentsRow");
-        opponentsRowObj.transform.SetParent(homeScreen.transform, false);
+        opponentsRowObj.transform.SetParent(sheet.transform, false);
         RectTransform oppRowRect = opponentsRowObj.AddComponent<RectTransform>();
-        oppRowRect.anchoredPosition = new Vector2(0f, -238f);
-        oppRowRect.sizeDelta = new Vector2(940f, 86f);
+        oppRowRect.anchoredPosition = new Vector2(0f, -384f);
+        oppRowRect.sizeDelta = new Vector2(880f, 84f);
 
         int[] botCounts = { 1, 2, 3 };
         string[] botLabels = { "1v1 (1 Bot)", "3P (2 Bots)", "4P (3 Bots)" };
         for (int i = 0; i < botCounts.Length; i++)
         {
             int c = botCounts[i];
-            Button b = CreatePillButton(opponentsRowObj.transform, $"BtnBots_{c}", botLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], 0f), new Vector2(285f, 78f), 26, () =>
+            Button b = CreatePillButton(opponentsRowObj.transform, $"BtnBots_{c}", botLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(triXs[i], 0f), new Vector2(274f, 76f), 25, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 selectedBotCount = c;
+                SaveMatchPreset();
                 RefreshHomeSelections();
             });
             botCountBtnImages[c] = b.GetComponent<Image>();
             botCountBtnObjs[c] = b.gameObject;
         }
 
-        // Big Play CTA
-        Button playBtn = CreatePillButton(homeScreen.transform, "BtnPlayNow", RoatanLocalization.T("play_now"), RoatanVisualAssets.PalmGreen, new Vector2(0f, -430f), new Vector2(720f, 122f), 46, StartNewMatch);
-        playNowBtnLabel = playBtn.GetComponentInChildren<TMP_Text>();
+        // Compact Rule Tooltip Popover (toggled by (?) button)
+        setupRuleTooltipCard = CreateCard(sheet.transform, "RuleTooltipPopover", new Color(0.05f, 0.14f, 0.20f, 0.98f), new Vector2(0f, 445f), new Vector2(820f, 195f));
+        setupRuleTooltipText = CreateText(setupRuleTooltipCard.transform, "TipText", "", 22, FontStyles.Normal, Color.white, new Vector2(0f, 16f), new Vector2(760f, 120f));
+        CreatePillButton(setupRuleTooltipCard.transform, "BtnCloseTip", "Got it", RoatanVisualAssets.PalmGreen, new Vector2(0f, -64f), new Vector2(180f, 48f), 22, () =>
+        {
+            setupRuleTooltipCard.SetActive(false);
+        });
+        setupRuleTooltipCard.SetActive(false);
 
-        // Bottom Utility Row
-        Button soundBtn = CreatePillButton(homeScreen.transform, "BtnHomeSound", RoatanLocalization.T("sound_on"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(-315f, -640f), new Vector2(280f, 78f), 26, () =>
+        // Primary START MATCH CTA
+        CreatePillButton(sheet.transform, "BtnStartCustomMatch", "START MATCH", RoatanVisualAssets.PalmGreen, new Vector2(0f, -565f), new Vector2(740f, 122f), 42, StartNewMatch);
+
+        matchSetupSheet.SetActive(false);
+    }
+
+    private void BuildUtilityDrawer()
+    {
+        utilityDrawerOverlay = CreateStretchPanel(safeAreaRoot, "UtilityDrawerOverlay", new Color(0f, 0f, 0f, 0.65f));
+
+        // Backdrop click closes drawer
+        Button scrimBtn = utilityDrawerOverlay.AddComponent<Button>();
+        scrimBtn.transition = Selectable.Transition.None;
+        scrimBtn.onClick.AddListener(() => utilityDrawerOverlay.SetActive(false));
+
+        // Right-aligned Slide-Out Drawer Panel
+        GameObject drawer = CreateCard(utilityDrawerOverlay.transform, "DrawerPanel", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(640f, 0f));
+        RectTransform dRect = drawer.GetComponent<RectTransform>();
+        dRect.anchorMin = new Vector2(1f, 0f);
+        dRect.anchorMax = new Vector2(1f, 1f);
+        dRect.pivot = new Vector2(1f, 0.5f);
+        dRect.offsetMin = new Vector2(-640f, 20f);
+        dRect.offsetMax = new Vector2(-8f, -20f);
+
+        CreateText(drawer.transform, "DrawerTitle", "ROATAN MENU", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-45f, 760f), new Vector2(440f, 64f));
+        CreatePillButton(drawer.transform, "BtnCloseDrawer", "✕", new Color(0.22f, 0.22f, 0.28f, 1f), new Vector2(240f, 760f), new Vector2(72f, 66f), 30, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            utilityDrawerOverlay.SetActive(false);
+        });
+
+        // 1. Offline Record / Stats Card
+        GameObject statsCard = CreateCard(drawer.transform, "DrawerStatsCard", new Color(0.06f, 0.20f, 0.26f, 0.96f), new Vector2(0f, 520f), new Vector2(540f, 260f));
+        CreateText(statsCard.transform, "StatsHdr", "OFFLINE RECORD & STATS", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 84f), new Vector2(500f, 40f));
+        drawerStatsLabel = CreateText(statsCard.transform, "StatsBody", "Wins: 0\nMatches Played: 0\nWin Rate: 0%", 28, FontStyles.Normal, Color.white, new Vector2(0f, -22f), new Vector2(500f, 160f));
+
+        // 2. Sound ON/OFF Toggle
+        Button soundBtn = CreatePillButton(drawer.transform, "BtnDrawerSound", RoatanLocalization.T("sound_on"), new Color(0.10f, 0.28f, 0.34f, 1f), new Vector2(0f, 250f), new Vector2(540f, 102f), 30, () =>
         {
             RoatanSoundFX.Instance?.ToggleMute();
             RoatanSoundFX.Instance?.PlayTap();
@@ -1566,15 +1903,21 @@ public class RoatanMobileApp : MonoBehaviour
         });
         homeSoundBtnLabel = soundBtn.GetComponentInChildren<TMP_Text>();
 
-        Button howBtn = CreatePillButton(homeScreen.transform, "BtnHowToPlay", RoatanLocalization.T("how_to_play"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(0f, -640f), new Vector2(280f, 78f), 26, () =>
+        // 3. How to Play (opens Tabbed Rule Guide)
+        Button howBtn = CreatePillButton(drawer.transform, "BtnDrawerHowToPlay", RoatanLocalization.T("how_to_play"), RoatanVisualAssets.BrightLagoon, new Vector2(0f, 115f), new Vector2(540f, 102f), 30, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
+            utilityDrawerOverlay.SetActive(false);
+            SelectRulesTab("Six-Lov");
+            howToPlayModal.transform.SetAsLastSibling();
             howToPlayModal.SetActive(true);
         });
         howToPlayBtnLabel = howBtn.GetComponentInChildren<TMP_Text>();
 
-        Button onlineBtn = CreatePillButton(homeScreen.transform, "BtnOnlineLogin", RoatanLocalization.T("online_mode"), new Color(0.08f, 0.20f, 0.26f, 0.95f), new Vector2(315f, -640f), new Vector2(280f, 78f), 26, OpenOnlineScreen);
-        onlineModeBtnLabel = onlineBtn.GetComponentInChildren<TMP_Text>();
+        // Language quick cycle inside drawer too
+        CreatePillButton(drawer.transform, "BtnDrawerLang", "Switch Language (EN/ES/FR/DE)", new Color(0.10f, 0.24f, 0.30f, 1f), new Vector2(0f, -20f), new Vector2(540f, 92f), 25, CycleLanguage);
+
+        utilityDrawerOverlay.SetActive(false);
     }
 
     private Button CreateCompactModeCard(Transform parent, string name, string title, string subtitle, Vector2 pos, Vector2 size, System.Action onClick, out TMP_Text titleOut, out TMP_Text descOut)
@@ -1652,12 +1995,29 @@ public class RoatanMobileApp : MonoBehaviour
 
         boardView = boardViewportObj.AddComponent<RoatanBoardView>();
         boardView.Initialize(vpRect);
+        boardView.SetSafeMargins(left: 44f, right: 44f, top: 220f, bottom: 118f);
         boardView.EndSlotClicked += OnBoardEndSlotClicked;
 
-        // Opponent Seats
-        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatTop", new Vector2(0.5f, 1f), new Vector2(0f, -172f), new Vector2(310f, 92f)));
-        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatLeft", new Vector2(0f, 0.56f), new Vector2(122f, 0f), new Vector2(215f, 118f)));
-        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatRight", new Vector2(1f, 0.56f), new Vector2(-122f, 0f), new Vector2(215f, 118f)));
+        // Compact Upper-Flank Opponent Nameplates (clear of central domino snake, raycastTarget = false on labels)
+        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatTop", new Vector2(0.5f, 1f), new Vector2(0f, -154f), new Vector2(292f, 82f)));
+        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatLeft", new Vector2(0f, 1f), new Vector2(114f, -216f), new Vector2(208f, 82f)));
+        opponentSeats.Add(CreateOpponentSeat(matchScreen.transform, "SeatRight", new Vector2(1f, 1f), new Vector2(-114f, -216f), new Vector2(208f, 82f)));
+
+        // Compact Human Passed-Suit Pip Strip (just above bottom hand dock on right edge)
+        GameObject hPassObj = new GameObject("HumanPassedPipsRow");
+        hPassObj.transform.SetParent(matchScreen.transform, false);
+        humanPassedPipsRow = hPassObj.AddComponent<RectTransform>();
+        humanPassedPipsRow.anchorMin = new Vector2(1f, 0f);
+        humanPassedPipsRow.anchorMax = new Vector2(1f, 0f);
+        humanPassedPipsRow.pivot = new Vector2(1f, 0f);
+        humanPassedPipsRow.anchoredPosition = new Vector2(-24f, 502f);
+        humanPassedPipsRow.sizeDelta = new Vector2(220f, 30f);
+        HorizontalLayoutGroup hpHlg = hPassObj.AddComponent<HorizontalLayoutGroup>();
+        hpHlg.childAlignment = TextAnchor.MiddleRight;
+        hpHlg.spacing = 4f;
+        hpHlg.childControlWidth = false;
+        hpHlg.childControlHeight = false;
+        hPassObj.SetActive(false);
 
         // Floating Status Banner
         GameObject statusCard = CreateCard(matchScreen.transform, "StatusBanner", new Color(0.05f, 0.16f, 0.22f, 0.90f), Vector2.zero, new Vector2(960f, 64f));
@@ -1796,31 +2156,88 @@ public class RoatanMobileApp : MonoBehaviour
     {
         howToPlayModal = CreateStretchPanel(safeAreaRoot, "HowToPlayModal", new Color(0f, 0f, 0f, 0.78f));
 
-        GameObject card = CreateCard(howToPlayModal.transform, "RulesCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(920f, 1060f));
-        CreateText(card.transform, "RulesTitle", "How to Play Roatan Domino", 42, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 430f), new Vector2(840f, 64f));
+        GameObject card = CreateCard(howToPlayModal.transform, "RulesCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(940f, 1140f));
+        CreateText(card.transform, "RulesTitle", "HOW TO PLAY — ROATAN RULES", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 488f), new Vector2(860f, 60f));
 
-        string rules =
-            "<b>1. Match Open Ends</b>\n" +
-            "Play a domino whose pip count matches either open end of the table chain. Playable tiles lift up with a golden glow.\n\n" +
-            "<b>2. Tap to Place</b>\n" +
-            "Tap a glowing domino in your hand, then tap the glowing gold slot on the table (or tap the same domino twice if only one end fits).\n\n" +
-            "<b>3. Two Game Modes</b>\n" +
-            "• <b>Roatan Cerrado (Blocked):</b> 4 players, all 28 tiles dealt (no boneyard). Pass (Paso!) when blocked. Lowest remaining pips wins a locked (Trancado!) board!\n" +
-            "• <b>Classic Draw:</b> Draw from the boneyard when you have no match.\n\n" +
-            "<b>4. Touch Controls</b>\n" +
-            "Drag with 1 finger to pan the table, pinch with 2 fingers to zoom, or tap <b>Fit</b> to re-center. First to 100 points wins the match!";
+        // 4 Rule Tabs: Six-Lov | Two-Best | Cut-Throat | Game Bruk
+        string[] tabs = { "Six-Lov", "Two-Best", "Cut-Throat", "Game Bruk" };
+        float[] tabXs = { -324f, -108f, 108f, 324f };
+        for (int i = 0; i < tabs.Length; i++)
+        {
+            string tabName = tabs[i];
+            Button tb = CreatePillButton(card.transform, $"RulesTab_{tabName}", tabName, new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(tabXs[i], 392f), new Vector2(206f, 68f), 23, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                SelectRulesTab(tabName);
+            });
+            rulesTabImages[tabName] = tb.GetComponent<Image>();
+        }
 
-        TMP_Text body = CreateText(card.transform, "RulesBody", rules, 28, FontStyles.Normal, Color.white, new Vector2(0f, 20f), new Vector2(820f, 700f));
-        body.alignment = TextAlignmentOptions.TopLeft;
+        GameObject bodyCard = CreateCard(card.transform, "RulesBodyCard", new Color(0.06f, 0.16f, 0.22f, 0.92f), new Vector2(0f, -15f), new Vector2(860f, 690f));
+        rulesBodyLabel = CreateText(bodyCard.transform, "RulesBody", "", 27, FontStyles.Normal, Color.white, Vector2.zero, new Vector2(800f, 630f));
+        rulesBodyLabel.alignment = TextAlignmentOptions.TopLeft;
 
-        Button gotItBtn = CreatePillButton(card.transform, "BtnCloseRules", RoatanLocalization.T("got_it"), RoatanVisualAssets.PalmGreen, new Vector2(0f, -420f), new Vector2(360f, 92f), 34, () =>
+        Button gotItBtn = CreatePillButton(card.transform, "BtnCloseRules", RoatanLocalization.T("got_it"), RoatanVisualAssets.PalmGreen, new Vector2(0f, -468f), new Vector2(380f, 92f), 34, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             howToPlayModal.SetActive(false);
         });
         rulesGotItLabel = gotItBtn.GetComponentInChildren<TMP_Text>();
 
+        SelectRulesTab("Six-Lov");
         howToPlayModal.SetActive(false);
+    }
+
+    private void SelectRulesTab(string tabName)
+    {
+        activeRulesTab = tabName;
+        foreach (KeyValuePair<string, Image> kv in rulesTabImages)
+        {
+            bool active = kv.Key == tabName;
+            kv.Value.color = active ? RoatanVisualAssets.IslandGold : new Color(0.14f, 0.22f, 0.28f, 1f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+            }
+        }
+
+        if (rulesBodyLabel == null) return;
+        switch (tabName)
+        {
+            case "Six-Lov":
+                rulesBodyLabel.text =
+                    "<b>SIX-LOV (2v2 PARTNERS)</b>\n\n" +
+                    "• <b>Goal:</b> First partnership to win <b>6 consecutive hands (6–0)</b> wins the match.\n\n" +
+                    "• <b>Call Your Padna:</b> After winning a hand, choose <b>Pose Myself</b> or <b>Pass Pose to Padna</b> within 8 seconds. The chosen poser opens the next hand with any tile.\n\n" +
+                    "• <b>1-1 Playoff Toggle:</b> Optional lobby rule where a trailing win at 1–0 moves to 1–1; the winner of 1–1 jumps straight to 2–0.\n\n" +
+                    "• <b>Controls:</b> Tap a glowing tile to place, flick down or tap <b>SLAM</b> for a heavy table impact, and drag/pinch to pan or zoom.";
+                break;
+            case "Two-Best":
+                rulesBodyLabel.text =
+                    "<b>TWO-BEST (QUICK BEST OF 3)</b>\n\n" +
+                    "• <b>Players:</b> Play <b>1v1</b> head-to-head or <b>2v2</b> partners.\n\n" +
+                    "• <b>Goal:</b> First player or pair to reach <b>2 hand wins</b> wins the match.\n\n" +
+                    "• <b>No Break Rule:</b> Wins do not have to be consecutive — a 1–1 tie goes straight to a deciding 3rd hand!\n\n" +
+                    "• <b>1v1 Dealing:</b> Each player gets 7 tiles (never 14). In Blocked mode the remaining 14 stay face-down; in Draw mode they form the boneyard.";
+                break;
+            case "Cut-Throat":
+                rulesBodyLabel.text =
+                    "<b>CUT-THROAT (FREE-FOR-ALL)</b>\n\n" +
+                    "• <b>Players:</b> 2, 3, or 4 players — every player for themselves (no partners).\n\n" +
+                    "• <b>Goal:</b> First individual player to reach <b>6 hand wins</b> wins and \"Cut-Throats\" anyone still at 0 wins!\n\n" +
+                    "• <b>3-Player Blocked Deck:</b> The [0|0] double blank is removed (27 tiles), dealing 9 tiles each.\n\n" +
+                    "• <b>Cut-Throat Break:</b> Wins keep stacking while at least one player sits at 0. Once every player scores 1+, all scores reset to 0!";
+                break;
+            default:
+                rulesBodyLabel.text =
+                    "<b>GAME BRUK (THE BREAK) & TABLE RULES</b>\n\n" +
+                    "• <b>Six-Lov Break:</b> If the trailing team wins while opponents hold 1–5 points, <b>Game Bruk!</b> triggers — scores reset to 0–0 and [6|6] must pose next.\n\n" +
+                    "• <b>Blocked Board (Trancado):</b> All hands flip face-up! Lowest individual pip count wins. Opposing ties are a Draw (0 pts, same poser repeats).\n\n" +
+                    "• <b>Pass-Suit Icons:</b> Small muted pip badges under each player's nameplate track suits they have already passed on this hand.\n\n" +
+                    "• <b>Timers:</b> 10s turn timer (3 strikes = Bot Auto-Play, tap any tile to reclaim) and 5s no-penalty Auto-Pass.";
+                break;
+        }
     }
 
     private void BuildRoundSummaryOverlay()
@@ -1870,7 +2287,8 @@ public class RoatanMobileApp : MonoBehaviour
         Image bg = obj.AddComponent<Image>();
         bg.sprite = RoatanVisualAssets.RoundedCardSprite;
         bg.type = Image.Type.Sliced;
-        bg.color = new Color(0.06f, 0.17f, 0.22f, 0.90f);
+        bg.color = new Color(0.06f, 0.17f, 0.22f, 0.88f);
+        bg.raycastTarget = false;
 
         GameObject ringObj = new GameObject("TurnRing");
         ringObj.transform.SetParent(obj.transform, false);
@@ -1885,9 +2303,29 @@ public class RoatanMobileApp : MonoBehaviour
         ringImg.color = new Color(1f, 1f, 1f, 0.15f);
         ringImg.raycastTarget = false;
 
-        TMP_Text nameTxt = CreateText(obj.transform, "Name", "Bot", 26, FontStyles.Bold, Color.white, new Vector2(0f, size.y * 0.22f), new Vector2(size.x - 16f, 34f));
-        TMP_Text countTxt = CreateText(obj.transform, "Count", "7 tiles", 23, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, -size.y * 0.08f), new Vector2(size.x - 16f, 30f));
-        TMP_Text scoreTxt = CreateText(obj.transform, "Score", "0 pts", 20, FontStyles.Normal, new Color(0.78f, 0.90f, 0.94f), new Vector2(0f, -size.y * 0.34f), new Vector2(size.x - 16f, 26f));
+        TMP_Text nameTxt = CreateText(obj.transform, "Name", "Bot", 22, FontStyles.Bold, Color.white, new Vector2(0f, size.y * 0.24f), new Vector2(size.x - 14f, 28f));
+        nameTxt.raycastTarget = false;
+        TMP_Text countTxt = CreateText(obj.transform, "Count", "7 tiles", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-size.x * 0.22f, -size.y * 0.20f), new Vector2(size.x * 0.52f, 26f));
+        countTxt.raycastTarget = false;
+        TMP_Text scoreTxt = CreateText(obj.transform, "Score", "0/6 W", 19, FontStyles.Normal, new Color(0.78f, 0.90f, 0.94f), new Vector2(size.x * 0.24f, -size.y * 0.20f), new Vector2(size.x * 0.44f, 26f));
+        scoreTxt.raycastTarget = false;
+
+        // Compact muted Pass-Suit Pip Row directly beneath each nameplate
+        GameObject pipsRowObj = new GameObject("PassedPipsRow");
+        pipsRowObj.transform.SetParent(obj.transform, false);
+        RectTransform pipsRect = pipsRowObj.AddComponent<RectTransform>();
+        pipsRect.anchorMin = new Vector2(0.5f, 0f);
+        pipsRect.anchorMax = new Vector2(0.5f, 0f);
+        pipsRect.pivot = new Vector2(0.5f, 1f);
+        pipsRect.anchoredPosition = new Vector2(0f, -5f);
+        pipsRect.sizeDelta = new Vector2(size.x + 12f, 28f);
+
+        HorizontalLayoutGroup pipsHlg = pipsRowObj.AddComponent<HorizontalLayoutGroup>();
+        pipsHlg.childAlignment = TextAnchor.MiddleCenter;
+        pipsHlg.spacing = 4f;
+        pipsHlg.childControlWidth = false;
+        pipsHlg.childControlHeight = false;
+        pipsRowObj.SetActive(false);
 
         return new OpponentSeatUI
         {
@@ -1896,7 +2334,8 @@ public class RoatanMobileApp : MonoBehaviour
             TurnRing = ringImg,
             NameText = nameTxt,
             CountText = countTxt,
-            ScoreText = scoreTxt
+            ScoreText = scoreTxt,
+            PassedPipsRow = pipsRect
         };
     }
 
