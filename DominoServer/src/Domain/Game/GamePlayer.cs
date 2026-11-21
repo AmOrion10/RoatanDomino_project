@@ -10,6 +10,11 @@ public class GamePlayer(User user) : User(user)
     public int MatchScore { get; set; }
     public int ConsecutiveAutoPlays { get; set; }
     public bool IsBotControlled { get; set; }
+    public bool IsDisconnected { get; set; }
+    public bool IsPermanentlyBot { get; set; }
+    public double DisconnectGraceRemainingSeconds { get; set; }
+    public string ReconnectToken { get; set; } = string.Empty;
+    public DateTime? DisconnectedAtUtc { get; set; }
 
     public void AddDominoToHand(Domino domino)
     {
@@ -24,7 +29,10 @@ public class GamePlayer(User user) : User(user)
     public void RecordManualAction()
     {
         ConsecutiveAutoPlays = 0;
-        IsBotControlled = false;
+        if (!IsPermanentlyBot)
+        {
+            IsBotControlled = false;
+        }
     }
 
     public bool RecordTimeoutAutoPlay(int strikeLimit)
@@ -39,7 +47,34 @@ public class GamePlayer(User user) : User(user)
 
     public void ReclaimManualControl()
     {
+        if (IsPermanentlyBot) return;
         IsBotControlled = false;
         ConsecutiveAutoPlays = 0;
+    }
+
+    public void MarkDisconnected(double graceSeconds)
+    {
+        if (IsPermanentlyBot) return;
+        IsDisconnected = true;
+        DisconnectGraceRemainingSeconds = graceSeconds;
+        DisconnectedAtUtc = DateTime.UtcNow;
+    }
+
+    public void ConvertToPermanentBot()
+    {
+        IsPermanentlyBot = true;
+        IsBotControlled = true;
+        IsDisconnected = true;
+        DisconnectGraceRemainingSeconds = 0.0;
+        ReconnectToken = string.Empty;
+    }
+
+    public void RestoreFromReconnect()
+    {
+        IsDisconnected = false;
+        IsBotControlled = false;
+        ConsecutiveAutoPlays = 0;
+        DisconnectGraceRemainingSeconds = 0.0;
+        DisconnectedAtUtc = null;
     }
 }

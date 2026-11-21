@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using DominoCommon.com.domino.common.Scripts.ExtensionMethods;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
@@ -107,6 +108,20 @@ public class Client : IClient
             case FrameCommandType.Disconnection:
                 User = null;
                 userToken = Guid.Empty;
+                break;
+            case FrameCommandType.RejoinMatch:
+                ResponseObjectDto<RejoinMatchSnapshotDto> rejoinResp = frame.GetObjectFromMessage<ResponseObjectDto<RejoinMatchSnapshotDto>>();
+                if (rejoinResp != null && rejoinResp.OkResult && rejoinResp.Object != null)
+                {
+                    if (rejoinResp.Object.User != null)
+                    {
+                        User = rejoinResp.Object.User;
+                    }
+                    if (!string.IsNullOrEmpty(rejoinResp.Object.AuthToken) && Guid.TryParse(rejoinResp.Object.AuthToken, out Guid parsedToken))
+                    {
+                        userToken = parsedToken;
+                    }
+                }
                 break;
         }
     }

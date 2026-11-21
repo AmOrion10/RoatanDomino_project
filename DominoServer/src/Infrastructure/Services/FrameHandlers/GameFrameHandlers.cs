@@ -1,6 +1,7 @@
 using Application;
 using Application.Common;
 using Application.Interfaces;
+using Application.Interfaces.Managers;
 using Application.Messages.Commands.Game;
 using Application.Messages.Queries.Chat;
 using Application.Messages.Queries.Game;
@@ -18,13 +19,83 @@ using Timer = Domain.Timer;
 
 namespace Infrastructure.Services.FrameHandlers;
 
-public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandlers
+public class GameFrameHandlers(
+    IMessageDispatcher dispatcher,
+    IGameManager gameManager,
+    ITokenManager tokenManager,
+    IChatManager chatManager) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
         handler.RegisterHandler(FrameCommandType.ReadyInGame, ReadyInGameCallback);
         handler.RegisterHandler(FrameCommandType.PlayerPlays, PlayerPlaysCallback);
         handler.RegisterHandler(FrameCommandType.LeaveGame, LeaveGameCallback);
+        handler.RegisterHandler(FrameCommandType.CheckActiveMatch, CheckActiveMatchCallback, needToBeLoggedIn: false);
+        handler.RegisterHandler(FrameCommandType.RejoinMatch, RejoinMatchCallback, needToBeLoggedIn: false);
+        handler.RegisterHandler(FrameCommandType.AbandonMatch, AbandonMatchCallback, needToBeLoggedIn: false);
+    }
+
+    private async Task CheckActiveMatchCallback(MessageFrame frame, IClient client)
+    {
+        RejoinSessionRequestDto req = frame.GetObjectFromMessage<RejoinSessionRequestDto>();
+        Game? game = gameManager.FindRejoinableGame(req.MatchId, req.PlayerId, req.ReconnectToken, out int remainingSeconds);
+        ResponseObjectDto<ActiveMatchCheckResponseDto> response = DtoBuilder.GetActiveMatchCheckResponseDto(game, req.PlayerId, remainingSeconds);
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, FrameCommandType.CheckActiveMatch)));
+    }
+
+    private async Task RejoinMatchCallback(MessageFrame frame, IClient client)
+    {
+        RejoinSessionRequestDto req = frame.GetObjectFromMessage<RejoinSessionRequestDto>();
+        Game? game = gameManager.FindRejoinableGame(req.MatchId, req.PlayerId, req.ReconnectToken, out _);
+        if (game is null || !game.RejoinPlayer(req.PlayerId, req.ReconnectToken))
+        {
+            ResponseObjectDto<RejoinMatchSnapshotDto> fail = new()
+            {
+                OkResult = false,
+                ErrorType = ErrorTypes.Unknown
+            };
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(fail, FrameCommandType.RejoinMatch)));
+            return;
+        }
+
+        GamePlayer player = game.Players.First(p => p.Id == req.PlayerId);
+
+        // Re-bind the player's socket to their original seat and issue a valid auth token
+        client.User = player;
+        client.IsLoggedIn = true;
+        tokenManager.RemoveTokenForClientIfPresent(client);
+        Guid newAuthToken = tokenManager.GenerateTokenForClient(client);
+
+        if (game.ChatId > 0)
+        {
+            try
+            {
+                chatManager.ClientJoinChat(client, game.ChatId);
+            }
+            catch
+            {
+                // Chat may already contain or not exist in unit/mock setups
+            }
+        }
+
+        ResponseObjectDto<RejoinMatchSnapshotDto> snapshotResponse = DtoBuilder.GetRejoinMatchSnapshotDto(game, player, newAuthToken);
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(snapshotResponse, FrameCommandType.RejoinMatch)));
+    }
+
+    private async Task AbandonMatchCallback(MessageFrame frame, IClient client)
+    {
+        RejoinSessionRequestDto req = frame.GetObjectFromMessage<RejoinSessionRequestDto>();
+        Game? game = gameManager.FindRejoinableGame(req.MatchId, req.PlayerId, req.ReconnectToken, out _);
+        if (game is not null)
+        {
+            game.AbandonDisconnectedSeat(req.PlayerId, req.ReconnectToken);
+            if (game.AreAllHumanSeatsTimedOut())
+            {
+                gameManager.DeleteGame(game.Id);
+            }
+        }
+
+        await SendOkToClient(client, FrameCommandType.AbandonMatch);
     }
 
     private async Task ReadyInGameCallback(MessageFrame frame, IClient client)

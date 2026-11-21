@@ -1,4 +1,4 @@
-﻿namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
+namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
 {
     public enum FrameCommandType
     {
@@ -63,5 +63,10 @@
 
         // Other
         Response, // Good or bad result
+
+        // Match Rejoin & Disconnect Persistence
+        CheckActiveMatch,
+        RejoinMatch,
+        AbandonMatch,
     }
 }

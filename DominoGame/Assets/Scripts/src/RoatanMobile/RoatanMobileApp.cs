@@ -165,7 +165,7 @@ public class RoatanMobileApp : MonoBehaviour
         BuildRoundSummaryOverlay();
 
         onlineController = gameObject.AddComponent<RoatanOnlineController>();
-        onlineController.Initialize(safeAreaRoot, uiFont, ShowHomeScreen);
+        onlineController.Initialize(safeAreaRoot, uiFont, ShowHomeScreen, OnOnlineMatchRejoined);
 
         RoatanLocalization.LanguageChanged += OnLanguageChanged;
         SceneManager.activeSceneChanged += OnSceneChanged;
@@ -174,6 +174,16 @@ public class RoatanMobileApp : MonoBehaviour
     private void Start()
     {
         ShowHomeScreen();
+        onlineController?.CheckPendingRejoinOnStartup();
+    }
+
+    private void OnOnlineMatchRejoined()
+    {
+        StopMatchRoutine();
+        homeScreen.SetActive(false);
+        matchScreen.SetActive(false);
+        howToPlayModal.SetActive(false);
+        roundSummaryOverlay.SetActive(false);
     }
 
     private void OnDestroy()

@@ -16,8 +16,11 @@ public class Game
     public const double TurnActionTimeoutSeconds = 10.0;
     public const int BotTakeoverStrikeLimit = 3;
     public const double BotTakeoverDelaySeconds = 1.2;
+    public const double DisconnectGraceWindowSeconds = 40.0;
 
     public int Id { get; }
+    public int LobbyId { get; set; }
+    public string MatchTitle { get; set; } = "Roatan Match";
     public List<GamePlayer> Players { get; }
     public GamePlayer PlayerPlaying => Players[currentPlayerIndex];
     public Timer StartTimer { get; set; } = new();
@@ -129,6 +132,10 @@ public class Game
         {
             Players[i].TeamId = IsTeam2v2 ? (i % 2) : i;
             Players[i].MatchScore = 0;
+            if (string.IsNullOrEmpty(Players[i].ReconnectToken))
+            {
+                Players[i].ReconnectToken = Guid.NewGuid().ToString("N");
+            }
             PlayerScores[Players[i].Id] = 0;
         }
     }
@@ -600,8 +607,113 @@ public class Game
     public bool ReclaimManualControl(long playerId)
     {
         GamePlayer? player = Players.FirstOrDefault(p => p.Id == playerId);
-        if (player is null) return false;
+        if (player is null || player.IsPermanentlyBot) return false;
         player.ReclaimManualControl();
+        return true;
+    }
+
+    /// <summary>
+    /// Marks a player's seat as Disconnected and starts the 40-second rejoin grace window
+    /// without aborting the match or removing the seat.
+    /// </summary>
+    public bool MarkPlayerDisconnected(long playerId)
+    {
+        if (IsMatchOver) return false;
+        GamePlayer? player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null || player.IsPermanentlyBot) return false;
+
+        if (string.IsNullOrEmpty(player.ReconnectToken))
+        {
+            player.ReconnectToken = Guid.NewGuid().ToString("N");
+        }
+
+        player.MarkDisconnected(DisconnectGraceWindowSeconds);
+        return true;
+    }
+
+    /// <summary>
+    /// Advances disconnect grace timers for all disconnected seats.
+    /// Seats reaching 0s are permanently converted to bots for the remainder of the match.
+    /// </summary>
+    public (List<long> PermanentlyConvertedPlayerIds, bool ShouldCloseRoom) TickDisconnectGraceTimers(double deltaSeconds)
+    {
+        List<long> converted = [];
+        double step = Math.Max(0.0, deltaSeconds);
+
+        foreach (GamePlayer player in Players)
+        {
+            if (!player.IsDisconnected || player.IsPermanentlyBot) continue;
+
+            player.DisconnectGraceRemainingSeconds = Math.Max(0.0, player.DisconnectGraceRemainingSeconds - step);
+            if (player.DisconnectGraceRemainingSeconds <= 0.0)
+            {
+                player.ConvertToPermanentBot();
+                converted.Add(player.Id);
+            }
+        }
+
+        return (converted, AreAllHumanSeatsTimedOut());
+    }
+
+    public bool AreAllHumanSeatsTimedOut()
+    {
+        return Players.Count > 0 && Players.All(p => p.IsPermanentlyBot);
+    }
+
+    public bool CanPlayerRejoin(long playerId, string reconnectToken, out int remainingGraceSeconds)
+    {
+        remainingGraceSeconds = 0;
+        if (IsMatchOver || string.IsNullOrWhiteSpace(reconnectToken))
+        {
+            return false;
+        }
+
+        GamePlayer? player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null || player.IsPermanentlyBot)
+        {
+            return false;
+        }
+
+        if (!string.Equals(player.ReconnectToken, reconnectToken, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (player.IsDisconnected)
+        {
+            if (player.DisconnectGraceRemainingSeconds <= 0.0)
+            {
+                return false;
+            }
+            remainingGraceSeconds = (int)Math.Ceiling(player.DisconnectGraceRemainingSeconds);
+            return true;
+        }
+
+        remainingGraceSeconds = (int)DisconnectGraceWindowSeconds;
+        return true;
+    }
+
+    public bool RejoinPlayer(long playerId, string reconnectToken)
+    {
+        if (!CanPlayerRejoin(playerId, reconnectToken, out _))
+        {
+            return false;
+        }
+
+        GamePlayer player = Players.First(p => p.Id == playerId);
+        player.RestoreFromReconnect();
+        return true;
+    }
+
+    public bool AbandonDisconnectedSeat(long playerId, string reconnectToken)
+    {
+        GamePlayer? player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null || !string.Equals(player.ReconnectToken, reconnectToken, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        player.ConvertToPermanentBot();
         return true;
     }
 

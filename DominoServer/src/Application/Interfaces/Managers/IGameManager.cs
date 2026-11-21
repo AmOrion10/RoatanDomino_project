@@ -1,4 +1,4 @@
-﻿using Domain;
+using Domain;
 using Domain.Game;
 
 using Timer = Domain.Timer;
@@ -29,4 +29,6 @@ public interface IGameManager
     void UpdatePlayerTurnTimer(int gameId, int newDuration);
     void DeleteGame(int gameId);
     bool PlayerLeave(int gameId, IClient playerLeaving);
+    List<Game> GetAllActiveGames();
+    Game? FindRejoinableGame(int matchId, long playerId, string reconnectToken, out int remainingGraceSeconds);
 }

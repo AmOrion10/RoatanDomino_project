@@ -35,14 +35,18 @@ public class GameManager(IChatManager chatManager) : IGameManager
             bool oneOnePlayoff = lobby.OneOnePlayoff ?? false;
             game = new Game(lobby.Id, players, mode, tableStyle, matchFormat, seed, isTeam2v2: isTeam2v2, oneOnePlayoff: oneOnePlayoff)
             {
-                ChatId = chatManager.CreateChat("Game")
+                ChatId = chatManager.CreateChat("Game"),
+                LobbyId = lobby.Id,
+                MatchTitle = lobby.Name
             };
         }
         else
         {
             game = new Game(lobby.Id, players, mode, seed)
             {
-                ChatId = chatManager.CreateChat("Game")
+                ChatId = chatManager.CreateChat("Game"),
+                LobbyId = lobby.Id,
+                MatchTitle = lobby.Name
             };
         }
         lock (games)
@@ -189,6 +193,37 @@ public class GameManager(IChatManager chatManager) : IGameManager
         {
             Game game = games.First(g => g.Players.Any(p => p.Id == playerLeaving.User!.Id));
             return game.PlayerLeave(game.Players.First(p => p.Id == playerLeaving.User!.Id));
+        }
+    }
+
+    public List<Game> GetAllActiveGames()
+    {
+        lock (games)
+        {
+            return games.ToList();
+        }
+    }
+
+    public Game? FindRejoinableGame(int matchId, long playerId, string reconnectToken, out int remainingGraceSeconds)
+    {
+        remainingGraceSeconds = 0;
+        if (string.IsNullOrWhiteSpace(reconnectToken))
+        {
+            return null;
+        }
+
+        lock (games)
+        {
+            Game? game = matchId > 0
+                ? games.FirstOrDefault(g => g.Id == matchId)
+                : games.FirstOrDefault(g => g.Players.Any(p => p.Id == playerId));
+
+            if (game is null) return null;
+            if (game.CanPlayerRejoin(playerId, reconnectToken, out remainingGraceSeconds))
+            {
+                return game;
+            }
+            return null;
         }
     }
 }

@@ -23,12 +23,23 @@ public class RoatanOnlineController : MonoBehaviour
 
     private TMP_FontAsset uiFont;
     private Action onReturnHome;
+    private Action onRejoinEnteredMatch;
 
     private GameObject onlineRoot;
     private GameObject authView;
     private GameObject hubView;
     private GameObject lobbyView;
     private GameObject onlineGameView;
+
+    // Startup / Lobby Rejoin Modal ("Match in Progress — Rejoin?")
+    private GameObject rejoinModal;
+    private TMP_Text rejoinModalBodyLabel;
+    private TMP_Text rejoinModalTimerLabel;
+    private Button rejoinConfirmBtn;
+    private RoatanMatchSessionStore.ActiveMatchSessionData pendingSavedSession;
+    private bool waitingForConnectToCheckRejoin;
+    private bool rejoinModalActive;
+    private float rejoinModalRemainingSeconds;
 
     // Header & status
     private TMP_Text titleLabel;
@@ -133,15 +144,61 @@ public class RoatanOnlineController : MonoBehaviour
     private bool isConnecting;
     private bool isSignedIn;
 
-    public void Initialize(RectTransform safeRoot, TMP_FontAsset font, Action returnHomeCallback)
+    public void Initialize(RectTransform safeRoot, TMP_FontAsset font, Action returnHomeCallback, Action onRejoinEnteredMatchCallback = null)
     {
         uiFont = font;
         onReturnHome = returnHomeCallback;
+        onRejoinEnteredMatch = onRejoinEnteredMatchCallback;
 
         BuildOnlineScreen(safeRoot);
+        BuildRejoinModal(safeRoot);
         RoatanLocalization.LanguageChanged += RefreshLocalizedTexts;
         RefreshLocalizedTexts();
         onlineRoot.SetActive(false);
+    }
+
+    /// <summary>
+    /// Checks PlayerPrefs on app startup / lobby initialization for an unexpired active match session
+    /// and sends a lightweight CheckActiveMatch handshake to DominoServer.
+    /// </summary>
+    public void CheckPendingRejoinOnStartup()
+    {
+        RoatanMatchSessionStore.ActiveMatchSessionData saved = RoatanMatchSessionStore.LoadValidSession();
+        if (saved == null || Networking.Instance == null)
+        {
+            return;
+        }
+
+        pendingSavedSession = saved;
+        Networking.Instance.ConnectionEvent -= OnConnectionStatusChanged;
+        Networking.Instance.ConnectionEvent += OnConnectionStatusChanged;
+        SubscribeToCurrentClient();
+
+        if (Networking.Instance.IsConnected && !Networking.Instance.IsOfflineMode && subscribedClient != null)
+        {
+            waitingForConnectToCheckRejoin = false;
+            SendCheckActiveMatch(saved);
+        }
+        else if (!isConnecting)
+        {
+            waitingForConnectToCheckRejoin = true;
+            isConnecting = true;
+            string host = saved.ServerHost;
+            int port = saved.ServerPort;
+            Task.Run(() => Networking.Instance.ConnectOnline(host, port, false));
+        }
+    }
+
+    private void SendCheckActiveMatch(RoatanMatchSessionStore.ActiveMatchSessionData session)
+    {
+        if (subscribedClient == null || session == null) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.CheckActiveMatchFrame(new RejoinSessionRequestDto
+        {
+            MatchId = session.MatchId,
+            LobbyId = session.LobbyId,
+            PlayerId = session.PlayerId,
+            ReconnectToken = session.ReconnectToken
+        }));
     }
 
     private void OnDestroy()
@@ -177,6 +234,7 @@ public class RoatanOnlineController : MonoBehaviour
 
         RefreshConnectionBadge();
         RefreshLocalizedTexts();
+        CheckPendingRejoinOnStartup();
     }
 
     public void HideOnline()
@@ -215,6 +273,9 @@ public class RoatanOnlineController : MonoBehaviour
         eh.NumberOfDominoPerPlayerEvent += OnOnlineCountsUpdated;
         eh.EndGameEvent += OnOnlineEndGame;
         eh.LeaveGameResponseEvent += OnOnlineLeaveGameResponse;
+        eh.CheckActiveMatchResponseEvent += OnCheckActiveMatchResponse;
+        eh.RejoinMatchResponseEvent += OnRejoinMatchResponse;
+        eh.AbandonMatchResponseEvent += OnAbandonMatchResponse;
     }
 
     private void UnsubscribeClient()
@@ -241,6 +302,9 @@ public class RoatanOnlineController : MonoBehaviour
         eh.NumberOfDominoPerPlayerEvent -= OnOnlineCountsUpdated;
         eh.EndGameEvent -= OnOnlineEndGame;
         eh.LeaveGameResponseEvent -= OnOnlineLeaveGameResponse;
+        eh.CheckActiveMatchResponseEvent -= OnCheckActiveMatchResponse;
+        eh.RejoinMatchResponseEvent -= OnRejoinMatchResponse;
+        eh.AbandonMatchResponseEvent -= OnAbandonMatchResponse;
         subscribedClient = null;
     }
 
@@ -274,9 +338,15 @@ public class RoatanOnlineController : MonoBehaviour
         if (Networking.Instance != null && Networking.Instance.IsConnected)
         {
             SetFeedback(RoatanLocalization.T("server_connected"), RoatanVisualAssets.PalmGreen);
+            if (waitingForConnectToCheckRejoin && pendingSavedSession != null)
+            {
+                waitingForConnectToCheckRejoin = false;
+                SendCheckActiveMatch(pendingSavedSession);
+            }
         }
         else
         {
+            waitingForConnectToCheckRejoin = false;
             SetFeedback(RoatanLocalization.T("server_offline"), RoatanVisualAssets.SunsetCoral);
         }
     }
@@ -582,6 +652,27 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void Update()
     {
+        // Live countdown inside the "Match in Progress — Rejoin?" modal
+        if (rejoinModalActive && rejoinModal != null && rejoinModal.activeSelf)
+        {
+            rejoinModalRemainingSeconds -= Time.deltaTime;
+            int sec = Mathf.Max(0, Mathf.CeilToInt(rejoinModalRemainingSeconds));
+            if (rejoinModalTimerLabel != null)
+            {
+                rejoinModalTimerLabel.text = sec > 0
+                    ? $"Time remaining to rejoin: {sec}s"
+                    : "Rejoin window expired — seat converted to bot.";
+                rejoinModalTimerLabel.color = sec <= 10 ? RoatanVisualAssets.SunsetCoral : RoatanVisualAssets.IslandGold;
+            }
+            if (rejoinModalRemainingSeconds <= 0f)
+            {
+                rejoinModalActive = false;
+                if (rejoinConfirmBtn != null) rejoinConfirmBtn.interactable = false;
+                RoatanMatchSessionStore.ClearSession();
+                pendingSavedSession = null;
+            }
+        }
+
         if (onlineGameView == null || !onlineGameView.activeSelf) return;
         if (subscribedClient?.User == null || onlineActiveUserId != subscribedClient.User.Id) return;
         if (onlineTurnActionDispatched) return;
@@ -630,6 +721,17 @@ public class RoatanOnlineController : MonoBehaviour
         {
             onlineHand.AddRange(dto.Dominoes);
         }
+
+        // Persist active match session in PlayerPrefs so player can rejoin after disconnect/crash
+        if (dto != null && !string.IsNullOrWhiteSpace(dto.ReconnectToken) && subscribedClient?.User != null)
+        {
+            int matchId = dto.MatchId ?? (currentLobby != null ? currentLobby.Id : 0);
+            int lobbyId = dto.LobbyId ?? (currentLobby != null ? currentLobby.Id : matchId);
+            string host = Networking.Instance != null ? Networking.Instance.CurrentHost : GetDefaultHost();
+            int port = Networking.Instance != null ? Networking.Instance.CurrentPort : 10000;
+            RoatanMatchSessionStore.SaveSession(matchId, lobbyId, subscribedClient.User.Id, dto.ReconnectToken, host, port);
+        }
+
         RebuildOnlineHandUI();
     }
 
@@ -898,6 +1000,13 @@ public class RoatanOnlineController : MonoBehaviour
         bool breakTriggered = dto != null && dto.BreakTriggered == true;
         bool matchOver = dto == null || dto.MatchOver != false;
 
+        // Clear saved session ONLY when match officially ends (MATCH_OVER)
+        if (matchOver && !breakTriggered)
+        {
+            RoatanMatchSessionStore.ClearSession();
+            pendingSavedSession = null;
+        }
+
         if (breakTriggered)
         {
             RoatanSoundFX.Instance?.PlayBreakSting();
@@ -964,9 +1073,200 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineLeaveGameResponse(ResponseDto dto)
     {
+        RoatanMatchSessionStore.ClearSession();
+        pendingSavedSession = null;
         ChatManager.Instance?.SetActiveRoundChatLocked(false);
         ShowSubView(hubView);
         RequestLobbiesList();
+    }
+
+    // ==================== REJOIN HANDSHAKE & SNAPSHOT SYNC ====================
+
+    private void OnCheckActiveMatchResponse(ResponseObjectDto<ActiveMatchCheckResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null || !dto.Object.HasActiveMatch || dto.Object.RemainingGraceSeconds <= 0)
+        {
+            RoatanMatchSessionStore.ClearSession();
+            pendingSavedSession = null;
+            rejoinModalActive = false;
+            if (rejoinModal != null) rejoinModal.SetActive(false);
+            return;
+        }
+
+        ActiveMatchCheckResponseDto info = dto.Object;
+        rejoinModalRemainingSeconds = info.RemainingGraceSeconds;
+        rejoinModalActive = true;
+
+        if (rejoinModal != null)
+        {
+            string rules = FormatLobbyRulesBadge(info.MatchFormat, info.TableStyle, null);
+            string title = string.IsNullOrWhiteSpace(info.MatchTitle) ? $"Match #{info.MatchId}" : info.MatchTitle;
+            rejoinModalBodyLabel.text = $"You disconnected from an active online match:\n<b>{title}</b>\n{rules}\n\nRejoin now to reclaim your seat from the bot!";
+            rejoinModalTimerLabel.text = $"Time remaining to rejoin: {info.RemainingGraceSeconds}s";
+            rejoinModalTimerLabel.color = RoatanVisualAssets.IslandGold;
+            if (rejoinConfirmBtn != null) rejoinConfirmBtn.interactable = true;
+            rejoinModal.transform.SetAsLastSibling();
+            rejoinModal.SetActive(true);
+        }
+    }
+
+    private void RequestRejoinMatch()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (pendingSavedSession == null || subscribedClient == null)
+        {
+            if (rejoinModal != null) rejoinModal.SetActive(false);
+            return;
+        }
+
+        if (rejoinConfirmBtn != null) rejoinConfirmBtn.interactable = false;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.RejoinMatchFrame(new RejoinSessionRequestDto
+        {
+            MatchId = pendingSavedSession.MatchId,
+            LobbyId = pendingSavedSession.LobbyId,
+            PlayerId = pendingSavedSession.PlayerId,
+            ReconnectToken = pendingSavedSession.ReconnectToken
+        }));
+    }
+
+    private void RequestAbandonMatch()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (pendingSavedSession != null && subscribedClient != null)
+        {
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.AbandonMatchFrame(new RejoinSessionRequestDto
+            {
+                MatchId = pendingSavedSession.MatchId,
+                LobbyId = pendingSavedSession.LobbyId,
+                PlayerId = pendingSavedSession.PlayerId,
+                ReconnectToken = pendingSavedSession.ReconnectToken
+            }));
+        }
+
+        RoatanMatchSessionStore.ClearSession();
+        pendingSavedSession = null;
+        rejoinModalActive = false;
+        if (rejoinModal != null) rejoinModal.SetActive(false);
+    }
+
+    private void OnAbandonMatchResponse(ResponseDto dto)
+    {
+        RoatanMatchSessionStore.ClearSession();
+        pendingSavedSession = null;
+        rejoinModalActive = false;
+        if (rejoinModal != null) rejoinModal.SetActive(false);
+    }
+
+    private void OnRejoinMatchResponse(ResponseObjectDto<RejoinMatchSnapshotDto> dto)
+    {
+        rejoinModalActive = false;
+        if (rejoinModal != null) rejoinModal.SetActive(false);
+
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            RoatanMatchSessionStore.ClearSession();
+            pendingSavedSession = null;
+            SetFeedback("Match expired or already ended.", RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        ApplyRejoinSnapshot(dto.Object);
+    }
+
+    private void ApplyRejoinSnapshot(RejoinMatchSnapshotDto snap)
+    {
+        isSignedIn = true;
+        currentLobby = new LobbyDto
+        {
+            Id = snap.LobbyId,
+            Name = string.IsNullOrWhiteSpace(snap.MatchTitle) ? $"Match #{snap.MatchId}" : snap.MatchTitle,
+            MatchFormat = snap.MatchFormat,
+            TableStyle = snap.TableStyle,
+            OneOnePlayoff = snap.OneOnePlayoff,
+            Players = snap.Players ?? new List<PlayerDto>()
+        };
+
+        // Refresh saved session token/expiry in PlayerPrefs
+        string host = Networking.Instance != null ? Networking.Instance.CurrentHost : GetDefaultHost();
+        int port = Networking.Instance != null ? Networking.Instance.CurrentPort : 10000;
+        RoatanMatchSessionStore.SaveSession(snap.MatchId, snap.LobbyId, snap.PlayerId, snap.ReconnectToken, host, port);
+
+        // Switch UI into Online Match view cleanly (hides Home screen if triggered on app startup)
+        onRejoinEnteredMatch?.Invoke();
+        onlineRoot.SetActive(true);
+        ShowSubView(onlineGameView);
+        if (onlineEndOverlay != null) onlineEndOverlay.SetActive(false);
+
+        // Reset board & sync live tiles + player hand + possible moves + turn timer
+        ClearOnlineBoardVisuals();
+        onlineHand.Clear();
+        onlineSelectedDomino = null;
+        onlineConsecutiveAutoPlays = 0;
+        onlineIsBotControlled = false;
+        onlineTurnActionDispatched = false;
+        RefreshOnlineTakeoverIndicators();
+
+        if (snap.BoardMoves != null)
+        {
+            foreach (MoveDto move in snap.BoardMoves)
+            {
+                SpawnOnlineBoardMove(move);
+            }
+        }
+
+        if (snap.Hand != null)
+        {
+            onlineHand.AddRange(snap.Hand);
+        }
+
+        onlinePossibleMoves = snap.PossibleMoves;
+        onlineActiveUserId = snap.CurrentTurnPlayerId;
+        onlineIsAutoPassTurn = snap.IsAutoPassTurn;
+
+        // Update header with live counts & scores
+        List<string> headerParts = new List<string>();
+        string rulesShort = FormatLobbyRulesBadge(snap.MatchFormat, snap.TableStyle, snap.OneOnePlayoff);
+        headerParts.Add(rulesShort);
+        if (snap.Players != null && snap.NumberOfDominoPerPlayer != null)
+        {
+            foreach (PlayerDto p in snap.Players)
+            {
+                if (snap.NumberOfDominoPerPlayer.TryGetValue(p.Id, out int cnt))
+                {
+                    int pts = snap.PlayerScores != null && snap.PlayerScores.TryGetValue(p.Id, out int sc) ? sc : 0;
+                    headerParts.Add($"{p.Name}:{cnt}({pts}W)");
+                }
+            }
+        }
+        onlineMatchHeader.text = string.Join(" • ", headerParts);
+
+        bool isMyTurn = snap.CurrentTurnPlayerId == snap.PlayerId;
+        if (isMyTurn)
+        {
+            onlineTurnTimeRemaining = snap.IsAutoPassTurn
+                ? RoatanMatchEngine.AutoPassTimeoutSeconds
+                : (snap.TurnTimer != null && snap.TurnTimer.Duration > 0 ? snap.TurnTimer.Duration : RoatanMatchEngine.TurnTimeoutSeconds);
+            onlineTurnTimerActive = true;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(true);
+            UpdateOnlineTimerUI(Mathf.CeilToInt(onlineTurnTimeRemaining));
+
+            bool hasMoves = snap.PossibleMoves != null && snap.PossibleMoves.Moves != null && snap.PossibleMoves.Moves.Count > 0;
+            onlineDrawBtn.gameObject.SetActive(!hasMoves);
+            onlineDrawBtn.GetComponent<Image>().color = snap.IsAutoPassTurn ? RoatanVisualAssets.SunsetCoral : RoatanVisualAssets.IslandGold;
+            onlineMatchStatus.text = "Rejoined live match! It's your turn!";
+        }
+        else
+        {
+            onlineTurnTimerActive = false;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+            onlineDrawBtn.gameObject.SetActive(false);
+            string activeName = snap.Players?.FirstOrDefault(p => p.Id == snap.CurrentTurnPlayerId)?.Name ?? $"Player {snap.CurrentTurnPlayerId}";
+            onlineMatchStatus.text = $"Rejoined live match! Waiting for {activeName}...";
+        }
+
+        ChatManager.Instance?.SetActiveRoundChatLocked(true);
+        RebuildOnlineHandUI();
+        RoatanSoundFX.Instance?.PlayWin();
     }
 
     private void SpawnOnlineBoardMove(MoveDto move)
@@ -1140,6 +1440,12 @@ public class RoatanOnlineController : MonoBehaviour
         Button backBtn = CreatePillButton(topBar.transform, "BtnOnlineHome", "< Home", new Color(0.06f, 0.17f, 0.22f, 0.94f), new Vector2(-395f, 0f), new Vector2(190f, 76f), 26, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
+            if (onlineGameView != null && onlineGameView.activeSelf)
+            {
+                RoatanMatchSessionStore.ClearSession();
+                pendingSavedSession = null;
+                subscribedClient?.AddToSendQueue(MessageFrameBuilder.LeaveGameFrame());
+            }
             HideOnline();
             onReturnHome?.Invoke();
         });
@@ -1489,6 +1795,8 @@ public class RoatanOnlineController : MonoBehaviour
         CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -276f), new Vector2(380f, 76f), 28, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
+            RoatanMatchSessionStore.ClearSession();
+            pendingSavedSession = null;
             onlineEndOverlay.SetActive(false);
             subscribedClient?.AddToSendQueue(MessageFrameBuilder.LeaveGameFrame());
             ShowSubView(hubView);
@@ -1530,6 +1838,21 @@ public class RoatanOnlineController : MonoBehaviour
         hcObj.AddComponent<ContentSizeFitter>().horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
         sr.content = onlineHandContent;
         sr.viewport = srRect;
+    }
+
+    private void BuildRejoinModal(Transform safeRoot)
+    {
+        rejoinModal = CreateStretchPanel(safeRoot, "MatchRejoinModal", new Color(0f, 0f, 0f, 0.78f));
+
+        GameObject card = CreateCard(rejoinModal.transform, "RejoinCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 680f));
+        CreateText(card.transform, "RejoinTitle", "Match in Progress — Rejoin?", 40, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 245f), new Vector2(800f, 64f));
+        rejoinModalBodyLabel = CreateText(card.transform, "RejoinBody", "", 27, FontStyles.Normal, Color.white, new Vector2(0f, 92f), new Vector2(780f, 200f));
+        rejoinModalTimerLabel = CreateText(card.transform, "RejoinTimer", "Time remaining to rejoin: 40s", 30, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, -35f), new Vector2(780f, 52f));
+
+        rejoinConfirmBtn = CreatePillButton(card.transform, "BtnRejoinMatch", "Rejoin Match", RoatanVisualAssets.PalmGreen, new Vector2(0f, -145f), new Vector2(540f, 96f), 34, RequestRejoinMatch);
+        CreatePillButton(card.transform, "BtnAbandonMatch", "Abandon", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -258f), new Vector2(400f, 80f), 28, RequestAbandonMatch);
+
+        rejoinModal.SetActive(false);
     }
 
     // ==================== HELPERS ====================

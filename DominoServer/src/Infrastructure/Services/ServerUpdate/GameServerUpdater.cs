@@ -1,5 +1,6 @@
 using Application.Common;
 using Application.Interfaces;
+using Application.Interfaces.Managers;
 using Application.Messages.Commands.Game;
 using Application.Messages.Queries.Chat;
 using Application.Messages.Queries.Game;
@@ -24,16 +25,19 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
     private TimeSpan timeElapsedBeforeGame;
     private TimeSpan timeElapsedGeneralGame;
     private TimeSpan timeElapsedTurnPerPlayer;
+    private TimeSpan timeElapsedDisconnectGrace;
 
     public async Task UpdateAsync(TimeSpan deltaTime)
     {
         timeElapsedBeforeGame += deltaTime;
         timeElapsedGeneralGame += deltaTime;
         timeElapsedTurnPerPlayer += deltaTime;
+        timeElapsedDisconnectGrace += deltaTime;
 
         await CheckForTimerBeforeStart();
         await CheckForGeneralTimerInGames();
         await CheckForPlayerTurnTimer();
+        await CheckForDisconnectGraceTimers();
     }
     
     private async Task CheckForTimerBeforeStart()
@@ -136,8 +140,9 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         {
             logger.LogInformation("Game {gameId} has player timer expired", gameId);
             List<IClient> clientsInGame = await dispatcher.Dispatch(new GetAllClientsForGameQuery(gameId));
-
-            Game game = await dispatcher.Dispatch(new GetGameForPlayerQuery(clientsInGame[0]));
+            IGameManager gameManager = scope.ServiceProvider.GetRequiredService<IGameManager>();
+            Game? game = gameManager.GetById(gameId);
+            if (game is null) continue;
 
             long previousPlayerId = game.PlayerPlaying.Id;
 
@@ -146,6 +151,8 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
                 await HandleRoatanTurnTimerExpired(dispatcher, game, clientsInGame, previousPlayerId);
                 continue;
             }
+
+            if (clientsInGame.Count == 0) continue;
 
             Domino? domino = await dispatcher.Dispatch(new GetDominoFromStackQuery(gameId));
             PlayerPlayDto drawDto = new();
@@ -312,12 +319,46 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         }
     }
 
+    private Task CheckForDisconnectGraceTimers()
+    {
+        if (timeElapsedDisconnectGrace.TotalSeconds < 1)
+        {
+            return Task.CompletedTask;
+        }
+
+        int wholeSeconds = (int)timeElapsedDisconnectGrace.TotalSeconds;
+        timeElapsedDisconnectGrace -= new TimeSpan(0, 0, wholeSeconds);
+
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IGameManager gameManager = scope.ServiceProvider.GetRequiredService<IGameManager>();
+
+        foreach (Game game in gameManager.GetAllActiveGames())
+        {
+            (List<long> convertedIds, bool shouldCloseRoom) = game.TickDisconnectGraceTimers(wholeSeconds);
+            foreach (long playerId in convertedIds)
+            {
+                logger.LogInformation("Game {gameId}: Player {playerId} exceeded 40s disconnect grace window and was permanently converted to a bot", game.Id, playerId);
+            }
+
+            if (shouldCloseRoom)
+            {
+                logger.LogInformation("Game {gameId}: All human players timed out; closing room", game.Id);
+                gameManager.DeleteGame(game.Id);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     private static async Task SendHandsToPlayers(List<IClient> clientsInGame, Game game)
     {
         foreach (GamePlayer player in game.Players)
         {
-            IClient clientForPlayer = clientsInGame.First(c => c.User!.Id == player.Id);
-            await clientForPlayer.SendAsync(new NetworkFrame(MessageFrameBuilder.DominoDistributionFrame(DtoBuilder.GetHandDto(player))));
+            IClient? clientForPlayer = clientsInGame.FirstOrDefault(c => c.User!.Id == player.Id);
+            if (clientForPlayer is not null)
+            {
+                await clientForPlayer.SendAsync(new NetworkFrame(MessageFrameBuilder.DominoDistributionFrame(DtoBuilder.GetHandDto(game, player))));
+            }
         }
     }
 }
