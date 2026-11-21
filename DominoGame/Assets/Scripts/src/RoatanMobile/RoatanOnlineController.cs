@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
@@ -67,7 +68,16 @@ public class RoatanOnlineController : MonoBehaviour
     private RectTransform lobbiesListContent;
     private readonly List<GameObject> spawnedLobbyRows = new List<GameObject>();
     private int createLobbyMaxPlayers = 4;
+    private TableStyle createTableStyle = TableStyle.BLOCK;
+    private MatchFormat createMatchFormat = MatchFormat.SIX_LOV;
+    private bool createOneOnePlayoff = false;
     private readonly Dictionary<int, Image> createMaxPlayerBtns = new Dictionary<int, Image>();
+    private readonly Dictionary<int, GameObject> createMaxPlayerObjs = new Dictionary<int, GameObject>();
+    private readonly Dictionary<TableStyle, Image> createTableStyleBtns = new Dictionary<TableStyle, Image>();
+    private readonly Dictionary<MatchFormat, Image> createMatchFormatBtns = new Dictionary<MatchFormat, Image>();
+    private Button createOneOnePlayoffBtn;
+    private Image createOneOnePlayoffImg;
+    private TMP_Text createOneOnePlayoffLabel;
 
     // In-Lobby view
     private TMP_Text lobbyTitleLabel;
@@ -312,11 +322,18 @@ public class RoatanOnlineController : MonoBehaviour
             ? "Roatan Table"
             : createLobbyNameInput.text.Trim();
 
+        int effectiveMaxPlayers = createMatchFormat == MatchFormat.SIX_LOV
+            ? 4
+            : (createMatchFormat == MatchFormat.TWO_BEST && createLobbyMaxPlayers == 3 ? 2 : createLobbyMaxPlayers);
+
         subscribedClient.AddToSendQueue(MessageFrameBuilder.CreateLobbyFrame(new CreateLobbyDto
         {
             Name = lobbyName,
-            MaxNumberOfPlayer = createLobbyMaxPlayers,
-            Public = true
+            MaxNumberOfPlayer = effectiveMaxPlayers,
+            Public = true,
+            TableStyle = createTableStyle,
+            MatchFormat = createMatchFormat,
+            OneOnePlayoff = createMatchFormat == MatchFormat.SIX_LOV ? createOneOnePlayoff : false
         }));
     }
 
@@ -427,11 +444,13 @@ public class RoatanOnlineController : MonoBehaviour
         foreach (LobbyInfoDto lobby in dto.Object.Lobbies)
         {
             LobbyInfoDto captured = lobby;
-            GameObject row = CreateCard(lobbiesListContent, $"Lobby_{lobby.Id}", new Color(0.08f, 0.23f, 0.29f, 0.95f), Vector2.zero, new Vector2(860f, 92f));
-            row.AddComponent<LayoutElement>().preferredHeight = 92f;
+            GameObject row = CreateCard(lobbiesListContent, $"Lobby_{lobby.Id}", new Color(0.08f, 0.23f, 0.29f, 0.95f), Vector2.zero, new Vector2(860f, 106f));
+            row.AddComponent<LayoutElement>().preferredHeight = 106f;
 
-            CreateText(row.transform, "LName", $"{lobby.Name}  ({lobby.NumberOfPlayer}/{lobby.MaxNumberOfPlayer})", 26, FontStyles.Bold, Color.white, new Vector2(-130f, 0f), new Vector2(540f, 64f)).alignment = TextAlignmentOptions.MidlineLeft;
-            CreatePillButton(row.transform, "BtnJoin", "Join", RoatanVisualAssets.PalmGreen, new Vector2(315f, 0f), new Vector2(180f, 66f), 25, () =>
+            string modeBadge = FormatLobbyRulesBadge(lobby.MatchFormat, lobby.TableStyle, lobby.OneOnePlayoff);
+            CreateText(row.transform, "LName", $"{lobby.Name}  ({lobby.NumberOfPlayer}/{lobby.MaxNumberOfPlayer})", 25, FontStyles.Bold, Color.white, new Vector2(-130f, 18f), new Vector2(560f, 38f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "LMode", modeBadge, 20, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-130f, -20f), new Vector2(560f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreatePillButton(row.transform, "BtnJoin", "Join", RoatanVisualAssets.PalmGreen, new Vector2(315f, 0f), new Vector2(180f, 68f), 25, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = captured.Id }));
@@ -866,48 +885,91 @@ public class RoatanOnlineController : MonoBehaviour
     {
         hubView = CreateStretchPanel(parent, "HubView", Color.clear);
 
-        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 575f), new Vector2(940f, 106f));
-        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 28, FontStyles.Bold, Color.white, new Vector2(-140f, 0f), new Vector2(580f, 64f));
+        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 605f), new Vector2(940f, 96f));
+        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 26, FontStyles.Bold, Color.white, new Vector2(-140f, 0f), new Vector2(580f, 58f));
         hubWelcomeLabel.alignment = TextAlignmentOptions.MidlineLeft;
-        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(335f, 0f), new Vector2(210f, 68f), 24, SubmitLogout);
+        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(335f, 0f), new Vector2(210f, 64f), 24, SubmitLogout);
         signOutBtnLabel = outBtn.GetComponentInChildren<TMP_Text>();
 
-        Button rankedBtn = CreatePillButton(hubView.transform, "BtnQuickRanked", "Quick Ranked Match", RoatanVisualAssets.IslandGold, new Vector2(0f, 445f), new Vector2(940f, 102f), 34, RequestQuickRanked);
+        Button rankedBtn = CreatePillButton(hubView.transform, "BtnQuickRanked", "Quick Ranked Match", RoatanVisualAssets.IslandGold, new Vector2(0f, 495f), new Vector2(940f, 84f), 30, RequestQuickRanked);
         quickRankedLabel = rankedBtn.GetComponentInChildren<TMP_Text>();
         quickRankedLabel.color = new Color(0.10f, 0.10f, 0.12f, 1f);
 
-        // Create Lobby Card
-        GameObject createCard = CreateCard(hubView.transform, "CreateLobbyCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 240f), new Vector2(940f, 250f));
-        createLobbyNameInput = CreateInputField(createCard.transform, "LobbyNameInput", "New Lobby Name", "Roatan Table", new Vector2(0f, 65f), new Vector2(860f, 70f));
+        // Create Lobby Card (with Table Style, Match Format, 1-1 Playoff & Player Count)
+        GameObject createCard = CreateCard(hubView.transform, "CreateLobbyCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 205f), new Vector2(940f, 455f));
+        createLobbyNameInput = CreateInputField(createCard.transform, "LobbyNameInput", "New Lobby Name", "Roatan Table", new Vector2(0f, 174f), new Vector2(860f, 64f));
 
+        // Table Style Row (Block | Draw)
+        TableStyle[] styles = { TableStyle.BLOCK, TableStyle.DRAW };
+        string[] styleLabels = { "Block (Cerrado)", "Classic Draw" };
+        float[] styleXs = { -218f, 218f };
+        for (int i = 0; i < styles.Length; i++)
+        {
+            TableStyle st = styles[i];
+            Button sb = CreatePillButton(createCard.transform, $"Style_{st}", styleLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(styleXs[i], 96f), new Vector2(416f, 62f), 24, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                createTableStyle = st;
+                RefreshCreateLobbySelections();
+            });
+            createTableStyleBtns[st] = sb.GetComponent<Image>();
+        }
+
+        // Match Format Row (Six-Lov 2v2 | Two-Best | Cut-Throat)
+        MatchFormat[] formats = { MatchFormat.SIX_LOV, MatchFormat.TWO_BEST, MatchFormat.CUT_THROAT };
+        string[] formatLabels = { "Six-Lov (2v2)", "Two-Best", "Cut-Throat" };
+        float[] fmtXs = { -290f, 0f, 290f };
+        for (int i = 0; i < formats.Length; i++)
+        {
+            MatchFormat mf = formats[i];
+            Button fb = CreatePillButton(createCard.transform, $"Fmt_{mf}", formatLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(fmtXs[i], 18f), new Vector2(272f, 66f), 23, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                createMatchFormat = mf;
+                RefreshCreateLobbySelections();
+            });
+            createMatchFormatBtns[mf] = fb.GetComponent<Image>();
+        }
+
+        // Player Count / 1-1 Playoff Row
         int[] maxChoices = { 2, 3, 4 };
-        float[] xs = { -290f, -110f, 70f };
+        float[] xs = { -290f, 0f, 290f };
         for (int i = 0; i < maxChoices.Length; i++)
         {
             int count = maxChoices[i];
-            Button b = CreatePillButton(createCard.transform, $"MaxP_{count}", $"{count}P", count == createLobbyMaxPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(xs[i], -45f), new Vector2(150f, 68f), 25, () =>
+            Button b = CreatePillButton(createCard.transform, $"MaxP_{count}", $"{count} Players", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(xs[i], -62f), new Vector2(272f, 62f), 23, () =>
             {
+                RoatanSoundFX.Instance?.PlayTap();
                 createLobbyMaxPlayers = count;
-                foreach (KeyValuePair<int, Image> kv in createMaxPlayerBtns)
-                {
-                    kv.Value.color = kv.Key == createLobbyMaxPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
-                }
+                RefreshCreateLobbySelections();
             });
             createMaxPlayerBtns[count] = b.GetComponent<Image>();
+            createMaxPlayerObjs[count] = b.gameObject;
         }
 
-        Button createBtn = CreatePillButton(createCard.transform, "BtnCreateLobby", "Create Lobby", RoatanVisualAssets.PalmGreen, new Vector2(300f, -45f), new Vector2(270f, 68f), 25, RequestCreateLobby);
+        createOneOnePlayoffBtn = CreatePillButton(createCard.transform, "BtnOnlineOneOne", "4P (2v2)  •  1-1 Playoff: OFF", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(0f, -62f), new Vector2(856f, 62f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            createOneOnePlayoff = !createOneOnePlayoff;
+            RefreshCreateLobbySelections();
+        });
+        createOneOnePlayoffImg = createOneOnePlayoffBtn.GetComponent<Image>();
+        createOneOnePlayoffLabel = createOneOnePlayoffBtn.GetComponentInChildren<TMP_Text>();
+
+        Button createBtn = CreatePillButton(createCard.transform, "BtnCreateLobby", "Create Lobby", RoatanVisualAssets.PalmGreen, new Vector2(0f, -156f), new Vector2(640f, 76f), 28, RequestCreateLobby);
         createLobbyBtnLabel = createBtn.GetComponentInChildren<TMP_Text>();
 
+        RefreshCreateLobbySelections();
+
         // Join by Code Row
-        GameObject codeCard = CreateCard(hubView.transform, "CodeCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 55f), new Vector2(940f, 100f));
-        joinCodeInput = CreateInputField(codeCard.transform, "JoinCodeInput", "Private Lobby Code", "", new Vector2(-150f, 0f), new Vector2(560f, 68f));
-        Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 68f), 25, RequestJoinByCode);
+        GameObject codeCard = CreateCard(hubView.transform, "CodeCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -88f), new Vector2(940f, 92f));
+        joinCodeInput = CreateInputField(codeCard.transform, "JoinCodeInput", "Private Lobby Code", "", new Vector2(-150f, 0f), new Vector2(560f, 64f));
+        Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 64f), 24, RequestJoinByCode);
         joinCodeBtnLabel = codeBtn.GetComponentInChildren<TMP_Text>();
 
         // Public Lobbies Scroll List
-        GameObject listCard = CreateCard(hubView.transform, "LobbiesCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -390f), new Vector2(940f, 730f));
-        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshLobbies", "Refresh Lobbies", RoatanVisualAssets.BrightLagoon, new Vector2(0f, 305f), new Vector2(380f, 64f), 24, RequestLobbiesList);
+        GameObject listCard = CreateCard(hubView.transform, "LobbiesCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -455f), new Vector2(940f, 600f));
+        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshLobbies", "Refresh Lobbies", RoatanVisualAssets.BrightLagoon, new Vector2(0f, 245f), new Vector2(380f, 60f), 24, RequestLobbiesList);
         refreshLobbiesBtnLabel = refreshBtn.GetComponentInChildren<TMP_Text>();
 
         GameObject scrollObj = new GameObject("LobbiesScroll");
@@ -944,8 +1006,8 @@ public class RoatanOnlineController : MonoBehaviour
 
         GameObject card = CreateCard(lobbyView.transform, "InLobbyCard", new Color(0.06f, 0.18f, 0.24f, 0.95f), new Vector2(0f, 20f), new Vector2(940f, 1180f));
         lobbyTitleLabel = CreateText(card.transform, "LTitle", "Lobby", 40, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 505f), new Vector2(860f, 62f));
-        lobbyInfoLabel = CreateText(card.transform, "LInfo", "", 25, FontStyles.Normal, new Color(0.84f, 0.95f, 0.98f), new Vector2(0f, 445f), new Vector2(860f, 46f));
-        lobbyTimerLabel = CreateText(card.transform, "LTimer", "Waiting for players...", 26, FontStyles.Italic, Color.white, new Vector2(0f, 385f), new Vector2(860f, 46f));
+        lobbyInfoLabel = CreateText(card.transform, "LInfo", "", 23, FontStyles.Normal, new Color(0.84f, 0.95f, 0.98f), new Vector2(0f, 438f), new Vector2(860f, 76f));
+        lobbyTimerLabel = CreateText(card.transform, "LTimer", "Waiting for players...", 25, FontStyles.Italic, Color.white, new Vector2(0f, 366f), new Vector2(860f, 44f));
 
         GameObject playersBox = new GameObject("PlayersBox");
         playersBox.transform.SetParent(card.transform, false);
@@ -1101,12 +1163,81 @@ public class RoatanOnlineController : MonoBehaviour
         }
     }
 
+    private void RefreshCreateLobbySelections()
+    {
+        foreach (KeyValuePair<TableStyle, Image> kv in createTableStyleBtns)
+        {
+            kv.Value.color = kv.Key == createTableStyle ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
+        }
+
+        foreach (KeyValuePair<MatchFormat, Image> kv in createMatchFormatBtns)
+        {
+            bool active = kv.Key == createMatchFormat;
+            kv.Value.color = active ? RoatanVisualAssets.IslandGold : new Color(0.14f, 0.22f, 0.28f, 1f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+            }
+        }
+
+        bool isSixLov = createMatchFormat == MatchFormat.SIX_LOV;
+        if (createOneOnePlayoffBtn != null)
+        {
+            createOneOnePlayoffBtn.gameObject.SetActive(isSixLov);
+            if (createOneOnePlayoffImg != null)
+            {
+                createOneOnePlayoffImg.color = createOneOnePlayoff ? RoatanVisualAssets.PalmGreen : new Color(0.14f, 0.22f, 0.28f, 1f);
+            }
+            if (createOneOnePlayoffLabel != null)
+            {
+                createOneOnePlayoffLabel.text = createOneOnePlayoff
+                    ? "4P (2v2 Partners)  •  1-1 Playoff: ON"
+                    : "4P (2v2 Partners)  •  1-1 Playoff: OFF";
+            }
+        }
+
+        if (isSixLov)
+        {
+            createLobbyMaxPlayers = 4;
+            foreach (KeyValuePair<int, GameObject> kv in createMaxPlayerObjs) kv.Value.SetActive(false);
+        }
+        else if (createMatchFormat == MatchFormat.TWO_BEST)
+        {
+            if (createLobbyMaxPlayers == 3) createLobbyMaxPlayers = 2;
+            if (createMaxPlayerObjs.ContainsKey(2)) createMaxPlayerObjs[2].SetActive(true);
+            if (createMaxPlayerObjs.ContainsKey(3)) createMaxPlayerObjs[3].SetActive(false);
+            if (createMaxPlayerObjs.ContainsKey(4)) createMaxPlayerObjs[4].SetActive(true);
+        }
+        else
+        {
+            foreach (KeyValuePair<int, GameObject> kv in createMaxPlayerObjs) kv.Value.SetActive(true);
+        }
+
+        foreach (KeyValuePair<int, Image> kv in createMaxPlayerBtns)
+        {
+            kv.Value.color = kv.Key == createLobbyMaxPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
+        }
+    }
+
+    private static string FormatLobbyRulesBadge(MatchFormat? format, TableStyle? style, bool? oneOnePlayoff)
+    {
+        string fmtStr = !format.HasValue ? "Classic"
+            : (format.Value == MatchFormat.SIX_LOV ? "Six-Lov (2v2)"
+            : (format.Value == MatchFormat.TWO_BEST ? "Two-Best" : "Cut-Throat (FFA)"));
+        string styleStr = !style.HasValue ? "Draw"
+            : (style.Value == TableStyle.BLOCK ? "Block (Cerrado)" : "Classic Draw");
+        string playoffStr = (format == MatchFormat.SIX_LOV && oneOnePlayoff == true) ? "  •  1-1 Playoff" : "";
+        return $"{fmtStr}  •  {styleStr}{playoffStr}";
+    }
+
     private void RefreshLobbyView()
     {
         if (currentLobby == null) return;
         lobbyTitleLabel.text = currentLobby.Name;
         string codePart = !string.IsNullOrEmpty(currentLobby.Code) ? $"  •  Code: {currentLobby.Code}" : "";
-        lobbyInfoLabel.text = $"Players: {currentLobby.Players.Count}/{currentLobby.MaxNumberOfPlayer}{codePart}";
+        string rulesBadge = FormatLobbyRulesBadge(currentLobby.MatchFormat, currentLobby.TableStyle, currentLobby.OneOnePlayoff);
+        lobbyInfoLabel.text = $"{rulesBadge}\nPlayers: {currentLobby.Players.Count}/{currentLobby.MaxNumberOfPlayer}{codePart}";
 
         foreach (GameObject go in spawnedLobbyPlayerRows) Destroy(go);
         spawnedLobbyPlayerRows.Clear();
