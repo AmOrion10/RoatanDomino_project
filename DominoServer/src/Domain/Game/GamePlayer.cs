@@ -7,6 +7,7 @@ public class GamePlayer(User user) : User(user)
     public int Bet { get; set; }
     public int Gain { get; set; }
     public int TeamId { get; set; } = -1;
+    public int MatchScore { get; set; }
 
     public void AddDominoToHand(Domino domino)
     {

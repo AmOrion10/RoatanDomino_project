@@ -7,6 +7,8 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 
 public class RoatanMatchEngine
 {
+    public const float ChoosePoserTimeoutSeconds = 8.0f;
+
     public class MatchPlayer
     {
         public int Id { get; set; }
@@ -53,14 +55,23 @@ public class RoatanMatchEngine
         public bool WasBlocked { get; set; }
         public bool IsDraw { get; set; }
         public bool BreakTriggered { get; set; }
+        public bool MatchOver { get; set; }
+        public MatchPlayer MatchWinner { get; set; }
+        public int MatchWinningTeamId { get; set; } = -1;
+        public bool RequiresChoosePoser { get; set; }
+        public int PoserChooserIndex { get; set; } = -1;
+        public int PartnerCandidateIndex { get; set; } = -1;
+        public bool CanPoserPlayAnyTile { get; set; }
         public int PointsAwarded { get; set; }
         public int NextPoserIndex { get; set; } = -1;
+        public List<MatchPlayer> CutThroatedPlayers { get; set; } = new List<MatchPlayer>();
         public List<MatchPlayer> Standings { get; set; }
     }
 
     public RoatanGameMode Mode { get; }
     public TableStyle TableStyle { get; }
     public MatchFormat MatchFormat { get; }
+    public bool OneOnePlayoff { get; }
     public TurnDirection TurnDirection { get; set; }
     public bool IsTeam2v2 { get; }
     public BotDifficulty Difficulty { get; }
@@ -70,12 +81,26 @@ public class RoatanMatchEngine
     public int BoneyardCount => boneyard.Count;
     public int LockedPileCount => lockedPile.Count;
     public int RoundNumber { get; private set; }
-    public int TargetMatchScore { get; } = 100;
+    public int TargetMatchScore => MatchFormat == MatchFormat.TWO_BEST ? 2 : 6;
     public int ConsecutivePasses => consecutivePasses;
+    public MatchPhase Phase { get; private set; } = MatchPhase.AWAITING_POSE;
     public bool IsBreakResetPending { get; private set; } = true;
     public int CurrentHandPoserIndex { get; private set; } = -1;
     public int LastHandPoserIndex { get; private set; } = -1;
     public bool LastHandWasDraw { get; private set; }
+
+    // Format & Partner Pose Handoff ("Call Your Padna") state
+    public int[] TeamScores { get; } = new int[2];
+    public bool IsMatchOver { get; private set; }
+    public MatchPlayer MatchWinner { get; private set; }
+    public int MatchWinningTeamId { get; private set; } = -1;
+    public List<MatchPlayer> CutThroatedPlayers { get; } = new List<MatchPlayer>();
+    public int PoserChooserIndex { get; private set; } = -1;
+    public int PartnerCandidateIndex { get; private set; } = -1;
+    public int ConfirmedPoserIndex { get; private set; } = -1;
+    public float ChoosePoserRemainingSeconds { get; private set; }
+    public bool CanPoserPlayAnyTile { get; private set; }
+    public bool PartnerHandsHiddenDuringChoosePoser => Phase == MatchPhase.CHOOSE_POSER;
 
     public bool HasBoardStarted => leftChain.Count > 0 || centerTile != null;
     public int LeftEndPip { get; private set; } = -1;
@@ -111,7 +136,8 @@ public class RoatanMatchEngine
             botCount,
             seed,
             isTeam2v2: false,
-            turnDirection: TurnDirection.CounterClockwise)
+            turnDirection: TurnDirection.CounterClockwise,
+            oneOnePlayoff: false)
     {
     }
 
@@ -122,23 +148,37 @@ public class RoatanMatchEngine
         int botCount,
         int? seed = null,
         bool isTeam2v2 = false,
-        TurnDirection turnDirection = TurnDirection.CounterClockwise)
+        TurnDirection turnDirection = TurnDirection.CounterClockwise,
+        bool oneOnePlayoff = false)
     {
         TableStyle = tableStyle;
         MatchFormat = matchFormat;
+        OneOnePlayoff = oneOnePlayoff;
         Mode = tableStyle == TableStyle.BLOCK ? RoatanGameMode.BlockedCerrado : RoatanGameMode.ClassicDraw;
         TurnDirection = turnDirection;
         Difficulty = difficulty;
         rng = seed.HasValue ? new Random(seed.Value) : new Random();
 
-        int clampedBots = Math.Max(1, Math.Min(3, botCount));
+        int clampedBots = matchFormat == MatchFormat.SIX_LOV ? 3 : Math.Max(1, Math.Min(3, botCount));
         int totalPlayers = 1 + clampedBots;
-        IsTeam2v2 = isTeam2v2 && totalPlayers == 4;
+
+        if (matchFormat == MatchFormat.SIX_LOV)
+        {
+            IsTeam2v2 = totalPlayers == 4;
+        }
+        else if (matchFormat == MatchFormat.CUT_THROAT)
+        {
+            IsTeam2v2 = false;
+        }
+        else
+        {
+            IsTeam2v2 = totalPlayers == 4;
+        }
 
         Players.Add(new MatchPlayer
         {
             Id = 0,
-            TeamId = IsTeam2v2 ? 0 : 0,
+            TeamId = 0,
             Name = "You",
             IsBot = false
         });
@@ -157,6 +197,14 @@ public class RoatanMatchEngine
         }
     }
 
+    public MatchPlayer GetPartner(MatchPlayer player)
+    {
+        if (!IsTeam2v2 || Players.Count != 4 || player == null) return null;
+        int idx = Players.FindIndex(p => p.Id == player.Id);
+        if (idx < 0) return null;
+        return Players[(idx + 2) % 4];
+    }
+
     public static int GetTilesPerPlayer(int playerCount, TableStyle tableStyle)
     {
         if (playerCount == 2) return 7;
@@ -168,10 +216,17 @@ public class RoatanMatchEngine
     public void TriggerBreakReset()
     {
         IsBreakResetPending = true;
+        ConfirmedPoserIndex = -1;
+        CanPoserPlayAnyTile = false;
     }
 
-    public PlacedTile StartNewRound()
+    public void DealRoundWithoutOpeningPose()
     {
+        if (Phase == MatchPhase.CHOOSE_POSER && PoserChooserIndex >= 0)
+        {
+            ConfirmPoserChoice(Players[PoserChooserIndex].Id, PoserChoice.POSE_MYSELF);
+        }
+
         RoundNumber++;
         centerTile = null;
         leftChain.Clear();
@@ -181,6 +236,7 @@ public class RoatanMatchEngine
         LeftEndPip = -1;
         RightEndPip = -1;
         consecutivePasses = 0;
+        Phase = MatchPhase.AWAITING_POSE;
 
         bool excludeDoubleBlank = Players.Count == 3 && TableStyle == TableStyle.BLOCK;
         BuildAndShuffleDeck(excludeDoubleBlank);
@@ -199,19 +255,29 @@ public class RoatanMatchEngine
             }
         }
 
-        // In BLOCK mode (e.g. 1v1 with 14 remaining tiles), place undealt tiles into a locked/inactive pile.
         if (TableStyle == TableStyle.BLOCK && boneyard.Count > 0)
         {
             lockedPile.AddRange(boneyard);
             boneyard.Clear();
         }
+    }
 
+    public PlacedTile StartNewRound()
+    {
+        DealRoundWithoutOpeningPose();
         ResolveOpeningPose(out int starterIdx, out DominoDto starterTile);
         return ApplyOpeningPose(starterIdx, starterTile);
     }
 
     public void ResolveOpeningPose(out int starterIdx, out DominoDto starterTile)
     {
+        if (!IsBreakResetPending && ConfirmedPoserIndex >= 0 && ConfirmedPoserIndex < Players.Count)
+        {
+            starterIdx = ConfirmedPoserIndex;
+            starterTile = FindBestOpeningTile(Players[starterIdx]);
+            return;
+        }
+
         if (!IsBreakResetPending && LastHandWasDraw && LastHandPoserIndex >= 0 && LastHandPoserIndex < Players.Count)
         {
             starterIdx = LastHandPoserIndex;
@@ -227,6 +293,28 @@ public class RoatanMatchEngine
         }
 
         FindGlobalOpeningTile(out starterIdx, out starterTile);
+    }
+
+    public PlacedTile PlayOpeningPose(int playerId, DominoDto chosenTile)
+    {
+        if (Phase != MatchPhase.AWAITING_POSE || chosenTile == null) return null;
+
+        ResolveOpeningPose(out int starterIdx, out DominoDto requiredTile);
+        MatchPlayer starter = Players[starterIdx];
+        if (starter.Id != playerId) return null;
+
+        DominoDto inHand = FindInHand(starter, chosenTile);
+        if (inHand == null) return null;
+
+        bool mustPlayRequired = IsBreakResetPending || (RoundNumber <= 1 && !CanPoserPlayAnyTile);
+        if (mustPlayRequired)
+        {
+            bool matches = (inHand.Side1 == requiredTile.Side1 && inHand.Side2 == requiredTile.Side2) ||
+                           (inHand.Side1 == requiredTile.Side2 && inHand.Side2 == requiredTile.Side1);
+            if (!matches) return null;
+        }
+
+        return ApplyOpeningPose(starterIdx, inHand);
     }
 
     private PlacedTile ApplyOpeningPose(int starterIdx, DominoDto starterTile)
@@ -250,8 +338,52 @@ public class RoatanMatchEngine
         CurrentHandPoserIndex = starterIdx;
         LastHandPoserIndex = starterIdx;
         IsBreakResetPending = false;
+        CanPoserPlayAnyTile = false;
+        ConfirmedPoserIndex = -1;
+        PoserChooserIndex = -1;
+        PartnerCandidateIndex = -1;
+        Phase = MatchPhase.PLAYING;
         currentPlayerIndex = StepTurnIndex(starterIdx);
         return centerTile;
+    }
+
+    public int ConfirmPoserChoice(int chooserPlayerId, PoserChoice choice)
+    {
+        if (Phase != MatchPhase.CHOOSE_POSER || PoserChooserIndex < 0)
+        {
+            return -1;
+        }
+
+        if (Players[PoserChooserIndex].Id != chooserPlayerId)
+        {
+            return -1;
+        }
+
+        ConfirmedPoserIndex = (choice == PoserChoice.PASS_TO_PADNA && PartnerCandidateIndex >= 0)
+            ? PartnerCandidateIndex
+            : PoserChooserIndex;
+
+        CanPoserPlayAnyTile = true;
+        ChoosePoserRemainingSeconds = 0f;
+        Phase = MatchPhase.AWAITING_POSE;
+        return ConfirmedPoserIndex;
+    }
+
+    public bool TickChoosePoserTimer(float deltaSeconds)
+    {
+        if (Phase != MatchPhase.CHOOSE_POSER)
+        {
+            return false;
+        }
+
+        ChoosePoserRemainingSeconds = Math.Max(0f, ChoosePoserRemainingSeconds - Math.Max(0f, deltaSeconds));
+        if (ChoosePoserRemainingSeconds <= 0f && PoserChooserIndex >= 0)
+        {
+            ConfirmPoserChoice(Players[PoserChooserIndex].Id, PoserChoice.POSE_MYSELF);
+            return true;
+        }
+
+        return false;
     }
 
     public List<LegalMove> GetLegalMoves(MatchPlayer player)
@@ -419,112 +551,271 @@ public class RoatanMatchEngine
             .ThenBy(p => p.Hand.Count)
             .ToList();
 
-        // Domino Out: player emptied hand
-        MatchPlayer dominoOutWinner = Players.FirstOrDefault(p => p.Hand.Count == 0);
-        if (dominoOutWinner != null)
+        MatchPlayer winner = Players.FirstOrDefault(p => p.Hand.Count == 0);
+        int winningTeam = -1;
+
+        if (winner != null)
         {
-            int winningTeam = dominoOutWinner.TeamId;
-            int pointsWon = SumOpposingPips(winningTeam);
-            AwardPoints(dominoOutWinner, winningTeam, pointsWon);
-
-            LastHandWasDraw = false;
-            lastRoundWinnerIndex = Players.FindIndex(p => p.Id == dominoOutWinner.Id);
-
-            return new RoundResult
-            {
-                Winner = dominoOutWinner,
-                WinningTeamId = winningTeam,
-                WasBlocked = false,
-                IsDraw = false,
-                BreakTriggered = false,
-                PointsAwarded = pointsWon,
-                NextPoserIndex = lastRoundWinnerIndex,
-                Standings = standings
-            };
+            wasBlocked = false;
+            winningTeam = winner.TeamId;
         }
-
-        // Blocked Board (Lockdown): compare individual player hand pip sums (never combine partners' pips)
-        int lowestIndividualPips = Players.Min(p => p.HandPipSum());
-        List<MatchPlayer> lowestPlayers = Players
-            .Where(p => p.HandPipSum() == lowestIndividualPips)
-            .ToList();
-
-        List<int> distinctLowestTeams = lowestPlayers
-            .Select(p => p.TeamId)
-            .Distinct()
-            .ToList();
-
-        // Opposing tie for lowest individual pip total -> Draw (0 pts, no Break, same Poser next hand)
-        if (distinctLowestTeams.Count > 1)
+        else
         {
-            LastHandWasDraw = true;
-            return new RoundResult
-            {
-                Winner = null,
-                WinningTeamId = -1,
-                WasBlocked = true,
-                IsDraw = true,
-                BreakTriggered = false,
-                PointsAwarded = 0,
-                NextPoserIndex = CurrentHandPoserIndex,
-                Standings = standings
-            };
-        }
+            wasBlocked = true;
+            int lowestIndividualPips = Players.Min(p => p.HandPipSum());
+            List<MatchPlayer> lowestPlayers = Players
+                .Where(p => p.HandPipSum() == lowestIndividualPips)
+                .ToList();
 
-        MatchPlayer blockWinner = lowestPlayers[0];
-        int blockWinningTeam = distinctLowestTeams[0];
-        int blockPoints = SumOpposingPips(blockWinningTeam);
-        AwardPoints(blockWinner, blockWinningTeam, blockPoints);
+            List<int> distinctLowestTeams = lowestPlayers
+                .Select(p => p.TeamId)
+                .Distinct()
+                .ToList();
+
+            if (distinctLowestTeams.Count > 1)
+            {
+                LastHandWasDraw = true;
+                ConfirmedPoserIndex = CurrentHandPoserIndex;
+                CanPoserPlayAnyTile = true;
+                Phase = MatchPhase.HAND_OVER;
+
+                return new RoundResult
+                {
+                    Winner = null,
+                    WinningTeamId = -1,
+                    WasBlocked = true,
+                    IsDraw = true,
+                    BreakTriggered = false,
+                    MatchOver = false,
+                    RequiresChoosePoser = false,
+                    CanPoserPlayAnyTile = true,
+                    PointsAwarded = 0,
+                    NextPoserIndex = CurrentHandPoserIndex,
+                    Standings = standings
+                };
+            }
+
+            winner = lowestPlayers[0];
+            winningTeam = distinctLowestTeams[0];
+        }
 
         LastHandWasDraw = false;
-        lastRoundWinnerIndex = Players.FindIndex(p => p.Id == blockWinner.Id);
+        int winnerIdx = Players.FindIndex(p => p.Id == winner.Id);
+        lastRoundWinnerIndex = winnerIdx;
+
+        bool breakTriggered = false;
+        bool matchOver = false;
+        bool requiresChoosePoser = false;
+        int chooserIdx = -1;
+        int partnerIdx = -1;
+        int nextPoserIdx = winnerIdx;
+        bool canPlayAnyTile = true;
+        List<MatchPlayer> cutThroated = new List<MatchPlayer>();
+
+        if (MatchFormat == MatchFormat.SIX_LOV && IsTeam2v2)
+        {
+            int oppTeam = winningTeam == 0 ? 1 : 0;
+            int winScore = TeamScores[winningTeam];
+            int oppScore = TeamScores[oppTeam];
+
+            if (OneOnePlayoff)
+            {
+                if (winScore == 0 && oppScore == 1)
+                {
+                    TeamScores[winningTeam] = 1;
+                    TeamScores[oppTeam] = 1;
+                }
+                else if (winScore == 1 && oppScore == 1)
+                {
+                    TeamScores[winningTeam] = 2;
+                    TeamScores[oppTeam] = 0;
+                }
+                else if (oppScore >= 2 && oppScore <= 5)
+                {
+                    TeamScores[0] = 0;
+                    TeamScores[1] = 0;
+                    breakTriggered = true;
+                }
+                else
+                {
+                    TeamScores[winningTeam] = winScore + 1;
+                }
+            }
+            else
+            {
+                if (oppScore >= 1 && oppScore <= 5)
+                {
+                    TeamScores[0] = 0;
+                    TeamScores[1] = 0;
+                    breakTriggered = true;
+                }
+                else
+                {
+                    TeamScores[winningTeam] = winScore + 1;
+                }
+            }
+
+            SyncTeamScores();
+
+            if (breakTriggered)
+            {
+                TriggerBreakReset();
+                nextPoserIdx = -1;
+                canPlayAnyTile = false;
+                Phase = MatchPhase.HAND_OVER;
+            }
+            else if (TeamScores[winningTeam] >= 6)
+            {
+                matchOver = true;
+                IsMatchOver = true;
+                MatchWinner = winner;
+                MatchWinningTeamId = winningTeam;
+                Phase = MatchPhase.MATCH_OVER;
+            }
+            else
+            {
+                EnterChoosePoserPhase(winnerIdx);
+                requiresChoosePoser = true;
+                chooserIdx = PoserChooserIndex;
+                partnerIdx = PartnerCandidateIndex;
+                nextPoserIdx = -1;
+                canPlayAnyTile = true;
+            }
+        }
+        else if (MatchFormat == MatchFormat.TWO_BEST)
+        {
+            if (IsTeam2v2)
+            {
+                TeamScores[winningTeam]++;
+                SyncTeamScores();
+
+                if (TeamScores[winningTeam] >= 2)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    EnterChoosePoserPhase(winnerIdx);
+                    requiresChoosePoser = true;
+                    chooserIdx = PoserChooserIndex;
+                    partnerIdx = PartnerCandidateIndex;
+                    nextPoserIdx = -1;
+                    canPlayAnyTile = true;
+                }
+            }
+            else
+            {
+                winner.MatchScore++;
+                if (winner.MatchScore >= 2)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    ConfirmedPoserIndex = winnerIdx;
+                    CanPoserPlayAnyTile = true;
+                    Phase = MatchPhase.HAND_OVER;
+                }
+            }
+        }
+        else // CUT_THROAT (Free-For-All)
+        {
+            winner.MatchScore++;
+            if (winner.MatchScore >= 6)
+            {
+                matchOver = true;
+                IsMatchOver = true;
+                MatchWinner = winner;
+                MatchWinningTeamId = winningTeam;
+                CutThroatedPlayers.Clear();
+                foreach (MatchPlayer p in Players)
+                {
+                    if (p.MatchScore == 0)
+                    {
+                        CutThroatedPlayers.Add(p);
+                        cutThroated.Add(p);
+                    }
+                }
+                Phase = MatchPhase.MATCH_OVER;
+            }
+            else if (Players.All(p => p.MatchScore >= 1))
+            {
+                foreach (MatchPlayer p in Players)
+                {
+                    p.MatchScore = 0;
+                }
+                breakTriggered = true;
+                TriggerBreakReset();
+                nextPoserIdx = -1;
+                canPlayAnyTile = false;
+                Phase = MatchPhase.HAND_OVER;
+            }
+            else
+            {
+                ConfirmedPoserIndex = winnerIdx;
+                CanPoserPlayAnyTile = true;
+                Phase = MatchPhase.HAND_OVER;
+            }
+        }
 
         return new RoundResult
         {
-            Winner = blockWinner,
-            WinningTeamId = blockWinningTeam,
-            WasBlocked = true,
+            Winner = winner,
+            WinningTeamId = winningTeam,
+            WasBlocked = wasBlocked,
             IsDraw = false,
-            BreakTriggered = false,
-            PointsAwarded = blockPoints,
-            NextPoserIndex = lastRoundWinnerIndex,
+            BreakTriggered = breakTriggered,
+            MatchOver = matchOver,
+            MatchWinner = matchOver ? winner : null,
+            MatchWinningTeamId = matchOver ? winningTeam : -1,
+            RequiresChoosePoser = requiresChoosePoser,
+            PoserChooserIndex = chooserIdx,
+            PartnerCandidateIndex = partnerIdx,
+            CanPoserPlayAnyTile = canPlayAnyTile,
+            PointsAwarded = breakTriggered ? 0 : 1,
+            NextPoserIndex = nextPoserIdx,
+            CutThroatedPlayers = cutThroated,
             Standings = standings
         };
     }
 
-    private int SumOpposingPips(int winningTeamId)
+    private void EnterChoosePoserPhase(int winnerIdx)
     {
-        int sum = 0;
-        foreach (MatchPlayer p in Players)
-        {
-            if (p.TeamId != winningTeamId)
-            {
-                sum += p.HandPipSum();
-            }
-        }
-        return sum;
+        PoserChooserIndex = winnerIdx;
+        PartnerCandidateIndex = (winnerIdx + 2) % Players.Count;
+        ConfirmedPoserIndex = -1;
+        CanPoserPlayAnyTile = true;
+        ChoosePoserRemainingSeconds = ChoosePoserTimeoutSeconds;
+        Phase = MatchPhase.CHOOSE_POSER;
     }
 
-    private void AwardPoints(MatchPlayer winner, int winningTeamId, int points)
+    private void SyncTeamScores()
     {
-        if (IsTeam2v2)
+        foreach (MatchPlayer p in Players)
         {
-            foreach (MatchPlayer p in Players)
+            if (p.TeamId >= 0 && p.TeamId < TeamScores.Length)
             {
-                if (p.TeamId == winningTeamId)
-                {
-                    p.MatchScore += points;
-                }
+                p.MatchScore = TeamScores[p.TeamId];
             }
-        }
-        else
-        {
-            winner.MatchScore += points;
         }
     }
 
     public bool HasMatchChampion(out MatchPlayer champion)
     {
+        if (IsMatchOver && MatchWinner != null)
+        {
+            champion = MatchWinner;
+            return true;
+        }
+
         champion = Players.OrderByDescending(p => p.MatchScore).FirstOrDefault(p => p.MatchScore >= TargetMatchScore);
         return champion != null;
     }
@@ -568,7 +859,6 @@ public class RoatanMatchEngine
         bestTile = Players[0].Hand[0];
         int bestDouble = -1;
 
-        // First priority: [6|6] down to [0|0]
         for (int i = 0; i < Players.Count; i++)
         {
             foreach (DominoDto d in Players[i].Hand)
@@ -584,7 +874,6 @@ public class RoatanMatchEngine
 
         if (bestDouble >= 0) return;
 
-        // Fallback if no player holds a double: highest total pip sum (tie-breaker: highest single end)
         int bestSum = -1;
         int bestMaxEnd = -1;
         for (int i = 0; i < Players.Count; i++)

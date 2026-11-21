@@ -42,7 +42,8 @@ public static class DtoBuilder
                 Ranked = lobby.Ranked,
                 Code = lobby.Code,
                 TableStyle = lobby.TableStyle,
-                MatchFormat = lobby.MatchFormat
+                MatchFormat = lobby.MatchFormat,
+                OneOnePlayoff = lobby.OneOnePlayoff
             }
         };
     }
@@ -98,7 +99,8 @@ public static class DtoBuilder
                     Name = l.Name,
                     IsPublic = l.IsPublic,
                     TableStyle = l.TableStyle,
-                    MatchFormat = l.MatchFormat
+                    MatchFormat = l.MatchFormat,
+                    OneOnePlayoff = l.OneOnePlayoff
                 }).ToList()
             }
         };

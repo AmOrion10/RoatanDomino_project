@@ -27,12 +27,13 @@ public class GameManager(IChatManager chatManager) : IGameManager
         List<GamePlayer> players = lobby.PlayersInLobby.Select(lobbyPlayer => new GamePlayer(lobbyPlayer)).ToList();
         GameMode mode = lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked;
         Game game;
-        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue)
+        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue || lobby.OneOnePlayoff.HasValue)
         {
             TableStyle tableStyle = lobby.TableStyle ?? TableStyle.DRAW;
             MatchFormat matchFormat = lobby.MatchFormat ?? MatchFormat.CUT_THROAT;
             bool isTeam2v2 = players.Count == 4 && matchFormat != MatchFormat.CUT_THROAT;
-            game = new Game(lobby.Id, players, mode, tableStyle, matchFormat, seed, isTeam2v2: isTeam2v2)
+            bool oneOnePlayoff = lobby.OneOnePlayoff ?? false;
+            game = new Game(lobby.Id, players, mode, tableStyle, matchFormat, seed, isTeam2v2: isTeam2v2, oneOnePlayoff: oneOnePlayoff)
             {
                 ChatId = chatManager.CreateChat("Game")
             };

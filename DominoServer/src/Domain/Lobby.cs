@@ -11,7 +11,8 @@ public class Lobby(
     bool ranked,
     string code,
     TableStyle? tableStyle = null,
-    MatchFormat? matchFormat = null)
+    MatchFormat? matchFormat = null,
+    bool? oneOnePlayoff = null)
 {
     public int Id { get; } = id;
     public LobbyPlayer Creator { get; set; } = creator;
@@ -24,6 +25,7 @@ public class Lobby(
     public string Code { get; } = code;
     public TableStyle? TableStyle { get; } = tableStyle;
     public MatchFormat? MatchFormat { get; } = matchFormat;
+    public bool? OneOnePlayoff { get; } = oneOnePlayoff;
     public int ChatId { get; set; }
 
     public bool IsEmpty()

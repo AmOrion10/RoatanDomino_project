@@ -518,6 +518,10 @@ public class RoatanMobileApp : MonoBehaviour
         {
             summaryTitleLabel.text = $"ROUND {engine.RoundNumber} — DRAW (TIE)!";
         }
+        else if (result.BreakTriggered)
+        {
+            summaryTitleLabel.text = $"GAME BRUK! (BREAK)";
+        }
         else
         {
             summaryTitleLabel.text = hasChampion
@@ -533,15 +537,24 @@ public class RoatanMobileApp : MonoBehaviour
                 : "Poser";
             sb.AppendLine($"{reason}   •   0 pts awarded (Tie)   •   {samePoserName} poses next");
         }
+        else if (result.BreakTriggered)
+        {
+            sb.AppendLine($"{reason}   •   {result.Winner.Name} broke the streak! Scores reset to 0 ([6|6] poses next)");
+        }
         else
         {
-            sb.AppendLine($"{reason}   •   +{result.PointsAwarded} pts to {result.Winner.Name}");
+            sb.AppendLine($"{reason}   •   +{result.PointsAwarded} hand win to {result.Winner.Name}");
+            if (result.CutThroatedPlayers != null && result.CutThroatedPlayers.Count > 0)
+            {
+                string victims = string.Join(", ", result.CutThroatedPlayers.Select(p => p.Name));
+                sb.AppendLine($"Cut-Throated at 0: {victims}");
+            }
         }
         sb.AppendLine();
         foreach (RoatanMatchEngine.MatchPlayer p in result.Standings)
         {
             string tag = (!result.IsDraw && result.Winner != null && p.Id == result.Winner.Id) ? "★ " : "   ";
-            sb.AppendLine($"{tag}{p.Name,-10}   Hand: {p.HandPipSum(),2} pips ({p.Hand.Count} tiles)   |   Score: {p.MatchScore}/{engine.TargetMatchScore}");
+            sb.AppendLine($"{tag}{p.Name,-10}   Hand: {p.HandPipSum(),2} pips ({p.Hand.Count} tiles)   |   Wins: {p.MatchScore}/{engine.TargetMatchScore}");
         }
 
         summaryBodyLabel.text = sb.ToString();

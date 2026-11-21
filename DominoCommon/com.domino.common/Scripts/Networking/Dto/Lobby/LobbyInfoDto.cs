@@ -29,5 +29,8 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "mf", NullValueHandling = NullValueHandling.Ignore)]
         public MatchFormat? MatchFormat { get; set; }
+
+        [JsonProperty(PropertyName = "oop", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? OneOnePlayoff { get; set; }
     }
 }

@@ -15,6 +15,7 @@ public class CreateLobbyCommand : ICommand<Domain.Lobby>
     public required string Name { get; set; }
     public TableStyle? TableStyle { get; set; }
     public MatchFormat? MatchFormat { get; set; }
+    public bool? OneOnePlayoff { get; set; }
 }
 
 public class CreateLobbyCommandHandler(ILobbyManager lobbyManager) : ICommandHandler<CreateLobbyCommand, Domain.Lobby>
@@ -32,6 +33,7 @@ public class CreateLobbyCommandHandler(ILobbyManager lobbyManager) : ICommandHan
             request.LobbyPublic,
             request.Name,
             tableStyle: request.TableStyle,
-            matchFormat: request.MatchFormat));
+            matchFormat: request.MatchFormat,
+            oneOnePlayoff: request.OneOnePlayoff));
     }
 }

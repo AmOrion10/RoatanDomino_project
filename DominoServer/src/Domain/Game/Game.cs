@@ -11,6 +11,8 @@ public class Game
     private const double PercentageOfLevelBettedRanked = 0.01;
     private const int FlatBet = 10;
 
+    public const double ChoosePoserTimeoutSeconds = 8.0;
+
     public int Id { get; }
     public List<GamePlayer> Players { get; }
     public GamePlayer PlayerPlaying => Players[currentPlayerIndex];
@@ -25,10 +27,13 @@ public class Game
     public GameMode Mode { get; set; }
     public TableStyle TableStyle { get; }
     public MatchFormat MatchFormat { get; }
+    public bool OneOnePlayoff { get; }
     public TurnDirection TurnDirection { get; set; }
     public bool IsTeam2v2 { get; }
     public bool IsLegacyDrawAdvance { get; }
+    public int TargetHandWins => MatchFormat == MatchFormat.TWO_BEST ? 2 : 6;
 
+    public MatchPhase Phase { get; private set; } = MatchPhase.PLAYING;
     public int HandNumber { get; private set; }
     public int ConsecutivePasses { get; private set; }
     public bool IsBreakResetPending { get; private set; } = true;
@@ -38,12 +43,28 @@ public class Game
     public long? LastHandWinnerId { get; private set; }
     public HandResolution? LastHandResolution { get; private set; }
 
+    public Dictionary<int, int> TeamScores { get; } = [];
+    public Dictionary<long, int> PlayerScores { get; } = [];
+    public bool IsMatchOver { get; private set; }
+    public GamePlayer? MatchWinner { get; private set; }
+    public int MatchWinningTeamId { get; private set; } = -1;
+    public List<long> CutThroatedPlayerIds { get; } = [];
+
+    // "Call Your Padna" (CHOOSE_POSER) state
+    public long? PoserChooserId { get; private set; }
+    public long? PartnerCandidateId { get; private set; }
+    public long? ConfirmedPoserId { get; private set; }
+    public double ChoosePoserRemainingSeconds { get; private set; }
+    public bool CanPoserPlayAnyTile { get; private set; }
+    public bool PartnerHandsHiddenDuringChoosePoser => Phase == MatchPhase.CHOOSE_POSER;
+
     public int TotalBet { get; set; }
     public int ChatId { get; set; }
 
-    private readonly GameGridDto gridDto = new(NumberOfRows, NumberOfCols);
-    private readonly DominoPlacer placer;
+    private GameGridDto gridDto = new(NumberOfRows, NumberOfCols);
+    private DominoPlacer placer;
     private int currentPlayerIndex;
+    private bool currentHandScored;
     public List<GamePlayer> Classement { get; } = [];
 
     /// <summary>
@@ -51,7 +72,7 @@ public class Game
     /// Defaults to DRAW table style, CUT_THROAT match format, and counter-clockwise turns.
     /// </summary>
     public Game(int id, List<GamePlayer> players, GameMode mode, int? seed = null)
-        : this(id, players, mode, TableStyle.DRAW, MatchFormat.CUT_THROAT, seed, isTeam2v2: false, turnDirection: TurnDirection.CounterClockwise, isLegacyDrawAdvance: true)
+        : this(id, players, mode, TableStyle.DRAW, MatchFormat.CUT_THROAT, seed, isTeam2v2: false, turnDirection: TurnDirection.CounterClockwise, isLegacyDrawAdvance: true, oneOnePlayoff: false)
     {
     }
 
@@ -64,7 +85,8 @@ public class Game
         int? seed = null,
         bool isTeam2v2 = false,
         TurnDirection turnDirection = TurnDirection.CounterClockwise,
-        bool isLegacyDrawAdvance = false)
+        bool isLegacyDrawAdvance = false,
+        bool oneOnePlayoff = false)
     {
         Stack = new DominoStack(seed);
         Id = id;
@@ -73,22 +95,46 @@ public class Game
         Mode = mode;
         TableStyle = tableStyle;
         MatchFormat = matchFormat;
+        OneOnePlayoff = oneOnePlayoff;
         TurnDirection = turnDirection;
-        IsTeam2v2 = isTeam2v2 && players.Count == 4;
         IsLegacyDrawAdvance = isLegacyDrawAdvance;
 
-        AssignDefaultTeams();
+        IsTeam2v2 = matchFormat switch
+        {
+            MatchFormat.SIX_LOV => players.Count == 4,
+            MatchFormat.CUT_THROAT => false,
+            MatchFormat.TWO_BEST => players.Count == 4 || (isTeam2v2 && players.Count == 4),
+            _ => isTeam2v2 && players.Count == 4
+        };
+
+        AssignDefaultTeamsAndScores();
     }
 
-    private void AssignDefaultTeams()
+    private void AssignDefaultTeamsAndScores()
     {
+        TeamScores.Clear();
+        PlayerScores.Clear();
+
+        if (IsTeam2v2)
+        {
+            TeamScores[0] = 0;
+            TeamScores[1] = 0;
+        }
+
         for (int i = 0; i < Players.Count; i++)
         {
-            if (Players[i].TeamId < 0)
-            {
-                Players[i].TeamId = IsTeam2v2 ? (i % 2) : i;
-            }
+            Players[i].TeamId = IsTeam2v2 ? (i % 2) : i;
+            Players[i].MatchScore = 0;
+            PlayerScores[Players[i].Id] = 0;
         }
+    }
+
+    public GamePlayer? GetPartner(GamePlayer player)
+    {
+        if (!IsTeam2v2 || Players.Count != 4) return null;
+        int idx = Players.IndexOf(player);
+        if (idx < 0) return null;
+        return Players[(idx + 2) % 4];
     }
 
     public static int GetTilesPerPlayer(int playerCount, TableStyle tableStyle)
@@ -108,6 +154,25 @@ public class Game
     public void TriggerBreakReset()
     {
         IsBreakResetPending = true;
+        ConfirmedPoserId = null;
+        CanPoserPlayAnyTile = false;
+    }
+
+    /// <summary>
+    /// Resets the board and deck to deal a new hand inside the same match while keeping match scores.
+    /// </summary>
+    public void PrepareNextHand(int? seed = null)
+    {
+        if (Phase == MatchPhase.CHOOSE_POSER)
+        {
+            // Default to Pose Myself if starting next hand while CHOOSE_POSER wasn't explicitly answered
+            ConfirmPoserChoice(PoserChooserId!.Value, PoserChoice.POSE_MYSELF);
+        }
+
+        gridDto = new GameGridDto(NumberOfRows, NumberOfCols);
+        placer = new DominoPlacer(gridDto);
+        Stack.Reset(seed);
+        DistributeDominoes();
     }
 
     public void DistributeDominoes()
@@ -115,7 +180,9 @@ public class Game
         StartTime = DateTime.Now;
         HandNumber++;
         ConsecutivePasses = 0;
+        currentHandScored = false;
         LastHandResolution = null;
+        Phase = MatchPhase.AWAITING_POSE;
 
         // 3-player BLOCK removes [0|0] -> 27 tiles total (9 dealt to each player, 0 boneyard)
         if (Players.Count == 3 && TableStyle == TableStyle.BLOCK)
@@ -145,6 +212,15 @@ public class Game
 
     public (GamePlayer Poser, Domino OpeningDomino) ResolveOpeningPoser()
     {
+        if (!IsBreakResetPending && ConfirmedPoserId.HasValue)
+        {
+            GamePlayer? confirmed = Players.FirstOrDefault(p => p.Id == ConfirmedPoserId.Value);
+            if (confirmed is not null && confirmed.Hand.Count > 0)
+            {
+                return (confirmed, FindBestOpeningTileInHand(confirmed));
+            }
+        }
+
         if (!IsBreakResetPending && LastHandWasDraw && LastHandPoserId.HasValue)
         {
             GamePlayer? samePoser = Players.FirstOrDefault(p => p.Id == LastHandPoserId.Value);
@@ -182,7 +258,48 @@ public class Game
     public void PlaceFirstDomino()
     {
         (GamePlayer poser, Domino openingDomino) = ResolveOpeningPoser();
+        ApplyOpeningDomino(poser, openingDomino);
+    }
 
+    /// <summary>
+    /// Allows the confirmed Poser to pose a chosen domino from their hand.
+    /// On Hand 1 / post-Break, only the required [6|6] (or fallback) tile is permitted.
+    /// On subsequent free-pose hands (including after CHOOSE_POSER), any tile in the Poser's hand is permitted.
+    /// </summary>
+    public bool PlaceOpeningDomino(long playerId, Domino chosenDomino)
+    {
+        (GamePlayer poser, Domino requiredOrSuggested) = ResolveOpeningPoser();
+        if (poser.Id != playerId)
+        {
+            return false;
+        }
+
+        Domino? inHand = poser.Hand.FirstOrDefault(d =>
+            (d.Side1 == chosenDomino.Side1 && d.Side2 == chosenDomino.Side2) ||
+            (d.Side1 == chosenDomino.Side2 && d.Side2 == chosenDomino.Side1));
+        if (inHand is null)
+        {
+            return false;
+        }
+
+        bool mustPlayRequiredTile = IsBreakResetPending || HandNumber <= 1 && !CanPoserPlayAnyTile;
+        if (mustPlayRequiredTile)
+        {
+            bool matchesRequired =
+                (inHand.Side1 == requiredOrSuggested.Side1 && inHand.Side2 == requiredOrSuggested.Side2) ||
+                (inHand.Side1 == requiredOrSuggested.Side2 && inHand.Side2 == requiredOrSuggested.Side1);
+            if (!matchesRequired)
+            {
+                return false;
+            }
+        }
+
+        ApplyOpeningDomino(poser, inHand);
+        return true;
+    }
+
+    private void ApplyOpeningDomino(GamePlayer poser, Domino openingDomino)
+    {
         Orientation orientation = openingDomino.Side1 == openingDomino.Side2
             ? Orientation.PerpendicularVerticalFromLeft
             : Orientation.HorizontalLeft;
@@ -194,7 +311,50 @@ public class Game
         CurrentHandPoserId = poser.Id;
         LastHandPoserId = poser.Id;
         IsBreakResetPending = false;
+        CanPoserPlayAnyTile = false;
+        ConfirmedPoserId = null;
+        PoserChooserId = null;
+        PartnerCandidateId = null;
         ConsecutivePasses = 0;
+        Phase = MatchPhase.PLAYING;
+    }
+
+    public long? ConfirmPoserChoice(long chooserId, PoserChoice choice)
+    {
+        if (Phase != MatchPhase.CHOOSE_POSER || !PoserChooserId.HasValue || chooserId != PoserChooserId.Value)
+        {
+            return null;
+        }
+
+        ConfirmedPoserId = choice == PoserChoice.PASS_TO_PADNA && PartnerCandidateId.HasValue
+            ? PartnerCandidateId.Value
+            : PoserChooserId.Value;
+
+        CanPoserPlayAnyTile = true;
+        ChoosePoserRemainingSeconds = 0;
+        Phase = MatchPhase.AWAITING_POSE;
+        return ConfirmedPoserId;
+    }
+
+    /// <summary>
+    /// Advances the 8-second CHOOSE_POSER countdown. Defaults to POSE_MYSELF upon expiration.
+    /// Returns true when the timer expires and auto-confirms the chooser.
+    /// </summary>
+    public bool TickChoosePoserTimer(double deltaSeconds)
+    {
+        if (Phase != MatchPhase.CHOOSE_POSER)
+        {
+            return false;
+        }
+
+        ChoosePoserRemainingSeconds = Math.Max(0.0, ChoosePoserRemainingSeconds - Math.Max(0.0, deltaSeconds));
+        if (ChoosePoserRemainingSeconds <= 0.0 && PoserChooserId.HasValue)
+        {
+            ConfirmPoserChoice(PoserChooserId.Value, PoserChoice.POSE_MYSELF);
+            return true;
+        }
+
+        return false;
     }
 
     public bool PlaceDomino(GameMove move)
@@ -346,20 +506,23 @@ public class Game
 
     public bool CheckEndGame()
     {
-        HandResolution resolution = ResolveHandEnd();
-        UpdateClassement();
-        if (resolution.IsOver)
+        if (currentHandScored && LastHandResolution is not null)
         {
-            LastHandResolution = resolution;
-            LastHandWasDraw = resolution.IsDraw;
-            if (!resolution.IsDraw && resolution.Winner is not null)
-            {
-                LastHandWinnerId = resolution.Winner.Id;
-            }
-            EndTime = DateTime.Now;
-            return true;
+            return LastHandResolution.IsOver;
         }
-        return false;
+
+        HandResolution raw = ResolveHandEnd();
+        UpdateClassement();
+        if (!raw.IsOver)
+        {
+            return false;
+        }
+
+        HandResolution finalResolution = ApplyMatchFormatResolution(raw);
+        currentHandScored = true;
+        LastHandResolution = finalResolution;
+        EndTime = DateTime.Now;
+        return true;
     }
 
     public HandResolution ResolveHandEnd()
@@ -442,6 +605,258 @@ public class Game
             IsOver = false,
             IndividualPipCounts = individualPips
         };
+    }
+
+    private HandResolution ApplyMatchFormatResolution(HandResolution raw)
+    {
+        if (raw.IsDraw)
+        {
+            LastHandWasDraw = true;
+            ConfirmedPoserId = CurrentHandPoserId ?? LastHandPoserId;
+            CanPoserPlayAnyTile = true;
+            Phase = MatchPhase.HAND_OVER;
+
+            return new HandResolution
+            {
+                IsOver = true,
+                WasBlocked = raw.WasBlocked,
+                IsDraw = true,
+                Winner = null,
+                WinningTeamId = -1,
+                PointsAwarded = 0,
+                BreakTriggered = false,
+                MatchOver = false,
+                RequiresChoosePoser = false,
+                NextPoserId = ConfirmedPoserId,
+                CanPoserPlayAnyTile = true,
+                IndividualPipCounts = raw.IndividualPipCounts,
+                TeamScoresSnapshot = new Dictionary<int, int>(TeamScores),
+                PlayerScoresSnapshot = new Dictionary<long, int>(PlayerScores)
+            };
+        }
+
+        GamePlayer winner = raw.Winner!;
+        int winningTeam = raw.WinningTeamId;
+        LastHandWasDraw = false;
+        LastHandWinnerId = winner.Id;
+
+        bool breakTriggered = false;
+        bool matchOver = false;
+        bool requiresChoosePoser = false;
+        long? poserChooserId = null;
+        long? partnerId = null;
+        long? nextPoserId = winner.Id;
+        bool canPlayAnyTile = true;
+        List<long> cutThroated = [];
+
+        if (MatchFormat == MatchFormat.SIX_LOV && IsTeam2v2)
+        {
+            int oppTeam = winningTeam == 0 ? 1 : 0;
+            int winScore = TeamScores[winningTeam];
+            int oppScore = TeamScores[oppTeam];
+
+            if (OneOnePlayoff)
+            {
+                if (winScore == 0 && oppScore == 1)
+                {
+                    TeamScores[winningTeam] = 1;
+                    TeamScores[oppTeam] = 1;
+                }
+                else if (winScore == 1 && oppScore == 1)
+                {
+                    TeamScores[winningTeam] = 2;
+                    TeamScores[oppTeam] = 0;
+                }
+                else if (oppScore >= 2 && oppScore <= 5)
+                {
+                    TeamScores[0] = 0;
+                    TeamScores[1] = 0;
+                    breakTriggered = true;
+                }
+                else
+                {
+                    TeamScores[winningTeam] = winScore + 1;
+                }
+            }
+            else
+            {
+                if (oppScore >= 1 && oppScore <= 5)
+                {
+                    TeamScores[0] = 0;
+                    TeamScores[1] = 0;
+                    breakTriggered = true;
+                }
+                else
+                {
+                    TeamScores[winningTeam] = winScore + 1;
+                }
+            }
+
+            SyncTeamScoresToPlayers();
+
+            if (breakTriggered)
+            {
+                TriggerBreakReset();
+                nextPoserId = null;
+                canPlayAnyTile = false;
+                Phase = MatchPhase.HAND_OVER;
+            }
+            else if (TeamScores[winningTeam] >= 6)
+            {
+                matchOver = true;
+                IsMatchOver = true;
+                MatchWinner = winner;
+                MatchWinningTeamId = winningTeam;
+                Phase = MatchPhase.MATCH_OVER;
+            }
+            else
+            {
+                EnterChoosePoserPhase(winner);
+                requiresChoosePoser = true;
+                poserChooserId = PoserChooserId;
+                partnerId = PartnerCandidateId;
+                nextPoserId = null;
+                canPlayAnyTile = true;
+            }
+        }
+        else if (MatchFormat == MatchFormat.TWO_BEST)
+        {
+            if (IsTeam2v2)
+            {
+                TeamScores[winningTeam]++;
+                SyncTeamScoresToPlayers();
+
+                if (TeamScores[winningTeam] >= 2)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    EnterChoosePoserPhase(winner);
+                    requiresChoosePoser = true;
+                    poserChooserId = PoserChooserId;
+                    partnerId = PartnerCandidateId;
+                    nextPoserId = null;
+                    canPlayAnyTile = true;
+                }
+            }
+            else
+            {
+                PlayerScores[winner.Id]++;
+                winner.MatchScore = PlayerScores[winner.Id];
+
+                if (PlayerScores[winner.Id] >= 2)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    ConfirmedPoserId = winner.Id;
+                    CanPoserPlayAnyTile = true;
+                    nextPoserId = winner.Id;
+                    canPlayAnyTile = true;
+                    Phase = MatchPhase.HAND_OVER;
+                }
+            }
+        }
+        else // CUT_THROAT (Free-For-All: 2, 3, or 4 players)
+        {
+            PlayerScores[winner.Id]++;
+            winner.MatchScore = PlayerScores[winner.Id];
+
+            if (PlayerScores[winner.Id] >= 6)
+            {
+                matchOver = true;
+                IsMatchOver = true;
+                MatchWinner = winner;
+                MatchWinningTeamId = winningTeam;
+                CutThroatedPlayerIds.Clear();
+                foreach (GamePlayer p in Players)
+                {
+                    if (PlayerScores[p.Id] == 0)
+                    {
+                        CutThroatedPlayerIds.Add(p.Id);
+                        cutThroated.Add(p.Id);
+                    }
+                }
+                Phase = MatchPhase.MATCH_OVER;
+            }
+            else if (Players.All(p => PlayerScores[p.Id] >= 1))
+            {
+                // Cut-Throat Break: every player has won at least 1 hand -> reset all to 0 and force [6|6]/fallback
+                foreach (GamePlayer p in Players)
+                {
+                    PlayerScores[p.Id] = 0;
+                    p.MatchScore = 0;
+                }
+                breakTriggered = true;
+                TriggerBreakReset();
+                nextPoserId = null;
+                canPlayAnyTile = false;
+                Phase = MatchPhase.HAND_OVER;
+            }
+            else
+            {
+                ConfirmedPoserId = winner.Id;
+                CanPoserPlayAnyTile = true;
+                nextPoserId = winner.Id;
+                canPlayAnyTile = true;
+                Phase = MatchPhase.HAND_OVER;
+            }
+        }
+
+        return new HandResolution
+        {
+            IsOver = true,
+            WasBlocked = raw.WasBlocked,
+            IsDraw = false,
+            Winner = winner,
+            WinningTeamId = winningTeam,
+            PointsAwarded = breakTriggered ? 0 : 1,
+            BreakTriggered = breakTriggered,
+            MatchOver = matchOver,
+            MatchWinner = matchOver ? winner : null,
+            MatchWinningTeamId = matchOver ? winningTeam : -1,
+            RequiresChoosePoser = requiresChoosePoser,
+            PoserChooserId = poserChooserId,
+            PartnerCandidateId = partnerId,
+            NextPoserId = nextPoserId,
+            CanPoserPlayAnyTile = canPlayAnyTile,
+            CutThroatedPlayerIds = cutThroated,
+            IndividualPipCounts = raw.IndividualPipCounts,
+            TeamScoresSnapshot = new Dictionary<int, int>(TeamScores),
+            PlayerScoresSnapshot = new Dictionary<long, int>(PlayerScores)
+        };
+    }
+
+    private void EnterChoosePoserPhase(GamePlayer handWinner)
+    {
+        GamePlayer? partner = GetPartner(handWinner);
+        PoserChooserId = handWinner.Id;
+        PartnerCandidateId = partner?.Id;
+        ConfirmedPoserId = null;
+        CanPoserPlayAnyTile = true;
+        ChoosePoserRemainingSeconds = ChoosePoserTimeoutSeconds;
+        Phase = MatchPhase.CHOOSE_POSER;
+    }
+
+    private void SyncTeamScoresToPlayers()
+    {
+        foreach (GamePlayer p in Players)
+        {
+            int team = GetEffectiveTeamId(p);
+            int score = TeamScores.TryGetValue(team, out int val) ? val : 0;
+            p.MatchScore = score;
+            PlayerScores[p.Id] = score;
+        }
     }
 
     private int GetEffectiveTeamId(GamePlayer player)

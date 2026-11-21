@@ -38,7 +38,8 @@ public class LobbyFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandle
             MaxNumberOfPlayer = dto.MaxNumberOfPlayer,
             Name = dto.Name,
             TableStyle = dto.TableStyle,
-            MatchFormat = dto.MatchFormat
+            MatchFormat = dto.MatchFormat,
+            OneOnePlayoff = dto.OneOnePlayoff
         });
         ResponseObjectDto<LobbyDto> response = DtoBuilder.GetLobbyDto(lobby);
         Chat chat = await dispatcher.Dispatch(new GetChatQuery(lobby.ChatId));

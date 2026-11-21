@@ -11,11 +11,11 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
     private int lobbyIdCounter = 1;
     private readonly List<Lobby> lobbies = [];
 
-    public Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null)
+    public Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null, bool? oneOnePlayoff = null)
     {
         code ??= codeGenerator.GenerateCodeForLobby();
         LobbyPlayer lobbyCreator = new(creator.User!);
-        Lobby lobby = new(lobbyIdCounter++, lobbyCreator, maxNumberOfPlayer, lobbyPublic, name, ranked, code, tableStyle, matchFormat)
+        Lobby lobby = new(lobbyIdCounter++, lobbyCreator, maxNumberOfPlayer, lobbyPublic, name, ranked, code, tableStyle, matchFormat, oneOnePlayoff)
         {
             PlayersInLobby = [lobbyCreator],
             ChatId = chatManager.CreateChat("Lobby")
