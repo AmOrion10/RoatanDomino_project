@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces.Managers;
 
 namespace Application.Messages.Commands.Game;
@@ -8,6 +8,7 @@ using Application.Exceptions.Game;
 
 using Domain.Game;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 
@@ -22,8 +23,9 @@ public class NextGameActionCommandHandler(IGameManager gameManager) : ICommandHa
 {
     public Task<GameAction> Handle(NextGameActionCommand request, CancellationToken cancellationToken)
     {
-        Game game = gameManager.GetById(request.GameId) ?? throw new GameNotFoundException($"Game with id {request.GameId} not found"); ;
+        Game game = gameManager.GetById(request.GameId) ?? throw new GameNotFoundException($"Game with id {request.GameId} not found");
         GameAction gameAction = new(GameActionType.Default);
+
         if (request.ActionType == PlayActionType.PlaceDomino)
         {
             if (game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0)
@@ -33,33 +35,72 @@ public class NextGameActionCommandHandler(IGameManager gameManager) : ICommandHa
                 if (!validMovement) throw new WrongPositionForDominoException("Wrong position for this domino");
                 gameAction.PlacedDomino = move;
                 game.NextTurn();
-                if (game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0)
-                {
-                    gameAction.Type = GameActionType.NextPlayerCanPlay;
-                }
-                else
-                {
-                    gameAction.Type = GameActionType.NextPlayerBlocked;
-                }
+                gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                    ? GameActionType.NextPlayerCanPlay
+                    : GameActionType.NextPlayerBlocked;
             }
         }
         else if (request.ActionType == PlayActionType.Draw)
         {
-            if (!game.Stack.IsEmpty())
+            if (game.IsLegacyDrawAdvance)
             {
-                Domino domino = game.Draw(game.PlayerPlaying.Id)!;
-                gameAction.DrawDomino = domino;
+                if (!game.Stack.IsEmpty())
+                {
+                    Domino? domino = game.Draw(game.PlayerPlaying.Id);
+                    gameAction.DrawDomino = domino;
+                }
+                game.NextTurn();
+                gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                    ? GameActionType.NextPlayerCanPlay
+                    : GameActionType.NextPlayerBlocked;
             }
-            game.NextTurn();
-            if (game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0)
+            else if (game.TableStyle == TableStyle.BLOCK)
             {
-                gameAction.Type = GameActionType.NextPlayerCanPlay;
+                // BLOCK mode forbids drawing; immediately pass when blocked
+                game.PassTurn(game.PlayerPlaying.Id);
+                gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                    ? GameActionType.NextPlayerCanPlay
+                    : GameActionType.NextPlayerBlocked;
             }
             else
             {
-                gameAction.Type = GameActionType.NextPlayerBlocked;
+                // DRAW mode: draw 1 tile at a time until playable or boneyard empty; pass only once boneyard is empty
+                if (game.CanDraw(game.PlayerPlaying.Id))
+                {
+                    gameAction.DrawDomino = game.Draw(game.PlayerPlaying.Id);
+                    if (game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0)
+                    {
+                        gameAction.Type = GameActionType.NextPlayerCanPlay;
+                    }
+                    else if (!game.Stack.IsEmpty())
+                    {
+                        gameAction.Type = GameActionType.NextPlayerBlocked;
+                    }
+                    else
+                    {
+                        game.PassTurn(game.PlayerPlaying.Id);
+                        gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                            ? GameActionType.NextPlayerCanPlay
+                            : GameActionType.NextPlayerBlocked;
+                    }
+                }
+                else
+                {
+                    game.PassTurn(game.PlayerPlaying.Id);
+                    gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                        ? GameActionType.NextPlayerCanPlay
+                        : GameActionType.NextPlayerBlocked;
+                }
             }
         }
+        else if (request.ActionType == PlayActionType.Pass)
+        {
+            game.PassTurn(game.PlayerPlaying.Id);
+            gameAction.Type = game.GetPlayerPossibleMoves(game.PlayerPlaying).Count > 0
+                ? GameActionType.NextPlayerCanPlay
+                : GameActionType.NextPlayerBlocked;
+        }
+
         if (game.CheckEndGame())
         {
             gameAction.Type = GameActionType.EndGame;

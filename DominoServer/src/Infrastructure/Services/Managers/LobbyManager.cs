@@ -1,7 +1,8 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 using Application.Interfaces.Managers;
 
 using Domain;
+using DominoCommon.com.domino.common.Scripts.Enums;
 
 namespace Infrastructure.Services.Managers;
 
@@ -10,11 +11,11 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
     private int lobbyIdCounter = 1;
     private readonly List<Lobby> lobbies = [];
 
-    public Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null)
+    public Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null)
     {
         code ??= codeGenerator.GenerateCodeForLobby();
         LobbyPlayer lobbyCreator = new(creator.User!);
-        Lobby lobby = new(lobbyIdCounter++, lobbyCreator, maxNumberOfPlayer, lobbyPublic, name, ranked, code)
+        Lobby lobby = new(lobbyIdCounter++, lobbyCreator, maxNumberOfPlayer, lobbyPublic, name, ranked, code, tableStyle, matchFormat)
         {
             PlayersInLobby = [lobbyCreator],
             ChatId = chatManager.CreateChat("Lobby")

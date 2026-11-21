@@ -1,4 +1,4 @@
-﻿using Application;
+using Application;
 using Application.Common;
 using Application.Interfaces;
 using Application.Messages.Commands.Game;
@@ -65,7 +65,7 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
         {
             await SendPlayerPlaceDomino(game.Id, dto, clientsInGame);
         }
-        else if (dto.PlayActionType == PlayActionType.Draw)
+        else if (dto.PlayActionType == PlayActionType.Draw || dto.PlayActionType == PlayActionType.Pass)
         {
             await SendPlayerDrawDomino(game.Id, gameAction, dto, clientsInGame);
         }
@@ -79,10 +79,13 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
             while (gameAction.Type != GameActionType.EndGame && gameAction.Type != GameActionType.NextPlayerCanPlay)
             {
                 await Task.Delay(2000);
-                PlayerPlayDto dtoNextPlayer = DtoBuilder.GetPlayerPlayDto(game.PlayerPlaying.Id, PlayActionType.Draw);
+                PlayActionType nextAction = game.CanDraw(game.PlayerPlaying.Id) || (game.IsLegacyDrawAdvance && !game.Stack.IsEmpty())
+                    ? PlayActionType.Draw
+                    : PlayActionType.Pass;
+                PlayerPlayDto dtoNextPlayer = DtoBuilder.GetPlayerPlayDto(game.PlayerPlaying.Id, nextAction);
                 gameAction = await dispatcher.Dispatch(new NextGameActionCommand
                 {
-                    ActionType = PlayActionType.Draw,
+                    ActionType = nextAction,
                     GameId = game.Id
                 });
                 await SendPlayerDrawDomino(game.Id, gameAction, dtoNextPlayer, clientsInGame);

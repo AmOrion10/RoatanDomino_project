@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 
 public class RoatanMatchEngine
@@ -9,6 +10,7 @@ public class RoatanMatchEngine
     public class MatchPlayer
     {
         public int Id { get; set; }
+        public int TeamId { get; set; }
         public string Name { get; set; }
         public bool IsBot { get; set; }
         public BotDifficulty? Difficulty { get; set; }
@@ -47,19 +49,33 @@ public class RoatanMatchEngine
     public class RoundResult
     {
         public MatchPlayer Winner { get; set; }
+        public int WinningTeamId { get; set; } = -1;
         public bool WasBlocked { get; set; }
+        public bool IsDraw { get; set; }
+        public bool BreakTriggered { get; set; }
         public int PointsAwarded { get; set; }
+        public int NextPoserIndex { get; set; } = -1;
         public List<MatchPlayer> Standings { get; set; }
     }
 
     public RoatanGameMode Mode { get; }
+    public TableStyle TableStyle { get; }
+    public MatchFormat MatchFormat { get; }
+    public TurnDirection TurnDirection { get; set; }
+    public bool IsTeam2v2 { get; }
     public BotDifficulty Difficulty { get; }
     public List<MatchPlayer> Players { get; } = new List<MatchPlayer>();
     public MatchPlayer CurrentPlayer => Players[currentPlayerIndex];
     public int CurrentPlayerIndex => currentPlayerIndex;
     public int BoneyardCount => boneyard.Count;
+    public int LockedPileCount => lockedPile.Count;
     public int RoundNumber { get; private set; }
     public int TargetMatchScore { get; } = 100;
+    public int ConsecutivePasses => consecutivePasses;
+    public bool IsBreakResetPending { get; private set; } = true;
+    public int CurrentHandPoserIndex { get; private set; } = -1;
+    public int LastHandPoserIndex { get; private set; } = -1;
+    public bool LastHandWasDraw { get; private set; }
 
     public bool HasBoardStarted => leftChain.Count > 0 || centerTile != null;
     public int LeftEndPip { get; private set; } = -1;
@@ -72,6 +88,7 @@ public class RoatanMatchEngine
 
     private readonly Random rng;
     private readonly List<DominoDto> boneyard = new List<DominoDto>();
+    private readonly List<DominoDto> lockedPile = new List<DominoDto>();
     private readonly List<PlacedTile> leftChain = new List<PlacedTile>();
     private readonly List<PlacedTile> rightChain = new List<PlacedTile>();
     private readonly List<DominoDto> playedDominoes = new List<DominoDto>();
@@ -83,31 +100,74 @@ public class RoatanMatchEngine
 
     private static readonly string[] IslandBotNames = { "Anthony", "Patrik", "Astor" };
 
+    /// <summary>
+    /// Backward-compatible constructor mapping RoatanGameMode to decoupled TableStyle + MatchFormat.
+    /// </summary>
     public RoatanMatchEngine(RoatanGameMode mode, BotDifficulty difficulty, int botCount, int? seed = null)
+        : this(
+            mode == RoatanGameMode.BlockedCerrado ? TableStyle.BLOCK : TableStyle.DRAW,
+            MatchFormat.CUT_THROAT,
+            difficulty,
+            botCount,
+            seed,
+            isTeam2v2: false,
+            turnDirection: TurnDirection.CounterClockwise)
     {
-        Mode = mode;
+    }
+
+    public RoatanMatchEngine(
+        TableStyle tableStyle,
+        MatchFormat matchFormat,
+        BotDifficulty difficulty,
+        int botCount,
+        int? seed = null,
+        bool isTeam2v2 = false,
+        TurnDirection turnDirection = TurnDirection.CounterClockwise)
+    {
+        TableStyle = tableStyle;
+        MatchFormat = matchFormat;
+        Mode = tableStyle == TableStyle.BLOCK ? RoatanGameMode.BlockedCerrado : RoatanGameMode.ClassicDraw;
+        TurnDirection = turnDirection;
         Difficulty = difficulty;
         rng = seed.HasValue ? new Random(seed.Value) : new Random();
 
-        int clampedBots = mode == RoatanGameMode.BlockedCerrado ? 3 : Math.Max(1, Math.Min(3, botCount));
+        int clampedBots = Math.Max(1, Math.Min(3, botCount));
+        int totalPlayers = 1 + clampedBots;
+        IsTeam2v2 = isTeam2v2 && totalPlayers == 4;
 
         Players.Add(new MatchPlayer
         {
             Id = 0,
+            TeamId = IsTeam2v2 ? 0 : 0,
             Name = "You",
             IsBot = false
         });
 
         for (int i = 0; i < clampedBots; i++)
         {
+            int seatId = i + 1;
             Players.Add(new MatchPlayer
             {
-                Id = i + 1,
+                Id = seatId,
+                TeamId = IsTeam2v2 ? (seatId % 2) : seatId,
                 Name = IslandBotNames[i],
                 IsBot = true,
                 Difficulty = difficulty
             });
         }
+    }
+
+    public static int GetTilesPerPlayer(int playerCount, TableStyle tableStyle)
+    {
+        if (playerCount == 2) return 7;
+        if (playerCount == 3) return tableStyle == TableStyle.BLOCK ? 9 : 7;
+        if (playerCount == 4) return tableStyle == TableStyle.BLOCK ? 7 : 6;
+        return 7;
+    }
+
+    public void TriggerBreakReset()
+    {
+        IsBreakResetPending = true;
     }
 
     public PlacedTile StartNewRound()
@@ -117,13 +177,15 @@ public class RoatanMatchEngine
         leftChain.Clear();
         rightChain.Clear();
         playedDominoes.Clear();
+        lockedPile.Clear();
         LeftEndPip = -1;
         RightEndPip = -1;
         consecutivePasses = 0;
 
-        BuildAndShuffleBoneyard();
+        bool excludeDoubleBlank = Players.Count == 3 && TableStyle == TableStyle.BLOCK;
+        BuildAndShuffleDeck(excludeDoubleBlank);
 
-        int tilesPerPlayer = (Mode == RoatanGameMode.ClassicDraw && Players.Count == 4) ? 6 : 7;
+        int tilesPerPlayer = GetTilesPerPlayer(Players.Count, TableStyle);
         foreach (MatchPlayer player in Players)
         {
             player.Hand.Clear();
@@ -137,20 +199,38 @@ public class RoatanMatchEngine
             }
         }
 
-        // First round (or if no prior winner): highest double starts (fallback: highest pip sum).
-        // Subsequent rounds: previous round winner leads with their best double or highest tile.
-        int starterIdx;
-        DominoDto starterTile;
-        if (lastRoundWinnerIndex >= 0 && lastRoundWinnerIndex < Players.Count)
+        // In BLOCK mode (e.g. 1v1 with 14 remaining tiles), place undealt tiles into a locked/inactive pile.
+        if (TableStyle == TableStyle.BLOCK && boneyard.Count > 0)
+        {
+            lockedPile.AddRange(boneyard);
+            boneyard.Clear();
+        }
+
+        ResolveOpeningPose(out int starterIdx, out DominoDto starterTile);
+        return ApplyOpeningPose(starterIdx, starterTile);
+    }
+
+    public void ResolveOpeningPose(out int starterIdx, out DominoDto starterTile)
+    {
+        if (!IsBreakResetPending && LastHandWasDraw && LastHandPoserIndex >= 0 && LastHandPoserIndex < Players.Count)
+        {
+            starterIdx = LastHandPoserIndex;
+            starterTile = FindBestOpeningTile(Players[starterIdx]);
+            return;
+        }
+
+        if (!IsBreakResetPending && !LastHandWasDraw && lastRoundWinnerIndex >= 0 && lastRoundWinnerIndex < Players.Count)
         {
             starterIdx = lastRoundWinnerIndex;
             starterTile = FindBestOpeningTile(Players[starterIdx]);
-        }
-        else
-        {
-            FindGlobalOpeningTile(out starterIdx, out starterTile);
+            return;
         }
 
+        FindGlobalOpeningTile(out starterIdx, out starterTile);
+    }
+
+    private PlacedTile ApplyOpeningPose(int starterIdx, DominoDto starterTile)
+    {
         MatchPlayer starter = Players[starterIdx];
         RemoveFromHand(starter, starterTile);
 
@@ -167,7 +247,10 @@ public class RoatanMatchEngine
         RightEndPip = starterTile.Side2;
         playedDominoes.Add(Clone(starterTile));
 
-        currentPlayerIndex = (starterIdx + 1) % Players.Count;
+        CurrentHandPoserIndex = starterIdx;
+        LastHandPoserIndex = starterIdx;
+        IsBreakResetPending = false;
+        currentPlayerIndex = StepTurnIndex(starterIdx);
         return centerTile;
     }
 
@@ -195,8 +278,6 @@ public class RoatanMatchEngine
                 });
             }
 
-            // If both ends have the same pip value AND it's the very first tile (just center),
-            // still allow choosing either side unless user prefers simplicity — allowing both sides feels natural.
             if (matchesRight && !(endsEqual && leftChain.Count == 0 && rightChain.Count == 0))
             {
                 int exposed = tile.Side1 == RightEndPip ? tile.Side2 : tile.Side1;
@@ -252,13 +333,13 @@ public class RoatanMatchEngine
         playedDominoes.Add(Clone(inHand));
         consecutivePasses = 0;
 
-        currentPlayerIndex = (currentPlayerIndex + 1) % Players.Count;
+        currentPlayerIndex = StepTurnIndex(currentPlayerIndex);
         return placed;
     }
 
     public DominoDto DrawFromBoneyard()
     {
-        if (Mode == RoatanGameMode.BlockedCerrado || boneyard.Count == 0)
+        if (!CanCurrentPlayerDraw())
         {
             return null;
         }
@@ -271,20 +352,43 @@ public class RoatanMatchEngine
         return tile;
     }
 
-    public void PassTurn()
+    public bool PassTurn()
     {
+        if (!CanCurrentPlayerPass())
+        {
+            return false;
+        }
+
         consecutivePasses++;
-        currentPlayerIndex = (currentPlayerIndex + 1) % Players.Count;
+        currentPlayerIndex = StepTurnIndex(currentPlayerIndex);
+        return true;
     }
 
     public bool CanCurrentPlayerDraw()
     {
-        return Mode == RoatanGameMode.ClassicDraw && boneyard.Count > 0;
+        return TableStyle == TableStyle.DRAW &&
+               boneyard.Count > 0 &&
+               GetLegalMoves(CurrentPlayer).Count == 0;
+    }
+
+    public bool CanCurrentPlayerPass()
+    {
+        return GetLegalMoves(CurrentPlayer).Count == 0 && !CanCurrentPlayerDraw();
     }
 
     public MatchPlayer PeekNextPlayer()
     {
-        return Players[(currentPlayerIndex + 1) % Players.Count];
+        return Players[StepTurnIndex(currentPlayerIndex)];
+    }
+
+    private int StepTurnIndex(int fromIndex)
+    {
+        if (TurnDirection == TurnDirection.Clockwise)
+        {
+            return (fromIndex + 1) % Players.Count;
+        }
+
+        return (fromIndex - 1 + Players.Count) % Players.Count;
     }
 
     public bool IsRoundOver(out bool wasBlocked)
@@ -296,12 +400,6 @@ public class RoatanMatchEngine
         }
 
         if (consecutivePasses >= Players.Count && boneyard.Count == 0)
-        {
-            wasBlocked = true;
-            return true;
-        }
-
-        if (boneyard.Count == 0 && Players.All(p => GetLegalMoves(p).Count == 0))
         {
             wasBlocked = true;
             return true;
@@ -321,26 +419,108 @@ public class RoatanMatchEngine
             .ThenBy(p => p.Hand.Count)
             .ToList();
 
-        MatchPlayer winner = standings[0];
-        int pointsWon = 0;
-        foreach (MatchPlayer p in Players)
+        // Domino Out: player emptied hand
+        MatchPlayer dominoOutWinner = Players.FirstOrDefault(p => p.Hand.Count == 0);
+        if (dominoOutWinner != null)
         {
-            if (p.Id != winner.Id)
+            int winningTeam = dominoOutWinner.TeamId;
+            int pointsWon = SumOpposingPips(winningTeam);
+            AwardPoints(dominoOutWinner, winningTeam, pointsWon);
+
+            LastHandWasDraw = false;
+            lastRoundWinnerIndex = Players.FindIndex(p => p.Id == dominoOutWinner.Id);
+
+            return new RoundResult
             {
-                pointsWon += p.HandPipSum();
-            }
+                Winner = dominoOutWinner,
+                WinningTeamId = winningTeam,
+                WasBlocked = false,
+                IsDraw = false,
+                BreakTriggered = false,
+                PointsAwarded = pointsWon,
+                NextPoserIndex = lastRoundWinnerIndex,
+                Standings = standings
+            };
         }
 
-        winner.MatchScore += pointsWon;
-        lastRoundWinnerIndex = Players.FindIndex(p => p.Id == winner.Id);
+        // Blocked Board (Lockdown): compare individual player hand pip sums (never combine partners' pips)
+        int lowestIndividualPips = Players.Min(p => p.HandPipSum());
+        List<MatchPlayer> lowestPlayers = Players
+            .Where(p => p.HandPipSum() == lowestIndividualPips)
+            .ToList();
+
+        List<int> distinctLowestTeams = lowestPlayers
+            .Select(p => p.TeamId)
+            .Distinct()
+            .ToList();
+
+        // Opposing tie for lowest individual pip total -> Draw (0 pts, no Break, same Poser next hand)
+        if (distinctLowestTeams.Count > 1)
+        {
+            LastHandWasDraw = true;
+            return new RoundResult
+            {
+                Winner = null,
+                WinningTeamId = -1,
+                WasBlocked = true,
+                IsDraw = true,
+                BreakTriggered = false,
+                PointsAwarded = 0,
+                NextPoserIndex = CurrentHandPoserIndex,
+                Standings = standings
+            };
+        }
+
+        MatchPlayer blockWinner = lowestPlayers[0];
+        int blockWinningTeam = distinctLowestTeams[0];
+        int blockPoints = SumOpposingPips(blockWinningTeam);
+        AwardPoints(blockWinner, blockWinningTeam, blockPoints);
+
+        LastHandWasDraw = false;
+        lastRoundWinnerIndex = Players.FindIndex(p => p.Id == blockWinner.Id);
 
         return new RoundResult
         {
-            Winner = winner,
-            WasBlocked = wasBlocked,
-            PointsAwarded = pointsWon,
+            Winner = blockWinner,
+            WinningTeamId = blockWinningTeam,
+            WasBlocked = true,
+            IsDraw = false,
+            BreakTriggered = false,
+            PointsAwarded = blockPoints,
+            NextPoserIndex = lastRoundWinnerIndex,
             Standings = standings
         };
+    }
+
+    private int SumOpposingPips(int winningTeamId)
+    {
+        int sum = 0;
+        foreach (MatchPlayer p in Players)
+        {
+            if (p.TeamId != winningTeamId)
+            {
+                sum += p.HandPipSum();
+            }
+        }
+        return sum;
+    }
+
+    private void AwardPoints(MatchPlayer winner, int winningTeamId, int points)
+    {
+        if (IsTeam2v2)
+        {
+            foreach (MatchPlayer p in Players)
+            {
+                if (p.TeamId == winningTeamId)
+                {
+                    p.MatchScore += points;
+                }
+            }
+        }
+        else
+        {
+            winner.MatchScore += points;
+        }
     }
 
     public bool HasMatchChampion(out MatchPlayer champion)
@@ -349,13 +529,17 @@ public class RoatanMatchEngine
         return champion != null;
     }
 
-    private void BuildAndShuffleBoneyard()
+    private void BuildAndShuffleDeck(bool excludeDoubleBlank)
     {
         boneyard.Clear();
         for (int i = 0; i <= 6; i++)
         {
             for (int j = i; j <= 6; j++)
             {
+                if (excludeDoubleBlank && i == 0 && j == 0)
+                {
+                    continue;
+                }
                 boneyard.Add(new DominoDto { Side1 = i, Side2 = j });
             }
         }
@@ -384,6 +568,7 @@ public class RoatanMatchEngine
         bestTile = Players[0].Hand[0];
         int bestDouble = -1;
 
+        // First priority: [6|6] down to [0|0]
         for (int i = 0; i < Players.Count; i++)
         {
             foreach (DominoDto d in Players[i].Hand)
@@ -399,15 +584,19 @@ public class RoatanMatchEngine
 
         if (bestDouble >= 0) return;
 
+        // Fallback if no player holds a double: highest total pip sum (tie-breaker: highest single end)
         int bestSum = -1;
+        int bestMaxEnd = -1;
         for (int i = 0; i < Players.Count; i++)
         {
             foreach (DominoDto d in Players[i].Hand)
             {
                 int sum = d.Side1 + d.Side2;
-                if (sum > bestSum)
+                int maxEnd = Math.Max(d.Side1, d.Side2);
+                if (sum > bestSum || (sum == bestSum && maxEnd > bestMaxEnd))
                 {
                     bestSum = sum;
+                    bestMaxEnd = maxEnd;
                     bestPlayerIdx = i;
                     bestTile = d;
                 }
@@ -426,6 +615,7 @@ public class RoatanMatchEngine
 
         return player.Hand
             .OrderByDescending(d => d.Side1 + d.Side2)
+            .ThenByDescending(d => Math.Max(d.Side1, d.Side2))
             .First();
     }
 

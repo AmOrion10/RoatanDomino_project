@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces;
 using Application.Messages.Commands.Lobby;
 using Application.Messages.Queries.Chat;
@@ -36,7 +36,9 @@ public class LobbyFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandle
             Creator = client,
             LobbyPublic = dto.Public,
             MaxNumberOfPlayer = dto.MaxNumberOfPlayer,
-            Name = dto.Name
+            Name = dto.Name,
+            TableStyle = dto.TableStyle,
+            MatchFormat = dto.MatchFormat
         });
         ResponseObjectDto<LobbyDto> response = DtoBuilder.GetLobbyDto(lobby);
         Chat chat = await dispatcher.Dispatch(new GetChatQuery(lobby.ChatId));

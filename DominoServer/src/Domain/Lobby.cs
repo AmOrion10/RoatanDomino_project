@@ -1,6 +1,17 @@
-﻿namespace Domain;
+using DominoCommon.com.domino.common.Scripts.Enums;
 
-public class Lobby(int id, LobbyPlayer creator, int maxNumberOfPlayer, bool isPublic, string name, bool ranked, string code)
+namespace Domain;
+
+public class Lobby(
+    int id,
+    LobbyPlayer creator,
+    int maxNumberOfPlayer,
+    bool isPublic,
+    string name,
+    bool ranked,
+    string code,
+    TableStyle? tableStyle = null,
+    MatchFormat? matchFormat = null)
 {
     public int Id { get; } = id;
     public LobbyPlayer Creator { get; set; } = creator;
@@ -11,6 +22,8 @@ public class Lobby(int id, LobbyPlayer creator, int maxNumberOfPlayer, bool isPu
     public string Name { get; } = name;
     public bool Ranked { get; } = ranked;
     public string Code { get; } = code;
+    public TableStyle? TableStyle { get; } = tableStyle;
+    public MatchFormat? MatchFormat { get; } = matchFormat;
     public int ChatId { get; set; }
 
     public bool IsEmpty()

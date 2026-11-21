@@ -1,4 +1,4 @@
-﻿using Domain;
+using Domain;
 using Domain.Game;
 
 using DominoCommon.com.domino.common.Scripts;
@@ -40,7 +40,9 @@ public static class DtoBuilder
                 IsPublic = lobby.IsPublic,
                 MaxNumberOfPlayer = lobby.MaxNumberOfPlayer,
                 Ranked = lobby.Ranked,
-                Code = lobby.Code
+                Code = lobby.Code,
+                TableStyle = lobby.TableStyle,
+                MatchFormat = lobby.MatchFormat
             }
         };
     }
@@ -94,7 +96,9 @@ public static class DtoBuilder
                     MaxNumberOfPlayer = l.MaxNumberOfPlayer,
                     NumberOfPlayer = l.PlayersInLobby.Count,
                     Name = l.Name,
-                    IsPublic = l.IsPublic
+                    IsPublic = l.IsPublic,
+                    TableStyle = l.TableStyle,
+                    MatchFormat = l.MatchFormat
                 }).ToList()
             }
         };

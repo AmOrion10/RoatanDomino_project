@@ -1,4 +1,4 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 using Application.Interfaces.Managers;
 
 using Domain;
@@ -25,10 +25,25 @@ public class GameManager(IChatManager chatManager) : IGameManager
     public void CreateGameFromLobby(Lobby lobby, int seed)
     {
         List<GamePlayer> players = lobby.PlayersInLobby.Select(lobbyPlayer => new GamePlayer(lobbyPlayer)).ToList();
-        Game game = new(lobby.Id, players, lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked, seed)
+        GameMode mode = lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked;
+        Game game;
+        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue)
         {
-            ChatId = chatManager.CreateChat("Game")
-        };
+            TableStyle tableStyle = lobby.TableStyle ?? TableStyle.DRAW;
+            MatchFormat matchFormat = lobby.MatchFormat ?? MatchFormat.CUT_THROAT;
+            bool isTeam2v2 = players.Count == 4 && matchFormat != MatchFormat.CUT_THROAT;
+            game = new Game(lobby.Id, players, mode, tableStyle, matchFormat, seed, isTeam2v2: isTeam2v2)
+            {
+                ChatId = chatManager.CreateChat("Game")
+            };
+        }
+        else
+        {
+            game = new Game(lobby.Id, players, mode, seed)
+            {
+                ChatId = chatManager.CreateChat("Game")
+            };
+        }
         lock (games)
         {
             games.Add(game);

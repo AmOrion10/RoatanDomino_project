@@ -203,7 +203,7 @@ public class RoatanMobileApp : MonoBehaviour
         RoatanSoundFX.Instance?.PlayTap();
         StopMatchRoutine();
 
-        int bots = selectedMode == RoatanGameMode.BlockedCerrado ? 3 : selectedBotCount;
+        int bots = selectedBotCount;
         engine = new RoatanMatchEngine(selectedMode, selectedDifficulty, bots);
         botBrain = new RoatanBotBrain();
 
@@ -490,9 +490,10 @@ public class RoatanMobileApp : MonoBehaviour
         boardView.ClearSlots();
 
         RoatanMatchEngine.RoundResult result = engine.CompleteRound();
-        bool hasChampion = engine.HasMatchChampion(out RoatanMatchEngine.MatchPlayer champion);
+        RoatanMatchEngine.MatchPlayer champion = null;
+        bool hasChampion = !result.IsDraw && engine.HasMatchChampion(out champion);
 
-        if (result.Winner.Id == 0)
+        if (!result.IsDraw && result.Winner != null && result.Winner.Id == 0)
         {
             RoatanSoundFX.Instance?.PlayWin();
         }
@@ -513,16 +514,33 @@ public class RoatanMobileApp : MonoBehaviour
         RefreshOpponentSeats();
 
         string reason = result.WasBlocked ? RoatanLocalization.T("blocked_reason") : RoatanLocalization.T("domino_reason");
-        summaryTitleLabel.text = hasChampion
-            ? (champion.Id == 0 ? "MATCH CHAMPION!" : $"{champion.Name} WINS MATCH")
-            : (result.Winner.Id == 0 ? $"YOU WON ROUND {engine.RoundNumber}!" : $"{result.Winner.Name} WON ROUND {engine.RoundNumber}");
+        if (result.IsDraw)
+        {
+            summaryTitleLabel.text = $"ROUND {engine.RoundNumber} — DRAW (TIE)!";
+        }
+        else
+        {
+            summaryTitleLabel.text = hasChampion
+                ? (champion.Id == 0 ? "MATCH CHAMPION!" : $"{champion.Name} WINS MATCH")
+                : (result.Winner.Id == 0 ? $"YOU WON ROUND {engine.RoundNumber}!" : $"{result.Winner.Name} WON ROUND {engine.RoundNumber}");
+        }
 
         System.Text.StringBuilder sb = new System.Text.StringBuilder();
-        sb.AppendLine($"{reason}   •   +{result.PointsAwarded} pts to {result.Winner.Name}");
+        if (result.IsDraw)
+        {
+            string samePoserName = (result.NextPoserIndex >= 0 && result.NextPoserIndex < engine.Players.Count)
+                ? engine.Players[result.NextPoserIndex].Name
+                : "Poser";
+            sb.AppendLine($"{reason}   •   0 pts awarded (Tie)   •   {samePoserName} poses next");
+        }
+        else
+        {
+            sb.AppendLine($"{reason}   •   +{result.PointsAwarded} pts to {result.Winner.Name}");
+        }
         sb.AppendLine();
         foreach (RoatanMatchEngine.MatchPlayer p in result.Standings)
         {
-            string tag = p.Id == result.Winner.Id ? "★ " : "   ";
+            string tag = (!result.IsDraw && result.Winner != null && p.Id == result.Winner.Id) ? "★ " : "   ";
             sb.AppendLine($"{tag}{p.Name,-10}   Hand: {p.HandPipSum(),2} pips ({p.Hand.Count} tiles)   |   Score: {p.MatchScore}/{engine.TargetMatchScore}");
         }
 
@@ -612,9 +630,8 @@ public class RoatanMobileApp : MonoBehaviour
             }
         }
 
-        bool isClassic = selectedMode == RoatanGameMode.ClassicDraw;
-        opponentsHeaderLabel.text = isClassic ? RoatanLocalization.T("opponents") : RoatanLocalization.T("cerrado_opp_banner");
-        opponentsRowObj.SetActive(isClassic);
+        opponentsHeaderLabel.text = RoatanLocalization.T("opponents");
+        opponentsRowObj.SetActive(true);
 
         foreach (KeyValuePair<int, Image> kv in botCountBtnImages)
         {
@@ -643,7 +660,9 @@ public class RoatanMobileApp : MonoBehaviour
     {
         if (engine == null) return;
         string modeShort = engine.Mode == RoatanGameMode.BlockedCerrado ? "Cerrado" : "Classic Draw";
-        string boneyardPart = engine.Mode == RoatanGameMode.ClassicDraw ? $"  •  Boneyard: {engine.BoneyardCount}" : "";
+        string boneyardPart = engine.Mode == RoatanGameMode.ClassicDraw
+            ? $"  •  Boneyard: {engine.BoneyardCount}"
+            : (engine.LockedPileCount > 0 ? $"  •  Locked: {engine.LockedPileCount}" : "");
         int humanScore = engine.Players[0].MatchScore;
         matchHeaderPill.text = $"{modeShort} ({RoatanLocalization.DifficultyLabel(engine.Difficulty)})  •  Rd {engine.RoundNumber}  •  You: {humanScore}/{engine.TargetMatchScore}{boneyardPart}";
     }

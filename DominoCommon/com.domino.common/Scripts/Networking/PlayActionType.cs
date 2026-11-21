@@ -1,8 +1,9 @@
-﻿namespace DominoCommon.com.domino.common.Scripts.Networking
+namespace DominoCommon.com.domino.common.Scripts.Networking
 {
     public enum PlayActionType
     {
         PlaceDomino,
-        Draw
+        Draw,
+        Pass
     }
 }
