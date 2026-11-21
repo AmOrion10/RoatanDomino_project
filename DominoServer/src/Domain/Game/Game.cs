@@ -12,6 +12,10 @@ public class Game
     private const int FlatBet = 10;
 
     public const double ChoosePoserTimeoutSeconds = 8.0;
+    public const double AutoPassTimeoutSeconds = 5.0;
+    public const double TurnActionTimeoutSeconds = 10.0;
+    public const int BotTakeoverStrikeLimit = 3;
+    public const double BotTakeoverDelaySeconds = 1.2;
 
     public int Id { get; }
     public List<GamePlayer> Players { get; }
@@ -151,11 +155,56 @@ public class Game
         };
     }
 
+    public static List<PostHandAction> GetPostHandActions(bool breakTriggered, bool matchOver)
+    {
+        if (breakTriggered || matchOver)
+        {
+            return [PostHandAction.Rematch, PostHandAction.NewMatch, PostHandAction.Leave];
+        }
+
+        return [PostHandAction.NextRound, PostHandAction.Leave];
+    }
+
     public void TriggerBreakReset()
     {
         IsBreakResetPending = true;
         ConfirmedPoserId = null;
         CanPoserPlayAnyTile = false;
+    }
+
+    /// <summary>
+    /// Resets all match scores to 0 and immediately starts a new [6|6] opening hand with the same players.
+    /// Used by the post-Break (Game Bruk) "Rematch" action.
+    /// </summary>
+    public void StartRematchAfterBreak(int? seed = null)
+    {
+        if (IsTeam2v2)
+        {
+            TeamScores[0] = 0;
+            TeamScores[1] = 0;
+        }
+
+        foreach (GamePlayer player in Players)
+        {
+            player.MatchScore = 0;
+            PlayerScores[player.Id] = 0;
+        }
+
+        IsMatchOver = false;
+        MatchWinner = null;
+        MatchWinningTeamId = -1;
+        CutThroatedPlayerIds.Clear();
+        LastHandWasDraw = false;
+        LastHandWinnerId = null;
+        LastHandPoserId = null;
+        CurrentHandPoserId = null;
+        TriggerBreakReset();
+
+        gridDto = new GameGridDto(NumberOfRows, NumberOfCols);
+        placer = new DominoPlacer(gridDto);
+        Stack.Reset(seed);
+        DistributeDominoes();
+        PlaceFirstDomino();
     }
 
     /// <summary>
@@ -295,6 +344,7 @@ public class Game
         }
 
         ApplyOpeningDomino(poser, inHand);
+        poser.RecordManualAction();
         return true;
     }
 
@@ -357,7 +407,7 @@ public class Game
         return false;
     }
 
-    public bool PlaceDomino(GameMove move)
+    public bool PlaceDomino(GameMove move, bool isAutomated = false)
     {
         if (move.PlayerId == PlayerPlaying.Id)
         {
@@ -365,6 +415,10 @@ public class Game
             if (placed)
             {
                 ConsecutivePasses = 0;
+                if (!isAutomated)
+                {
+                    PlayerPlaying.RecordManualAction();
+                }
             }
             return placed;
         }
@@ -392,7 +446,7 @@ public class Game
         return true;
     }
 
-    public Domino? Draw(long idUser)
+    public Domino? Draw(long idUser, bool isAutomated = false)
     {
         if (TableStyle == TableStyle.BLOCK || Stack.IsLocked)
         {
@@ -405,22 +459,158 @@ public class Game
             if (domino is not null)
             {
                 PlayerPlaying.AddDominoToHand(domino);
+                if (!isAutomated)
+                {
+                    PlayerPlaying.RecordManualAction();
+                }
                 return domino;
             }
         }
         return null;
     }
 
-    public bool PassTurn(long idUser)
+    public bool PassTurn(long idUser, bool isAutomated = false)
     {
         if (!CanPass(idUser))
         {
             return false;
         }
 
+        if (!isAutomated && PlayerPlaying.IsBotControlled)
+        {
+            PlayerPlaying.ReclaimManualControl();
+        }
+
         ConsecutivePasses++;
         NextTurn();
         return true;
+    }
+
+    public bool IsCurrentPlayerAutoPassTurn()
+    {
+        return Players.Count > 0 && CanPass(PlayerPlaying.Id);
+    }
+
+    public double GetActiveTurnTimeoutSeconds()
+    {
+        return IsCurrentPlayerAutoPassTurn() ? AutoPassTimeoutSeconds : TurnActionTimeoutSeconds;
+    }
+
+    public int GetActiveTurnDurationSeconds()
+    {
+        if (Players.Count > 0 && PlayerPlaying.IsBotControlled)
+        {
+            return Math.Max(1, (int)Math.Round(BotTakeoverDelaySeconds));
+        }
+
+        return (int)GetActiveTurnTimeoutSeconds();
+    }
+
+    /// <summary>
+    /// Executes the 5-second auto-pass when the active player has zero valid moves (and empty boneyard in DRAW).
+    /// Explicitly does NOT increment ConsecutiveAutoPlays.
+    /// </summary>
+    public bool ExecuteAutoPassOnTimeout(long playerId)
+    {
+        if (Players.Count == 0 || playerId != PlayerPlaying.Id || !CanPass(playerId))
+        {
+            return false;
+        }
+
+        return PassTurn(playerId, isAutomated: true);
+    }
+
+    /// <summary>
+    /// Executes the 10-second turn timeout auto-play: performs any required boneyard draws in DRAW mode,
+    /// plays a valid tile, increments ConsecutiveAutoPlays (+1), and triggers 3-strike bot takeover at 3.
+    /// If the player already had no valid moves and could not draw, performs auto-pass without any AFK strike.
+    /// </summary>
+    public (bool PlayedTile, bool Passed, List<Domino> DrawnDominoes, GameMove? PlacedMove, bool TriggeredBotTakeover) ExecuteTimeoutAutoPlay(long playerId)
+    {
+        List<Domino> drawn = [];
+        if (Players.Count == 0 || playerId != PlayerPlaying.Id)
+        {
+            return (false, false, drawn, null, false);
+        }
+
+        GamePlayer actingPlayer = PlayerPlaying;
+
+        // No valid move and cannot draw -> 5s auto-pass, NEVER increments AFK strikes
+        if (CanPass(playerId))
+        {
+            bool autoPassed = ExecuteAutoPassOnTimeout(playerId);
+            return (false, autoPassed, drawn, null, false);
+        }
+
+        while (CanDraw(playerId))
+        {
+            Domino? tile = Draw(playerId, isAutomated: true);
+            if (tile is null) break;
+            drawn.Add(tile);
+        }
+
+        List<GameMove> possibleMoves = GetPlayerPossibleMoves(actingPlayer);
+        if (possibleMoves.Count > 0)
+        {
+            GameMove chosen = ChooseBestAutoPlayMove(possibleMoves);
+            PlaceDomino(chosen, isAutomated: true);
+            NextTurn();
+            bool tookOver = actingPlayer.RecordTimeoutAutoPlay(BotTakeoverStrikeLimit);
+            return (true, false, drawn, chosen, tookOver);
+        }
+
+        bool passed = PassTurn(playerId, isAutomated: true);
+        bool takeoverAfterDraw = actingPlayer.RecordTimeoutAutoPlay(BotTakeoverStrikeLimit);
+        return (false, passed, drawn, null, takeoverAfterDraw);
+    }
+
+    /// <summary>
+    /// Executes a turn automatically for a seat currently under 3-strike bot takeover (IsBotControlled == true).
+    /// Keeps IsBotControlled == true until the human explicitly reclaims control.
+    /// </summary>
+    public (bool PlayedTile, bool Passed, List<Domino> DrawnDominoes, GameMove? PlacedMove) ExecuteBotTakeoverTurn(long playerId)
+    {
+        List<Domino> drawn = [];
+        if (Players.Count == 0 || playerId != PlayerPlaying.Id || !PlayerPlaying.IsBotControlled)
+        {
+            return (false, false, drawn, null);
+        }
+
+        GamePlayer actingPlayer = PlayerPlaying;
+        while (CanDraw(playerId))
+        {
+            Domino? tile = Draw(playerId, isAutomated: true);
+            if (tile is null) break;
+            drawn.Add(tile);
+        }
+
+        List<GameMove> possibleMoves = GetPlayerPossibleMoves(actingPlayer);
+        if (possibleMoves.Count > 0)
+        {
+            GameMove chosen = ChooseBestAutoPlayMove(possibleMoves);
+            PlaceDomino(chosen, isAutomated: true);
+            NextTurn();
+            return (true, false, drawn, chosen);
+        }
+
+        bool passed = PassTurn(playerId, isAutomated: true);
+        return (false, passed, drawn, null);
+    }
+
+    public bool ReclaimManualControl(long playerId)
+    {
+        GamePlayer? player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null) return false;
+        player.ReclaimManualControl();
+        return true;
+    }
+
+    private static GameMove ChooseBestAutoPlayMove(List<GameMove> moves)
+    {
+        return moves
+            .OrderByDescending(m => m.Domino.Side1 == m.Domino.Side2 ? 1 : 0)
+            .ThenByDescending(m => m.Domino.SumOfSides())
+            .First();
     }
 
     private (GamePlayer? player, Domino? domino) FindPlayerWithHighestDouble()
@@ -629,6 +819,7 @@ public class Game
                 RequiresChoosePoser = false,
                 NextPoserId = ConfirmedPoserId,
                 CanPoserPlayAnyTile = true,
+                AvailablePostHandActions = GetPostHandActions(breakTriggered: false, matchOver: false),
                 IndividualPipCounts = raw.IndividualPipCounts,
                 TeamScoresSnapshot = new Dictionary<int, int>(TeamScores),
                 PlayerScoresSnapshot = new Dictionary<long, int>(PlayerScores)
@@ -831,6 +1022,7 @@ public class Game
             NextPoserId = nextPoserId,
             CanPoserPlayAnyTile = canPlayAnyTile,
             CutThroatedPlayerIds = cutThroated,
+            AvailablePostHandActions = GetPostHandActions(breakTriggered, matchOver),
             IndividualPipCounts = raw.IndividualPipCounts,
             TeamScoresSnapshot = new Dictionary<int, int>(TeamScores),
             PlayerScoresSnapshot = new Dictionary<long, int>(PlayerScores)

@@ -142,7 +142,9 @@ public class GameManager(IChatManager chatManager) : IGameManager
         {
             Game game = games.First(g => g.Id == gameId);
             game.PlayerTurnTimer.HasStarted = true;
-            game.PlayerTurnTimer.Duration = IGameManager.GameTimerPerPlayer;
+            game.PlayerTurnTimer.Duration = game.IsLegacyDrawAdvance
+                ? IGameManager.GameTimerPerPlayer
+                : game.GetActiveTurnDurationSeconds();
         }
     }
 

@@ -1,3 +1,5 @@
+using DominoCommon.com.domino.common.Scripts.Enums;
+
 namespace Domain.Game;
 
 public class HandResolution
@@ -18,6 +20,7 @@ public class HandResolution
     public long? NextPoserId { get; init; }
     public bool CanPoserPlayAnyTile { get; init; }
     public List<long> CutThroatedPlayerIds { get; init; } = [];
+    public List<PostHandAction> AvailablePostHandActions { get; init; } = [];
     public Dictionary<long, int> IndividualPipCounts { get; init; } = [];
     public Dictionary<int, int> TeamScoresSnapshot { get; init; } = [];
     public Dictionary<long, int> PlayerScoresSnapshot { get; init; } = [];

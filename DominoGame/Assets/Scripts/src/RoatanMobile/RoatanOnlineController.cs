@@ -99,6 +99,18 @@ public class RoatanOnlineController : MonoBehaviour
     private RectTransform onlineSlotsLayer;
     private RectTransform onlineHandContent;
     private Button onlineDrawBtn;
+    private TMP_Text onlineDrawBtnLabel;
+    private GameObject onlineTimerBadgeObj;
+    private Image onlineTimerBadgeBg;
+    private TMP_Text onlineTimerLabel;
+    private GameObject onlineBotIndicatorObj;
+    private Button onlineResumeControlBtn;
+    private GameObject onlineEndOverlay;
+    private TMP_Text onlineEndTitleLabel;
+    private TMP_Text onlineEndBodyLabel;
+    private Button onlineEndPrimaryBtn;
+    private TMP_Text onlineEndPrimaryBtnLabel;
+    private Button onlineEndNewMatchBtn;
     private readonly List<GameObject> onlineBoardObjs = new List<GameObject>();
     private readonly List<GameObject> onlineSlotObjs = new List<GameObject>();
     private readonly List<GameObject> onlineHandObjs = new List<GameObject>();
@@ -107,6 +119,15 @@ public class RoatanOnlineController : MonoBehaviour
     private DominoDto onlineSelectedDomino;
     private long onlineActiveUserId = -1;
     private readonly GameGridDto onlineGridValue = new GameGridDto(60, 60);
+
+    // Online Match Resilience state (5s Auto-Pass, 10s Turn Timer, 3-Strike Bot Takeover & Instant Reclaim)
+    private bool onlineTurnTimerActive;
+    private bool onlineIsAutoPassTurn;
+    private float onlineTurnTimeRemaining;
+    private int onlineConsecutiveAutoPlays;
+    private bool onlineIsBotControlled;
+    private float onlineBotPacingRemaining;
+    private bool onlineTurnActionDispatched;
 
     private IClient subscribedClient;
     private bool isConnecting;
@@ -533,6 +554,16 @@ public class RoatanOnlineController : MonoBehaviour
         onlinePossibleMoves = null;
         onlineSelectedDomino = null;
         onlineActiveUserId = -1;
+        onlineTurnTimerActive = false;
+        onlineIsAutoPassTurn = false;
+        onlineTurnTimeRemaining = 0f;
+        onlineConsecutiveAutoPlays = 0;
+        onlineIsBotControlled = false;
+        onlineBotPacingRemaining = 0f;
+        onlineTurnActionDispatched = false;
+        if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+        if (onlineEndOverlay != null) onlineEndOverlay.SetActive(false);
+        RefreshOnlineTakeoverIndicators();
 
         for (int r = 0; r < 60; r++)
         {
@@ -547,6 +578,49 @@ public class RoatanOnlineController : MonoBehaviour
         onlineMatchHeader.text = currentLobby != null ? $"ONLINE  •  {currentLobby.Name}" : "ONLINE MATCH";
         onlineMatchStatus.text = "Waiting for server to deal dominoes...";
         subscribedClient?.AddToSendQueue(MessageFrameBuilder.ReadyInGameFrame());
+    }
+
+    private void Update()
+    {
+        if (onlineGameView == null || !onlineGameView.activeSelf) return;
+        if (subscribedClient?.User == null || onlineActiveUserId != subscribedClient.User.Id) return;
+        if (onlineTurnActionDispatched) return;
+
+        if (onlineIsBotControlled)
+        {
+            if (onlineBotPacingRemaining > 0f)
+            {
+                onlineBotPacingRemaining -= Time.deltaTime;
+                if (onlineBotPacingRemaining <= 0f)
+                {
+                    ExecuteOnlineAutoTurn(incrementStrike: false);
+                }
+            }
+            return;
+        }
+
+        if (!onlineTurnTimerActive) return;
+
+        onlineTurnTimeRemaining -= Time.deltaTime;
+        int displaySec = Mathf.Max(0, Mathf.CeilToInt(onlineTurnTimeRemaining));
+        UpdateOnlineTimerUI(displaySec);
+
+        if (onlineTurnTimeRemaining <= 0f)
+        {
+            onlineTurnTimerActive = false;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+
+            if (onlineIsAutoPassTurn)
+            {
+                // 5-second Auto-Pass: MUST NOT increment AFK auto-play counter
+                ExecuteOnlineAutoPassNoPenalty();
+            }
+            else
+            {
+                // 10-second Turn Timeout: auto-play / auto-draw and increment AFK strike counter (+1)
+                ExecuteOnlineAutoTurn(incrementStrike: true);
+            }
+        }
     }
 
     private void OnOnlineHandDistributed(HandDto dto)
@@ -594,17 +668,209 @@ public class RoatanOnlineController : MonoBehaviour
     private void OnOnlineTurnChanged(PlayerTurnDto dto)
     {
         onlineActiveUserId = dto.IdUserPlaying;
+        onlineTurnActionDispatched = false;
         bool isMyTurn = subscribedClient?.User != null && dto.IdUserPlaying == subscribedClient.User.Id;
-        onlineDrawBtn.gameObject.SetActive(isMyTurn);
 
-        string playerName = currentLobby?.Players.FirstOrDefault(p => p.Id == dto.IdUserPlaying)?.Name ?? $"Player {dto.IdUserPlaying}";
-        onlineMatchStatus.text = isMyTurn ? "Your turn! Tap a glowing domino to place." : $"{playerName}'s turn...";
+        if (isMyTurn)
+        {
+            if (dto.ConsecutiveAutoPlays.HasValue)
+            {
+                onlineConsecutiveAutoPlays = dto.ConsecutiveAutoPlays.Value;
+            }
+            if (dto.IsBotControlled.HasValue)
+            {
+                onlineIsBotControlled = dto.IsBotControlled.Value;
+            }
+
+            onlineIsAutoPassTurn = dto.IsAutoPassTurn == true;
+            RefreshOnlineTakeoverIndicators();
+
+            if (onlineIsBotControlled)
+            {
+                onlineTurnTimerActive = false;
+                onlineBotPacingRemaining = RoatanMatchEngine.BotTakeoverPacingSeconds;
+                if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+                onlineDrawBtn.gameObject.SetActive(false);
+                onlineMatchStatus.text = "Bot Auto-Playing your turn... Tap any tile or Resume Control.";
+            }
+            else
+            {
+                onlineTurnTimeRemaining = onlineIsAutoPassTurn
+                    ? RoatanMatchEngine.AutoPassTimeoutSeconds
+                    : RoatanMatchEngine.TurnTimeoutSeconds;
+                onlineTurnTimerActive = true;
+                if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(true);
+                UpdateOnlineTimerUI(Mathf.CeilToInt(onlineTurnTimeRemaining));
+
+                onlineDrawBtn.gameObject.SetActive(true);
+                onlineDrawBtn.GetComponent<Image>().color = onlineIsAutoPassTurn
+                    ? RoatanVisualAssets.SunsetCoral
+                    : RoatanVisualAssets.IslandGold;
+                onlineMatchStatus.text = onlineIsAutoPassTurn
+                    ? "No valid move — tap Pass or wait 5s for Auto-Pass (no penalty)"
+                    : "Your turn! Tap a glowing domino to place.";
+            }
+        }
+        else
+        {
+            onlineTurnTimerActive = false;
+            onlineIsAutoPassTurn = false;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+            onlineDrawBtn.gameObject.SetActive(false);
+
+            string playerName = currentLobby?.Players.FirstOrDefault(p => p.Id == dto.IdUserPlaying)?.Name ?? $"Player {dto.IdUserPlaying}";
+            string botSuffix = dto.IsBotControlled == true ? " [Bot Auto-Playing]" : "";
+            onlineMatchStatus.text = $"{playerName}{botSuffix}'s turn...";
+        }
     }
 
     private void OnOnlinePossibleMoves(PossibleMovesDto dto)
     {
         onlinePossibleMoves = dto;
+
+        bool isMyTurn = subscribedClient?.User != null && onlineActiveUserId == subscribedClient.User.Id;
+        if (isMyTurn && !onlineIsBotControlled)
+        {
+            bool hasMoves = dto != null && dto.Moves != null && dto.Moves.Count > 0;
+            bool isBlockMode = currentLobby != null && currentLobby.TableStyle == TableStyle.BLOCK;
+            if (!hasMoves && isBlockMode && !onlineIsAutoPassTurn)
+            {
+                onlineIsAutoPassTurn = true;
+                onlineTurnTimeRemaining = RoatanMatchEngine.AutoPassTimeoutSeconds;
+                onlineDrawBtn.gameObject.SetActive(true);
+                onlineDrawBtn.GetComponent<Image>().color = RoatanVisualAssets.SunsetCoral;
+                UpdateOnlineTimerUI(Mathf.CeilToInt(onlineTurnTimeRemaining));
+            }
+            else if (hasMoves)
+            {
+                onlineIsAutoPassTurn = false;
+                onlineDrawBtn.gameObject.SetActive(false);
+            }
+        }
+
         RebuildOnlineHandUI();
+    }
+
+    private void UpdateOnlineTimerUI(int displaySec)
+    {
+        if (onlineIsAutoPassTurn)
+        {
+            if (onlineDrawBtnLabel != null) onlineDrawBtnLabel.text = $"Pass ({displaySec}s)";
+            if (onlineTimerLabel != null) onlineTimerLabel.text = $"AUTO-PASS {displaySec}s";
+            if (onlineTimerBadgeBg != null) onlineTimerBadgeBg.color = RoatanVisualAssets.SunsetCoral;
+        }
+        else
+        {
+            if (onlineDrawBtnLabel != null) onlineDrawBtnLabel.text = "Draw / Pass";
+            if (onlineTimerLabel != null) onlineTimerLabel.text = $"TURN TIMER: {displaySec}s";
+            if (onlineTimerBadgeBg != null)
+            {
+                onlineTimerBadgeBg.color = displaySec <= 3
+                    ? RoatanVisualAssets.SunsetCoral
+                    : (displaySec <= 5 ? RoatanVisualAssets.AmberHighlight : new Color(0.08f, 0.34f, 0.38f, 0.96f));
+            }
+        }
+    }
+
+    private void ExecuteOnlineAutoPassNoPenalty()
+    {
+        if (subscribedClient?.User == null || onlineTurnActionDispatched) return;
+        onlineTurnActionDispatched = true;
+        onlineDrawBtn.gameObject.SetActive(false);
+        RoatanSoundFX.Instance?.PlayPass();
+        onlineMatchStatus.text = "Auto-passed (0s) — no AFK strike";
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.PlayerPlaysFrame(new PlayerPlayDto
+        {
+            IdUserPlayed = subscribedClient.User.Id,
+            PlayActionType = PlayActionType.Pass
+        }));
+    }
+
+    private void ExecuteOnlineAutoTurn(bool incrementStrike)
+    {
+        if (subscribedClient?.User == null || onlineTurnActionDispatched) return;
+        onlineTurnActionDispatched = true;
+        onlineDrawBtn.gameObject.SetActive(false);
+
+        if (incrementStrike)
+        {
+            onlineConsecutiveAutoPlays++;
+            if (onlineConsecutiveAutoPlays >= RoatanMatchEngine.BotTakeoverStrikeLimit)
+            {
+                onlineIsBotControlled = true;
+            }
+            RefreshOnlineTakeoverIndicators();
+        }
+
+        if (onlinePossibleMoves != null && onlinePossibleMoves.Moves != null && onlinePossibleMoves.Moves.Count > 0)
+        {
+            MoveDto chosen = onlinePossibleMoves.Moves
+                .OrderByDescending(m => m.Domino.Side1 == m.Domino.Side2 ? 1 : 0)
+                .ThenByDescending(m => m.Domino.Side1 + m.Domino.Side2)
+                .First();
+
+            onlineMatchStatus.text = onlineIsBotControlled
+                ? $"Bot Auto-Playing [{chosen.Domino.Side1}|{chosen.Domino.Side2}] — Tap any tile or Resume Control"
+                : $"Time's up! Auto-played [{chosen.Domino.Side1}|{chosen.Domino.Side2}] (AFK {onlineConsecutiveAutoPlays}/3)";
+
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.PlayerPlaysFrame(new PlayerPlayDto
+            {
+                IdUserPlayed = subscribedClient.User.Id,
+                Moves = chosen,
+                PlayActionType = PlayActionType.PlaceDomino
+            }));
+        }
+        else
+        {
+            PlayActionType fallbackAction = onlineIsAutoPassTurn ? PlayActionType.Pass : PlayActionType.Draw;
+            onlineMatchStatus.text = onlineIsBotControlled
+                ? "Bot Auto-Playing... Tap any tile or Resume Control."
+                : $"Time's up! Auto-{(fallbackAction == PlayActionType.Pass ? "passed" : "drew")} (AFK {onlineConsecutiveAutoPlays}/3)";
+
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.PlayerPlaysFrame(new PlayerPlayDto
+            {
+                IdUserPlayed = subscribedClient.User.Id,
+                PlayActionType = fallbackAction
+            }));
+        }
+    }
+
+    private void ReclaimOnlineManualControl()
+    {
+        if (!onlineIsBotControlled) return;
+        onlineIsBotControlled = false;
+        onlineConsecutiveAutoPlays = 0;
+        onlineBotPacingRemaining = 0f;
+        RoatanSoundFX.Instance?.PlayTap();
+        RefreshOnlineTakeoverIndicators();
+
+        bool isMyTurn = subscribedClient?.User != null && onlineActiveUserId == subscribedClient.User.Id && !onlineTurnActionDispatched;
+        if (isMyTurn)
+        {
+            onlineTurnTimeRemaining = onlineIsAutoPassTurn
+                ? RoatanMatchEngine.AutoPassTimeoutSeconds
+                : RoatanMatchEngine.TurnTimeoutSeconds;
+            onlineTurnTimerActive = true;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(true);
+            UpdateOnlineTimerUI(Mathf.CeilToInt(onlineTurnTimeRemaining));
+            bool hasMoves = onlinePossibleMoves != null && onlinePossibleMoves.Moves != null && onlinePossibleMoves.Moves.Count > 0;
+            onlineDrawBtn.gameObject.SetActive(!hasMoves);
+        }
+
+        onlineMatchStatus.text = "Control resumed! You're back in full manual control.";
+        RebuildOnlineHandUI();
+    }
+
+    private void RefreshOnlineTakeoverIndicators()
+    {
+        if (onlineBotIndicatorObj != null)
+        {
+            onlineBotIndicatorObj.SetActive(onlineIsBotControlled);
+        }
+        if (onlineResumeControlBtn != null)
+        {
+            onlineResumeControlBtn.gameObject.SetActive(onlineIsBotControlled);
+        }
     }
 
     private void OnOnlineCountsUpdated(NumberOfDominoPerPlayerDto dto)
@@ -623,16 +889,77 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineEndGame(EndGameDto dto)
     {
+        onlineTurnTimerActive = false;
+        onlineIsBotControlled = false;
+        if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+        RefreshOnlineTakeoverIndicators();
         ChatManager.Instance?.SetActiveRoundChatLocked(false);
-        RoatanSoundFX.Instance?.PlayWin();
+
+        bool breakTriggered = dto != null && dto.BreakTriggered == true;
+        bool matchOver = dto == null || dto.MatchOver != false;
+
+        if (breakTriggered)
+        {
+            RoatanSoundFX.Instance?.PlayBreakSting();
+        }
+        else
+        {
+            RoatanSoundFX.Instance?.PlayWin();
+        }
+
         string winnerName = "Match Complete";
         if (dto?.Rankings != null && dto.Rankings.Count > 0 && currentLobby != null)
         {
             PlayerDto w = currentLobby.Players.FirstOrDefault(p => p.Id == dto.Rankings[0].Id);
             if (w != null) winnerName = $"Winner: {w.Name}!";
         }
-        onlineMatchStatus.text = winnerName;
+        onlineMatchStatus.text = breakTriggered ? "GAME BRUK! (BREAK)" : winnerName;
         onlineDrawBtn.gameObject.SetActive(false);
+
+        if (onlineEndOverlay != null)
+        {
+            onlineEndTitleLabel.text = breakTriggered ? "GAME BRUK! (BREAK)" : (matchOver ? "MATCH COMPLETE" : "HAND COMPLETE");
+            onlineEndBodyLabel.text = breakTriggered
+                ? $"{winnerName}\nScores reset to 0 — [6|6] poses next on Rematch."
+                : winnerName;
+
+            bool showRematchLayout = breakTriggered || matchOver;
+            onlineEndPrimaryBtn.onClick.RemoveAllListeners();
+            if (showRematchLayout)
+            {
+                onlineEndPrimaryBtnLabel.text = "Rematch";
+                onlineEndPrimaryBtn.onClick.AddListener(() =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    onlineEndOverlay.SetActive(false);
+                    if (currentLobby != null && subscribedClient != null)
+                    {
+                        ShowSubView(lobbyView);
+                        RefreshLobbyView();
+                    }
+                    else
+                    {
+                        ShowSubView(hubView);
+                        RequestLobbiesList();
+                    }
+                });
+                onlineEndNewMatchBtn.gameObject.SetActive(true);
+            }
+            else
+            {
+                onlineEndPrimaryBtnLabel.text = "Next Round";
+                onlineEndPrimaryBtn.onClick.AddListener(() =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    onlineEndOverlay.SetActive(false);
+                    EnterOnlineMatchTable();
+                });
+                onlineEndNewMatchBtn.gameObject.SetActive(false);
+            }
+
+            onlineEndOverlay.transform.SetAsLastSibling();
+            onlineEndOverlay.SetActive(true);
+        }
     }
 
     private void OnOnlineLeaveGameResponse(ResponseDto dto)
@@ -727,6 +1054,12 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineHandTileClicked(DominoDto tile)
     {
+        // Instant Manual Reclaim: tapping ANY tile in hand while Bot Auto-Playing immediately reclaims control
+        if (onlineIsBotControlled)
+        {
+            ReclaimOnlineManualControl();
+        }
+
         if (onlinePossibleMoves == null) return;
         List<MoveDto> matching = onlinePossibleMoves.Moves.Where(m =>
             (m.Domino.Side1 == tile.Side1 && m.Domino.Side2 == tile.Side2) ||
@@ -755,6 +1088,12 @@ public class RoatanOnlineController : MonoBehaviour
             btn.targetGraphic = img;
             btn.onClick.AddListener(() =>
             {
+                onlineTurnTimerActive = false;
+                onlineTurnActionDispatched = true;
+                onlineConsecutiveAutoPlays = 0;
+                onlineIsBotControlled = false;
+                if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+                RefreshOnlineTakeoverIndicators();
                 subscribedClient?.AddToSendQueue(MessageFrameBuilder.PlayerPlaysFrame(new PlayerPlayDto
                 {
                     IdUserPlayed = subscribedClient.User.Id,
@@ -1073,11 +1412,22 @@ public class RoatanOnlineController : MonoBehaviour
 
         onlineDrawBtn = CreatePillButton(onlineGameView.transform, "BtnOnlineDraw", "Draw / Pass", RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(360f, 82f), 28, () =>
         {
-            if (subscribedClient?.User == null || onlineActiveUserId != subscribedClient.User.Id) return;
+            if (subscribedClient?.User == null || onlineActiveUserId != subscribedClient.User.Id || onlineTurnActionDispatched) return;
+            onlineTurnTimerActive = false;
+            onlineTurnActionDispatched = true;
+            if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+
+            if (!onlineIsAutoPassTurn)
+            {
+                onlineConsecutiveAutoPlays = 0;
+                onlineIsBotControlled = false;
+                RefreshOnlineTakeoverIndicators();
+            }
+
             subscribedClient.AddToSendQueue(MessageFrameBuilder.PlayerPlaysFrame(new PlayerPlayDto
             {
                 IdUserPlayed = subscribedClient.User.Id,
-                PlayActionType = PlayActionType.Draw
+                PlayActionType = onlineIsAutoPassTurn ? PlayActionType.Pass : PlayActionType.Draw
             }));
         });
         RectTransform dRect = onlineDrawBtn.GetComponent<RectTransform>();
@@ -1085,8 +1435,66 @@ public class RoatanOnlineController : MonoBehaviour
         dRect.anchorMax = new Vector2(0.5f, 0f);
         dRect.pivot = new Vector2(0.5f, 0f);
         dRect.anchoredPosition = new Vector2(0f, 430f);
-        onlineDrawBtn.GetComponentInChildren<TMP_Text>().color = Color.black;
+        onlineDrawBtnLabel = onlineDrawBtn.GetComponentInChildren<TMP_Text>();
+        onlineDrawBtnLabel.color = Color.black;
         onlineDrawBtn.gameObject.SetActive(false);
+
+        // Online 10s Turn Timer / 5s Auto-Pass Pill
+        onlineTimerBadgeObj = CreateCard(onlineGameView.transform, "OnlineTurnTimerBadge", new Color(0.08f, 0.34f, 0.38f, 0.96f), Vector2.zero, new Vector2(275f, 64f));
+        RectTransform otRect = onlineTimerBadgeObj.GetComponent<RectTransform>();
+        otRect.anchorMin = new Vector2(0f, 0f);
+        otRect.anchorMax = new Vector2(0f, 0f);
+        otRect.pivot = new Vector2(0f, 0f);
+        otRect.anchoredPosition = new Vector2(24f, 430f);
+        onlineTimerBadgeBg = onlineTimerBadgeObj.GetComponent<Image>();
+        onlineTimerLabel = CreateText(onlineTimerBadgeObj.transform, "TimerText", "TURN TIMER: 10s", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(255f, 52f));
+        onlineTimerBadgeObj.SetActive(false);
+
+        // Online "Bot Auto-Playing" Indicator + Instant "Resume Control" Banner
+        onlineBotIndicatorObj = CreateCard(onlineGameView.transform, "OnlineBotIndicator", new Color(0.58f, 0.22f, 0.14f, 0.96f), Vector2.zero, new Vector2(290f, 58f));
+        RectTransform obiRect = onlineBotIndicatorObj.GetComponent<RectTransform>();
+        obiRect.anchorMin = new Vector2(0f, 0f);
+        obiRect.anchorMax = new Vector2(0f, 0f);
+        obiRect.pivot = new Vector2(0f, 0f);
+        obiRect.anchoredPosition = new Vector2(24f, 502f);
+        CreateText(onlineBotIndicatorObj.transform, "BotText", "Bot Auto-Playing", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(270f, 46f));
+        onlineBotIndicatorObj.SetActive(false);
+
+        onlineResumeControlBtn = CreatePillButton(onlineGameView.transform, "BtnOnlineResumeControl", "Resume Control (Tap Here or Any Tile)", RoatanVisualAssets.PalmGreen, Vector2.zero, new Vector2(610f, 76f), 25, ReclaimOnlineManualControl);
+        RectTransform orcRect = onlineResumeControlBtn.GetComponent<RectTransform>();
+        orcRect.anchorMin = new Vector2(0.5f, 0f);
+        orcRect.anchorMax = new Vector2(0.5f, 0f);
+        orcRect.pivot = new Vector2(0.5f, 0f);
+        orcRect.anchoredPosition = new Vector2(0f, 430f);
+        onlineResumeControlBtn.gameObject.SetActive(false);
+
+        // Online Post-Hand / Post-Break Overlay
+        onlineEndOverlay = CreateStretchPanel(onlineGameView.transform, "OnlineEndOverlay", new Color(0f, 0f, 0f, 0.74f));
+        GameObject endCard = CreateCard(onlineEndOverlay.transform, "EndCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 700f));
+        onlineEndTitleLabel = CreateText(endCard.transform, "EndTitle", "MATCH COMPLETE", 42, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 255f), new Vector2(800f, 64f));
+        onlineEndBodyLabel = CreateText(endCard.transform, "EndBody", "", 28, FontStyles.Normal, Color.white, new Vector2(0f, 110f), new Vector2(780f, 160f));
+
+        onlineEndPrimaryBtn = CreatePillButton(endCard.transform, "BtnOnlinePrimary", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -60f), new Vector2(520f, 92f), 32, () => { });
+        onlineEndPrimaryBtnLabel = onlineEndPrimaryBtn.GetComponentInChildren<TMP_Text>();
+
+        onlineEndNewMatchBtn = CreatePillButton(endCard.transform, "BtnOnlineNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -172f), new Vector2(460f, 82f), 28, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            onlineEndOverlay.SetActive(false);
+            ShowSubView(hubView);
+            RequestLobbiesList();
+        });
+        onlineEndNewMatchBtn.gameObject.SetActive(false);
+
+        CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -276f), new Vector2(380f, 76f), 28, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            onlineEndOverlay.SetActive(false);
+            subscribedClient?.AddToSendQueue(MessageFrameBuilder.LeaveGameFrame());
+            ShowSubView(hubView);
+            RequestLobbiesList();
+        });
+        onlineEndOverlay.SetActive(false);
 
         // Wood Hand Dock
         GameObject handDock = new GameObject("OnlineHandDock");

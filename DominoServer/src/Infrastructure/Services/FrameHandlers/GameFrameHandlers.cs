@@ -149,7 +149,7 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
         {
             await clientInGame.SendAsync(new NetworkFrame([
                 MessageFrameBuilder.PlayerPlaysFrame(dto),
-                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game.PlayerPlaying.Id, DtoBuilder.GetTimerDto(timerPerTurn))),
+                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
                     MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
             ]));
         }
@@ -181,7 +181,7 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
                 {
                     await clientInGame.SendAsync(new NetworkFrame([
                         MessageFrameBuilder.PlayerPlaysFrame(dtoPlayerPlaying),
-                            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game.PlayerPlaying.Id, DtoBuilder.GetTimerDto(timerPerTurn))),
+                            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
                             MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
                     ]));
                 }
@@ -189,7 +189,7 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
                 {
                     await clientInGame.SendAsync(new NetworkFrame([
                         MessageFrameBuilder.PlayerPlaysFrame(dto),
-                            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game.PlayerPlaying.Id, DtoBuilder.GetTimerDto(timerPerTurn))),
+                            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
                             MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
                     ]));
                 }
@@ -203,7 +203,7 @@ public class GameFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandler
             foreach (IClient clientInGame in clientsInGame)
             {
                 await clientInGame.SendAsync(new NetworkFrame([
-                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game.PlayerPlaying.Id, DtoBuilder.GetTimerDto(timerPerTurn))),
+                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
                         MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
                 ]));
             }

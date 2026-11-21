@@ -181,6 +181,23 @@ public static class DtoBuilder
         };
     }
 
+    public static PlayerTurnDto GetPlayerTurnDto(Game game, TimerDto timer)
+    {
+        if (game.IsLegacyDrawAdvance)
+        {
+            return GetPlayerTurnDto(game.PlayerPlaying.Id, timer);
+        }
+
+        return new PlayerTurnDto
+        {
+            IdUserPlaying = game.PlayerPlaying.Id,
+            Timer = timer,
+            IsAutoPassTurn = game.IsCurrentPlayerAutoPassTurn(),
+            IsBotControlled = game.PlayerPlaying.IsBotControlled,
+            ConsecutiveAutoPlays = game.PlayerPlaying.ConsecutiveAutoPlays
+        };
+    }
+
     public static PlayerPlayDto GetPlayerPlayDto(long playerId, PlayActionType type)
     {
         return new PlayerPlayDto
@@ -213,11 +230,20 @@ public static class DtoBuilder
             };
             playerClassement.Add(newPlayerClassement);
         }
-        return new EndGameDto
+        EndGameDto dto = new()
         {
             NormalFinish = normalFinish,
             Rankings = playerClassement
         };
+
+        if (!game.IsLegacyDrawAdvance && game.LastHandResolution is not null)
+        {
+            dto.BreakTriggered = game.LastHandResolution.BreakTriggered;
+            dto.MatchOver = game.LastHandResolution.MatchOver;
+            dto.AvailableActions = new List<PostHandAction>(game.LastHandResolution.AvailablePostHandActions);
+        }
+
+        return dto;
     }
 
     public static EndGameDto GetEndGameDto(bool normalFinish)

@@ -8,6 +8,10 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 public class RoatanMatchEngine
 {
     public const float ChoosePoserTimeoutSeconds = 8.0f;
+    public const float AutoPassTimeoutSeconds = 5.0f;
+    public const float TurnTimeoutSeconds = 10.0f;
+    public const int BotTakeoverStrikeLimit = 3;
+    public const float BotTakeoverPacingSeconds = 1.2f;
 
     public class MatchPlayer
     {
@@ -17,6 +21,8 @@ public class RoatanMatchEngine
         public bool IsBot { get; set; }
         public BotDifficulty? Difficulty { get; set; }
         public int MatchScore { get; set; }
+        public int ConsecutiveAutoPlays { get; set; }
+        public bool IsBotControlled { get; set; }
         public List<DominoDto> Hand { get; } = new List<DominoDto>();
 
         public int HandPipSum()
@@ -65,6 +71,7 @@ public class RoatanMatchEngine
         public int PointsAwarded { get; set; }
         public int NextPoserIndex { get; set; } = -1;
         public List<MatchPlayer> CutThroatedPlayers { get; set; } = new List<MatchPlayer>();
+        public List<PostHandAction> AvailablePostHandActions { get; set; } = new List<PostHandAction>();
         public List<MatchPlayer> Standings { get; set; }
     }
 
@@ -213,11 +220,56 @@ public class RoatanMatchEngine
         return 7;
     }
 
+    public static List<PostHandAction> GetPostHandActions(bool breakTriggered, bool matchOver)
+    {
+        if (breakTriggered || matchOver)
+        {
+            return new List<PostHandAction>
+            {
+                PostHandAction.Rematch,
+                PostHandAction.NewMatch,
+                PostHandAction.Leave
+            };
+        }
+
+        return new List<PostHandAction>
+        {
+            PostHandAction.NextRound,
+            PostHandAction.Leave
+        };
+    }
+
     public void TriggerBreakReset()
     {
         IsBreakResetPending = true;
         ConfirmedPoserIndex = -1;
         CanPoserPlayAnyTile = false;
+    }
+
+    /// <summary>
+    /// Resets all match scores to 0 and immediately starts a new [6|6] opening hand with the same players.
+    /// Used by the post-Break (Game Bruk) "Rematch" action.
+    /// </summary>
+    public PlacedTile StartRematchAfterBreak()
+    {
+        TeamScores[0] = 0;
+        TeamScores[1] = 0;
+        foreach (MatchPlayer player in Players)
+        {
+            player.MatchScore = 0;
+        }
+
+        IsMatchOver = false;
+        MatchWinner = null;
+        MatchWinningTeamId = -1;
+        CutThroatedPlayers.Clear();
+        LastHandWasDraw = false;
+        lastRoundWinnerIndex = -1;
+        LastHandPoserIndex = -1;
+        CurrentHandPoserIndex = -1;
+        TriggerBreakReset();
+
+        return StartNewRound();
     }
 
     public void DealRoundWithoutOpeningPose()
@@ -508,6 +560,145 @@ public class RoatanMatchEngine
         return GetLegalMoves(CurrentPlayer).Count == 0 && !CanCurrentPlayerDraw();
     }
 
+    public bool IsCurrentPlayerAutoPassTurn()
+    {
+        return Players.Count > 0 && CanCurrentPlayerPass();
+    }
+
+    public float GetActiveTurnTimeoutSeconds()
+    {
+        return IsCurrentPlayerAutoPassTurn() ? AutoPassTimeoutSeconds : TurnTimeoutSeconds;
+    }
+
+    public void RecordManualAction(int playerId)
+    {
+        MatchPlayer player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player == null) return;
+        player.ConsecutiveAutoPlays = 0;
+        player.IsBotControlled = false;
+    }
+
+    public bool ReclaimManualControl(int playerId)
+    {
+        MatchPlayer player = Players.FirstOrDefault(p => p.Id == playerId);
+        if (player == null) return false;
+        player.IsBotControlled = false;
+        player.ConsecutiveAutoPlays = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Executes the 5-second auto-pass when the active player has zero playable tiles
+    /// (and an empty boneyard in DRAW mode). Must NOT increment ConsecutiveAutoPlays.
+    /// </summary>
+    public bool ExecuteAutoPassNoPenalty()
+    {
+        if (!CanCurrentPlayerPass())
+        {
+            return false;
+        }
+
+        return PassTurn();
+    }
+
+    /// <summary>
+    /// Executes the 10-second turn timeout auto-play: performs any required boneyard draws
+    /// and plays a valid tile using RoatanBotBrain selection logic, incrementing ConsecutiveAutoPlays (+1)
+    /// and activating 3-strike bot takeover at 3 consecutive timeouts.
+    /// </summary>
+    public bool ExecuteTimeoutAutoPlay(
+        RoatanBotBrain brain,
+        out PlacedTile placedTile,
+        out List<DominoDto> drawnTiles,
+        out bool passed,
+        out bool triggeredBotTakeover)
+    {
+        placedTile = null;
+        drawnTiles = new List<DominoDto>();
+        passed = false;
+        triggeredBotTakeover = false;
+
+        if (Players.Count == 0) return false;
+        MatchPlayer active = CurrentPlayer;
+
+        // Auto-passing when having no valid moves must NOT increment the AFK auto-play counter
+        if (CanCurrentPlayerPass())
+        {
+            passed = ExecuteAutoPassNoPenalty();
+            return passed;
+        }
+
+        while (CanCurrentPlayerDraw())
+        {
+            DominoDto drawn = DrawFromBoneyard();
+            if (drawn == null) break;
+            drawnTiles.Add(drawn);
+        }
+
+        List<LegalMove> moves = GetLegalMoves(active);
+        if (moves.Count > 0)
+        {
+            LegalMove chosen = brain != null
+                ? brain.ChooseMove(this, active, moves, Difficulty)
+                : moves[0];
+            placedTile = PlayMove(chosen);
+        }
+        else if (CanCurrentPlayerPass())
+        {
+            passed = PassTurn();
+        }
+
+        active.ConsecutiveAutoPlays++;
+        if (active.ConsecutiveAutoPlays >= BotTakeoverStrikeLimit)
+        {
+            active.IsBotControlled = true;
+            triggeredBotTakeover = true;
+        }
+
+        return placedTile != null || passed;
+    }
+
+    /// <summary>
+    /// Plays a turn automatically for a human seat currently under 3-strike bot takeover (IsBotControlled == true).
+    /// Leaves IsBotControlled == true until the player reclaims control.
+    /// </summary>
+    public bool ExecuteBotControlledTurn(
+        RoatanBotBrain brain,
+        out PlacedTile placedTile,
+        out List<DominoDto> drawnTiles,
+        out bool passed)
+    {
+        placedTile = null;
+        drawnTiles = new List<DominoDto>();
+        passed = false;
+
+        if (Players.Count == 0) return false;
+        MatchPlayer active = CurrentPlayer;
+        if (!active.IsBotControlled) return false;
+
+        while (CanCurrentPlayerDraw())
+        {
+            DominoDto drawn = DrawFromBoneyard();
+            if (drawn == null) break;
+            drawnTiles.Add(drawn);
+        }
+
+        List<LegalMove> moves = GetLegalMoves(active);
+        if (moves.Count > 0)
+        {
+            LegalMove chosen = brain != null
+                ? brain.ChooseMove(this, active, moves, Difficulty)
+                : moves[0];
+            placedTile = PlayMove(chosen);
+        }
+        else if (CanCurrentPlayerPass())
+        {
+            passed = PassTurn();
+        }
+
+        return placedTile != null || passed;
+    }
+
     public MatchPlayer PeekNextPlayer()
     {
         return Players[StepTurnIndex(currentPlayerIndex)];
@@ -591,6 +782,7 @@ public class RoatanMatchEngine
                     CanPoserPlayAnyTile = true,
                     PointsAwarded = 0,
                     NextPoserIndex = CurrentHandPoserIndex,
+                    AvailablePostHandActions = GetPostHandActions(breakTriggered: false, matchOver: false),
                     Standings = standings
                 };
             }
@@ -783,6 +975,7 @@ public class RoatanMatchEngine
             PointsAwarded = breakTriggered ? 0 : 1,
             NextPoserIndex = nextPoserIdx,
             CutThroatedPlayers = cutThroated,
+            AvailablePostHandActions = GetPostHandActions(breakTriggered, matchOver),
             Standings = standings
         };
     }

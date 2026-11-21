@@ -76,6 +76,15 @@ public class RoatanMobileApp : MonoBehaviour
     private RoatanBlockedPipRevealOverlay pipRevealOverlay;
     private bool slamArmed;
 
+    // Match Resilience HUD refs (10s turn timer, 5s auto-pass, Bot Auto-Playing + Resume Control)
+    private GameObject humanTimerBadgeObj;
+    private Image humanTimerBadgeBg;
+    private TMP_Text humanTimerLabel;
+    private GameObject humanBotIndicatorObj;
+    private TMP_Text humanBotIndicatorLabel;
+    private Button resumeControlBtn;
+    private Coroutine humanTimerRoutine;
+
     // Opponent seat badges (Top = index 0, Left = index 1, Right = index 2)
     private readonly List<OpponentSeatUI> opponentSeats = new List<OpponentSeatUI>();
 
@@ -84,6 +93,8 @@ public class RoatanMobileApp : MonoBehaviour
     private TMP_Text summaryBodyLabel;
     private Button summaryNextBtn;
     private TMP_Text summaryNextBtnLabel;
+    private Button summaryNewMatchBtn;
+    private TMP_Text summaryNewMatchBtnLabel;
     private TMP_Text summaryMenuBtnLabel;
     private TMP_Text rulesGotItLabel;
 
@@ -248,7 +259,18 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void BeginRound()
     {
+        BeginRoundInternal(rematchAfterBreak: false);
+    }
+
+    private void BeginRematchAfterBreak()
+    {
+        BeginRoundInternal(rematchAfterBreak: true);
+    }
+
+    private void BeginRoundInternal(bool rematchAfterBreak)
+    {
         StopMatchRoutine();
+        StopHumanTurnTimer();
         roundSummaryOverlay.SetActive(false);
         tableTalkUI?.HideAllOverlays();
         pipRevealOverlay?.HideImmediate();
@@ -260,7 +282,9 @@ public class RoatanMobileApp : MonoBehaviour
         botBrain.ResetForRound();
 
         boardView.ClearBoard();
-        RoatanMatchEngine.PlacedTile opener = engine.StartNewRound();
+        RoatanMatchEngine.PlacedTile opener = rematchAfterBreak
+            ? engine.StartRematchAfterBreak()
+            : engine.StartNewRound();
         RoatanMatchEngine.MatchPlayer starter = engine.Players.First(p => p.Id == opener.PlayerId);
 
         boardView.RebuildFromEngine(engine, animateLastTile: true);
@@ -268,8 +292,11 @@ public class RoatanMobileApp : MonoBehaviour
 
         RefreshMatchHeader();
         RefreshOpponentSeats();
+        RefreshHumanTakeoverIndicators();
         RebuildHumanHand();
-        UpdateStatusBanner($"{starter.Name} opened with [{opener.Domino.Side1}|{opener.Domino.Side2}]");
+        UpdateStatusBanner(rematchAfterBreak
+            ? $"REMATCH! Scores reset to 0 • {starter.Name} opened with [{opener.Domino.Side1}|{opener.Domino.Side2}]"
+            : $"{starter.Name} opened with [{opener.Domino.Side1}|{opener.Domino.Side2}]");
 
         turnRoutine = StartCoroutine(DriveTurnsCoroutine());
     }
@@ -302,11 +329,65 @@ public class RoatanMobileApp : MonoBehaviour
             RoatanMatchEngine.MatchPlayer active = engine.CurrentPlayer;
             RefreshMatchHeader();
             RefreshOpponentSeats();
+            RefreshHumanTakeoverIndicators();
 
             List<RoatanMatchEngine.LegalMove> moves = engine.GetLegalMoves(active);
 
             if (!active.IsBot)
             {
+                if (active.IsBotControlled)
+                {
+                    // 3-strike AFK Bot Takeover: play automatically at standard bot pacing (~1.2s),
+                    // while remaining instantly interruptible if the player taps any tile or Resume Control.
+                    waitingForHumanInput = false;
+                    currentHumanMoves.Clear();
+                    selectedHandDomino = null;
+                    boardView.ClearSlots();
+                    actionButton.gameObject.SetActive(false);
+                    if (slamButton != null) slamButton.gameObject.SetActive(false);
+                    StopHumanTurnTimer();
+                    RebuildHumanHand();
+                    UpdateStatusBanner("Bot Auto-Playing your turn... Tap any tile or Resume Control.");
+
+                    float elapsed = 0f;
+                    while (elapsed < RoatanMatchEngine.BotTakeoverPacingSeconds && active.IsBotControlled)
+                    {
+                        elapsed += Time.deltaTime;
+                        yield return null;
+                    }
+
+                    if (!active.IsBotControlled)
+                    {
+                        // Human reclaimed control during pacing window -> hand back manual control immediately
+                        continue;
+                    }
+
+                    engine.ExecuteBotControlledTurn(
+                        botBrain,
+                        out RoatanMatchEngine.PlacedTile botPlaced,
+                        out List<DominoDto> botDrawn,
+                        out bool botPassed);
+
+                    if (botPlaced != null)
+                    {
+                        boardView.RebuildFromEngine(engine, animateLastTile: true);
+                        RoatanSoundFX.Instance?.PlayPlace();
+                        string drawNote = botDrawn.Count > 0 ? $" (drew {botDrawn.Count})" : "";
+                        UpdateStatusBanner($"Bot Auto-Played [{botPlaced.Domino.Side1}|{botPlaced.Domino.Side2}]{drawNote}");
+                    }
+                    else if (botPassed)
+                    {
+                        RoatanSoundFX.Instance?.PlayPass();
+                        UpdateStatusBanner("Bot Auto-Passed (Paso!)");
+                    }
+
+                    RebuildHumanHand();
+                    RefreshMatchHeader();
+                    RefreshOpponentSeats();
+                    yield return new WaitForSeconds(0.35f);
+                    continue;
+                }
+
                 currentHumanMoves = moves;
                 selectedHandDomino = null;
                 boardView.ClearSlots();
@@ -317,6 +398,7 @@ public class RoatanMobileApp : MonoBehaviour
                 {
                     actionButton.gameObject.SetActive(false);
                     UpdateStatusBanner($"Your turn! Tap a glowing domino ({moves.Count} playable)");
+                    StartHumanTurnTimer(isAutoPass: false);
                 }
                 else if (engine.CanCurrentPlayerDraw())
                 {
@@ -324,13 +406,15 @@ public class RoatanMobileApp : MonoBehaviour
                     actionButton.GetComponent<Image>().color = RoatanVisualAssets.IslandGold;
                     actionButtonLabel.text = RoatanLocalization.Tf("draw_tile", engine.BoneyardCount);
                     UpdateStatusBanner("No matching tile — tap Draw Tile!");
+                    StartHumanTurnTimer(isAutoPass: false);
                 }
                 else
                 {
                     actionButton.gameObject.SetActive(true);
                     actionButton.GetComponent<Image>().color = RoatanVisualAssets.SunsetCoral;
-                    actionButtonLabel.text = RoatanLocalization.T("pass_turn");
-                    UpdateStatusBanner("No matching tile — tap Pass Turn (Paso!)");
+                    actionButtonLabel.text = $"Pass ({(int)RoatanMatchEngine.AutoPassTimeoutSeconds}s)";
+                    UpdateStatusBanner("No valid move — tap Pass or wait 5s for Auto-Pass (no penalty)");
+                    StartHumanTurnTimer(isAutoPass: true);
                 }
 
                 yield break;
@@ -407,7 +491,16 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void OnHumanHandTileClicked(DominoDto domino)
     {
-        if (!waitingForHumanInput || engine == null) return;
+        if (engine == null) return;
+
+        // Instant Manual Reclaim: tapping ANY tile in hand while Bot Auto-Playing immediately reclaims control
+        if (engine.Players.Count > 0 && engine.Players[0].IsBotControlled)
+        {
+            ReclaimHumanControl();
+            if (!waitingForHumanInput) return;
+        }
+
+        if (!waitingForHumanInput) return;
 
         List<RoatanMatchEngine.LegalMove> tileMoves = currentHumanMoves
             .Where(m => (m.Domino.Side1 == domino.Side1 && m.Domino.Side2 == domino.Side2) ||
@@ -513,6 +606,7 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void ExecuteHumanMove(RoatanMatchEngine.LegalMove move, bool isSlam = false)
     {
+        StopHumanTurnTimer();
         waitingForHumanInput = false;
         selectedHandDomino = null;
         slamArmed = false;
@@ -520,6 +614,10 @@ public class RoatanMobileApp : MonoBehaviour
         boardView.ClearSlots();
         actionButton.gameObject.SetActive(false);
         if (slamButton != null) slamButton.gameObject.SetActive(false);
+
+        // Manual move resets consecutiveAutoPlays = 0
+        engine.RecordManualAction(0);
+        RefreshHumanTakeoverIndicators();
 
         RoatanMatchEngine.PlacedTile placed = engine.PlayMove(move);
         if (placed != null)
@@ -562,6 +660,8 @@ public class RoatanMobileApp : MonoBehaviour
 
         if (engine.CanCurrentPlayerDraw())
         {
+            engine.RecordManualAction(human.Id);
+            RefreshHumanTakeoverIndicators();
             botBrain.RecordBlocked(human.Id, engine.LeftEndPip, engine.RightEndPip);
             DominoDto drawn = engine.DrawFromBoneyard();
             if (drawn != null)
@@ -579,20 +679,24 @@ public class RoatanMobileApp : MonoBehaviour
             {
                 actionButton.gameObject.SetActive(false);
                 UpdateStatusBanner($"Nice draw! Tap [{drawn.Side1}|{drawn.Side2}] to play!");
+                StartHumanTurnTimer(isAutoPass: false);
             }
             else if (engine.CanCurrentPlayerDraw())
             {
                 actionButtonLabel.text = RoatanLocalization.Tf("draw_tile", engine.BoneyardCount);
+                StartHumanTurnTimer(isAutoPass: false);
             }
             else
             {
                 actionButton.GetComponent<Image>().color = RoatanVisualAssets.SunsetCoral;
-                actionButtonLabel.text = RoatanLocalization.T("pass_turn");
-                UpdateStatusBanner("Boneyard empty — tap Pass Turn (Paso!)");
+                actionButtonLabel.text = $"Pass ({(int)RoatanMatchEngine.AutoPassTimeoutSeconds}s)";
+                UpdateStatusBanner("Boneyard empty — tap Pass or wait 5s for Auto-Pass");
+                StartHumanTurnTimer(isAutoPass: true);
             }
         }
         else
         {
+            StopHumanTurnTimer();
             botBrain.RecordBlocked(human.Id, engine.LeftEndPip, engine.RightEndPip);
             waitingForHumanInput = false;
             actionButton.gameObject.SetActive(false);
@@ -605,6 +709,7 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void FinishCurrentRound()
     {
+        StopHumanTurnTimer();
         waitingForHumanInput = false;
         slamArmed = false;
         actionButton.gameObject.SetActive(false);
@@ -754,18 +859,189 @@ public class RoatanMobileApp : MonoBehaviour
         }
 
         summaryBodyLabel.text = sb.ToString();
-        summaryNextBtnLabel.text = hasChampion
-            ? RoatanLocalization.T("new_match")
-            : RoatanLocalization.Tf("next_round", engine.RoundNumber + 1);
+
+        // Post-Hand UI Options:
+        // - Break (Game Bruk): NO "Next Round" -> show Rematch, New Match, Leave
+        // - Match Champion: show Rematch, New Match, Leave
+        // - Normal non-Break hand end: show Next Round and Leave ONLY
+        bool showRematchLayout = result.BreakTriggered || hasChampion;
+
         summaryNextBtn.onClick.RemoveAllListeners();
-        summaryNextBtn.onClick.AddListener(() =>
+        if (showRematchLayout)
         {
-            RoatanSoundFX.Instance?.PlayTap();
-            if (hasChampion) StartNewMatch();
-            else BeginRound();
-        });
+            summaryNextBtnLabel.text = "Rematch";
+            summaryNextBtn.GetComponent<Image>().color = RoatanVisualAssets.PalmGreen;
+            summaryNextBtn.onClick.AddListener(() =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                BeginRematchAfterBreak();
+            });
+            if (summaryNewMatchBtn != null)
+            {
+                summaryNewMatchBtn.gameObject.SetActive(true);
+            }
+        }
+        else
+        {
+            summaryNextBtnLabel.text = RoatanLocalization.Tf("next_round", engine.RoundNumber + 1);
+            summaryNextBtn.GetComponent<Image>().color = RoatanVisualAssets.PalmGreen;
+            summaryNextBtn.onClick.AddListener(() =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                BeginRound();
+            });
+            if (summaryNewMatchBtn != null)
+            {
+                summaryNewMatchBtn.gameObject.SetActive(false);
+            }
+        }
+
+        if (summaryMenuBtnLabel != null)
+        {
+            summaryMenuBtnLabel.text = "Leave";
+        }
 
         roundSummaryOverlay.SetActive(true);
+    }
+
+    // ==================== RESILIENCE TIMERS & BOT TAKEOVER ====================
+
+    private void StartHumanTurnTimer(bool isAutoPass)
+    {
+        StopHumanTurnTimer();
+        humanTimerRoutine = StartCoroutine(HumanTurnTimerCoroutine(isAutoPass));
+    }
+
+    private void StopHumanTurnTimer()
+    {
+        if (humanTimerRoutine != null)
+        {
+            StopCoroutine(humanTimerRoutine);
+            humanTimerRoutine = null;
+        }
+        if (humanTimerBadgeObj != null)
+        {
+            humanTimerBadgeObj.SetActive(false);
+        }
+    }
+
+    private IEnumerator HumanTurnTimerCoroutine(bool isAutoPass)
+    {
+        float remaining = isAutoPass
+            ? RoatanMatchEngine.AutoPassTimeoutSeconds
+            : RoatanMatchEngine.TurnTimeoutSeconds;
+
+        if (humanTimerBadgeObj != null) humanTimerBadgeObj.SetActive(true);
+
+        while (remaining > 0f && waitingForHumanInput && engine != null && !engine.CurrentPlayer.IsBot && !engine.CurrentPlayer.IsBotControlled)
+        {
+            int displaySec = Mathf.CeilToInt(remaining);
+            if (isAutoPass)
+            {
+                if (actionButtonLabel != null) actionButtonLabel.text = $"Pass ({displaySec}s)";
+                if (humanTimerLabel != null) humanTimerLabel.text = $"AUTO-PASS {displaySec}s";
+                if (humanTimerBadgeBg != null) humanTimerBadgeBg.color = RoatanVisualAssets.SunsetCoral;
+            }
+            else
+            {
+                if (humanTimerLabel != null) humanTimerLabel.text = $"TURN TIMER: {displaySec}s";
+                if (humanTimerBadgeBg != null)
+                {
+                    humanTimerBadgeBg.color = remaining <= 3f
+                        ? RoatanVisualAssets.SunsetCoral
+                        : (remaining <= 5f ? RoatanVisualAssets.AmberHighlight : new Color(0.08f, 0.34f, 0.38f, 0.96f));
+                }
+            }
+
+            remaining -= Time.deltaTime;
+            yield return null;
+        }
+
+        if (!waitingForHumanInput || engine == null || engine.CurrentPlayer.IsBot || engine.CurrentPlayer.IsBotControlled)
+        {
+            if (humanTimerBadgeObj != null) humanTimerBadgeObj.SetActive(false);
+            humanTimerRoutine = null;
+            yield break;
+        }
+
+        // Timer expired (0s)
+        waitingForHumanInput = false;
+        selectedHandDomino = null;
+        slamArmed = false;
+        currentHumanMoves.Clear();
+        boardView.ClearSlots();
+        actionButton.gameObject.SetActive(false);
+        if (slamButton != null) slamButton.gameObject.SetActive(false);
+        if (humanTimerBadgeObj != null) humanTimerBadgeObj.SetActive(false);
+        humanTimerRoutine = null;
+
+        if (isAutoPass)
+        {
+            // 5s Auto-Pass: MUST NOT increment AFK counter
+            botBrain.RecordBlocked(0, engine.LeftEndPip, engine.RightEndPip);
+            engine.ExecuteAutoPassNoPenalty();
+            RoatanSoundFX.Instance?.PlayPass();
+            UpdateStatusBanner("Auto-passed (0s) — no AFK strike");
+        }
+        else
+        {
+            // 10s Turn Timeout: Auto-draw (if needed) + play via RoatanBotBrain + increment AFK counter (+1)
+            RoatanMatchEngine.MatchPlayer human = engine.Players[0];
+            engine.ExecuteTimeoutAutoPlay(
+                botBrain,
+                out RoatanMatchEngine.PlacedTile autoPlaced,
+                out List<DominoDto> autoDrawn,
+                out bool autoPassed,
+                out bool triggeredBotTakeover);
+
+            if (autoPlaced != null)
+            {
+                boardView.RebuildFromEngine(engine, animateLastTile: true);
+                RoatanSoundFX.Instance?.PlayPlace();
+                string drawNote = autoDrawn.Count > 0 ? $" (drew {autoDrawn.Count})" : "";
+                UpdateStatusBanner(triggeredBotTakeover
+                    ? $"3 AFK Timeouts — Bot Auto-Playing! Tap any tile or Resume Control."
+                    : $"Time's up! Auto-played [{autoPlaced.Domino.Side1}|{autoPlaced.Domino.Side2}]{drawNote} (AFK {human.ConsecutiveAutoPlays}/{RoatanMatchEngine.BotTakeoverStrikeLimit})");
+            }
+            else if (autoPassed)
+            {
+                RoatanSoundFX.Instance?.PlayPass();
+                UpdateStatusBanner(triggeredBotTakeover
+                    ? "3 AFK Timeouts — Bot Auto-Playing! Tap any tile or Resume Control."
+                    : $"Time's up! Auto-passed after drawing (AFK {human.ConsecutiveAutoPlays}/{RoatanMatchEngine.BotTakeoverStrikeLimit})");
+            }
+        }
+
+        RefreshHumanTakeoverIndicators();
+        RebuildHumanHand();
+        RefreshMatchHeader();
+        RefreshOpponentSeats();
+        turnRoutine = StartCoroutine(DriveTurnsCoroutine());
+    }
+
+    private void ReclaimHumanControl()
+    {
+        if (engine == null || engine.Players.Count == 0) return;
+        if (!engine.Players[0].IsBotControlled) return;
+
+        engine.ReclaimManualControl(0);
+        RoatanSoundFX.Instance?.PlayTap();
+        RefreshHumanTakeoverIndicators();
+        RebuildHumanHand();
+        UpdateStatusBanner("Control resumed! You're back in full manual control.");
+    }
+
+    private void RefreshHumanTakeoverIndicators()
+    {
+        bool botActive = engine != null && engine.Players.Count > 0 && engine.Players[0].IsBotControlled;
+        if (humanBotIndicatorObj != null)
+        {
+            humanBotIndicatorObj.SetActive(botActive);
+        }
+        if (resumeControlBtn != null)
+        {
+            resumeControlBtn.gameObject.SetActive(botActive);
+        }
     }
 
     private void ShowBotEmoteBubble(RoatanMatchEngine.MatchPlayer bot, string phrase)
@@ -789,6 +1065,7 @@ public class RoatanMobileApp : MonoBehaviour
 
     private void StopMatchRoutine()
     {
+        StopHumanTurnTimer();
         if (turnRoutine != null)
         {
             StopCoroutine(turnRoutine);
@@ -812,7 +1089,7 @@ public class RoatanMobileApp : MonoBehaviour
         if (onlineModeBtnLabel != null) onlineModeBtnLabel.text = RoatanLocalization.T("online_mode");
         if (matchBackBtnLabel != null) matchBackBtnLabel.text = RoatanLocalization.T("menu_back");
         if (matchFitBtnLabel != null) matchFitBtnLabel.text = RoatanLocalization.T("fit");
-        if (summaryMenuBtnLabel != null) summaryMenuBtnLabel.text = RoatanLocalization.T("main_menu");
+        if (summaryMenuBtnLabel != null) summaryMenuBtnLabel.text = "Leave";
         if (rulesGotItLabel != null) rulesGotItLabel.text = RoatanLocalization.T("got_it");
 
         foreach (KeyValuePair<BotDifficulty, TMP_Text> kv in diffBtnLabels)
@@ -1413,6 +1690,35 @@ public class RoatanMobileApp : MonoBehaviour
         emoteRect.pivot = new Vector2(1f, 0f);
         emoteRect.anchoredPosition = new Vector2(-24f, 424f);
 
+        // Visible 10s Turn Timer / 5s Auto-Pass Pill (left side above status banner)
+        humanTimerBadgeObj = CreateCard(matchScreen.transform, "HumanTurnTimerBadge", new Color(0.08f, 0.34f, 0.38f, 0.96f), Vector2.zero, new Vector2(275f, 64f));
+        RectTransform timerRect = humanTimerBadgeObj.GetComponent<RectTransform>();
+        timerRect.anchorMin = new Vector2(0f, 0f);
+        timerRect.anchorMax = new Vector2(0f, 0f);
+        timerRect.pivot = new Vector2(0f, 0f);
+        timerRect.anchoredPosition = new Vector2(24f, 424f);
+        humanTimerBadgeBg = humanTimerBadgeObj.GetComponent<Image>();
+        humanTimerLabel = CreateText(humanTimerBadgeObj.transform, "TimerText", "TURN TIMER: 10s", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(255f, 52f));
+        humanTimerBadgeObj.SetActive(false);
+
+        // "Bot Auto-Playing" Avatar/HUD Indicator + Instant "Resume Control" Banner
+        humanBotIndicatorObj = CreateCard(matchScreen.transform, "BotAutoPlayingBadge", new Color(0.58f, 0.22f, 0.14f, 0.96f), Vector2.zero, new Vector2(290f, 58f));
+        RectTransform botIndRect = humanBotIndicatorObj.GetComponent<RectTransform>();
+        botIndRect.anchorMin = new Vector2(0f, 0f);
+        botIndRect.anchorMax = new Vector2(0f, 0f);
+        botIndRect.pivot = new Vector2(0f, 0f);
+        botIndRect.anchoredPosition = new Vector2(24f, 496f);
+        humanBotIndicatorLabel = CreateText(humanBotIndicatorObj.transform, "BotIndText", "Bot Auto-Playing", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(270f, 46f));
+        humanBotIndicatorObj.SetActive(false);
+
+        resumeControlBtn = CreatePillButton(matchScreen.transform, "BtnResumeControl", "Resume Control (Tap Here or Any Tile)", RoatanVisualAssets.PalmGreen, Vector2.zero, new Vector2(610f, 76f), 25, ReclaimHumanControl);
+        RectTransform resumeRect = resumeControlBtn.GetComponent<RectTransform>();
+        resumeRect.anchorMin = new Vector2(0.5f, 0f);
+        resumeRect.anchorMax = new Vector2(0.5f, 0f);
+        resumeRect.pivot = new Vector2(0.5f, 0f);
+        resumeRect.anchoredPosition = new Vector2(0f, 420f);
+        resumeControlBtn.gameObject.SetActive(false);
+
         // Attach Table Talk UI (Emote Wheel, Speech Bubbles, Celebratory Banners, Call Your Padna Modal)
         tableTalkUI = matchScreen.AddComponent<RoatanTableTalkUI>();
         tableTalkUI.Initialize(matchScreen.transform, uiFont, phrase =>
@@ -1511,15 +1817,26 @@ public class RoatanMobileApp : MonoBehaviour
     {
         roundSummaryOverlay = CreateStretchPanel(safeAreaRoot, "RoundSummaryOverlay", new Color(0f, 0f, 0f, 0.76f));
 
-        GameObject card = CreateCard(roundSummaryOverlay.transform, "SummaryCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(920f, 820f));
-        summaryTitleLabel = CreateText(card.transform, "SummaryTitle", "ROUND COMPLETE", 44, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 305f), new Vector2(840f, 74f));
-        summaryBodyLabel = CreateText(card.transform, "SummaryBody", "", 27, FontStyles.Normal, Color.white, new Vector2(0f, 30f), new Vector2(820f, 400f));
+        GameObject card = CreateCard(roundSummaryOverlay.transform, "SummaryCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(920f, 920f));
+        summaryTitleLabel = CreateText(card.transform, "SummaryTitle", "ROUND COMPLETE", 44, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 365f), new Vector2(840f, 74f));
+        summaryBodyLabel = CreateText(card.transform, "SummaryBody", "", 26, FontStyles.Normal, Color.white, new Vector2(0f, 95f), new Vector2(820f, 410f));
         summaryBodyLabel.alignment = TextAlignmentOptions.MidlineLeft;
 
-        summaryNextBtn = CreatePillButton(card.transform, "BtnNextRound", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -210f), new Vector2(540f, 102f), 36, BeginRound);
+        // Primary CTA: "Next Round" (normal hand) or "Rematch" (Break / Match Over)
+        summaryNextBtn = CreatePillButton(card.transform, "BtnNextRound", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -180f), new Vector2(560f, 96f), 34, BeginRound);
         summaryNextBtnLabel = summaryNextBtn.GetComponentInChildren<TMP_Text>();
 
-        Button menuBtn = CreatePillButton(card.transform, "BtnSummaryMenu", RoatanLocalization.T("main_menu"), new Color(0.18f, 0.25f, 0.34f, 1f), new Vector2(0f, -330f), new Vector2(380f, 84f), 30, () =>
+        // Secondary CTA (shown ONLY on Break / Match Over): "New Match" -> returns to match/lobby config
+        summaryNewMatchBtn = CreatePillButton(card.transform, "BtnSummaryNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -292f), new Vector2(500f, 84f), 30, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            ShowHomeScreen();
+        });
+        summaryNewMatchBtnLabel = summaryNewMatchBtn.GetComponentInChildren<TMP_Text>();
+        summaryNewMatchBtn.gameObject.SetActive(false);
+
+        // Leave button (always visible)
+        Button menuBtn = CreatePillButton(card.transform, "BtnSummaryMenu", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -396f), new Vector2(400f, 78f), 28, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             ShowHomeScreen();

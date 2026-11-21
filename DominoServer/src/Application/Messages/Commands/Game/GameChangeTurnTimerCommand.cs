@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Exceptions.Game;
 using Application.Interfaces.Managers;
 
@@ -18,11 +18,13 @@ public class GameChangeTurnTimerCommandHandler(IGameManager gameManager) : IComm
     {
         Game game = gameManager.GetById(request.GameId) ?? throw new GameNotFoundException($"Game with id {request.GameId} not found");
         game.PlayerTurnTimer.HasStarted = false;
-        game.PlayerTurnTimer.Duration = IGameManager.GameTimerPerPlayer;
         if (request.TimerExpired)
         {
             game.NextTurn();
         }
+        game.PlayerTurnTimer.Duration = game.IsLegacyDrawAdvance
+            ? IGameManager.GameTimerPerPlayer
+            : game.GetActiveTurnDurationSeconds();
         return Task.FromResult(game);
     }
 }
