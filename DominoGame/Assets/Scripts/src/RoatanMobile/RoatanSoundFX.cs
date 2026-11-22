@@ -6,6 +6,10 @@ public class RoatanSoundFX : MonoBehaviour
 {
     private const string MutePrefKey = "RoatanDomino_Muted";
     private const int SampleRate = 44100;
+    private const string RegularHitResourcePath = "Audios/Domino-REGULAR_HIT_TABLE";
+    private const string HardSlamResourcePath = "Audios/Domino-HARD_SLAMMED_TABLE";
+    private const string ShuffleMixResourcePath = "Audios/Dominos-being-shuffled-and-mixed";
+    private const float DefaultShuffleDurationSeconds = 5.0f;
 
     public static RoatanSoundFX Instance { get; private set; }
     public bool IsMuted { get; private set; }
@@ -15,6 +19,11 @@ public class RoatanSoundFX : MonoBehaviour
     [SerializeField] private AudioClip[] tileDealClips;
 
     private AudioSource source;
+    private AudioSource shuffleSource;
+    private AudioClip regularHitClip;
+    private AudioClip hardSlamClip;
+    private AudioClip shuffleMixClip;
+    private AudioClip fallbackShuffleClip;
     private AudioClip[] heavySlamClips;
     private AudioClip clipTap;
     private AudioClip clipDraw;
@@ -40,6 +49,10 @@ public class RoatanSoundFX : MonoBehaviour
         source = gameObject.AddComponent<AudioSource>();
         source.playOnAwake = false;
 
+        shuffleSource = gameObject.AddComponent<AudioSource>();
+        shuffleSource.playOnAwake = false;
+        shuffleSource.pitch = 1.0f;
+
         LoadOrSynthesizeTileClips();
 
         clipTap = SynthesizeSoftTone(520f, 0.055f, 0.18f);
@@ -55,7 +68,12 @@ public class RoatanSoundFX : MonoBehaviour
 
     private void LoadOrSynthesizeTileClips()
     {
-        // Attempt loading user-supplied wood/resin SFX from Resources/Audio/SFX/
+        // 1. Load user-imported authentic domino audio clips from Assets/Resources/Audios/
+        regularHitClip = Resources.Load<AudioClip>(RegularHitResourcePath);
+        hardSlamClip = Resources.Load<AudioClip>(HardSlamResourcePath);
+        shuffleMixClip = Resources.Load<AudioClip>(ShuffleMixResourcePath);
+
+        // 2. Also check optional Resources/Audio/SFX/ arrays
         if (tilePlaceClips == null || tilePlaceClips.Length == 0)
         {
             tilePlaceClips = LoadClipsFromResources("Audio/SFX/TilePlace", "place");
@@ -69,7 +87,7 @@ public class RoatanSoundFX : MonoBehaviour
             tileDealClips = LoadClipsFromResources("Audio/SFX/TileDeal", "deal");
         }
 
-        // Upgraded procedural resin-on-mahogany fallback (3 seeded variations per category)
+        // 3. Upgraded procedural resin-on-mahogany fallback if imported assets are missing
         if (tilePlaceClips == null || tilePlaceClips.Length == 0)
         {
             tilePlaceClips = new[]
@@ -105,6 +123,11 @@ public class RoatanSoundFX : MonoBehaviour
                 SynthesizeResinTileHit(359, isDeal: true)
             };
         }
+
+        if (shuffleMixClip == null)
+        {
+            fallbackShuffleClip = SynthesizeTableShuffleFallback();
+        }
     }
 
     private static AudioClip[] LoadClipsFromResources(string subfolderPath, string nameFilter)
@@ -135,12 +158,64 @@ public class RoatanSoundFX : MonoBehaviour
     public void ToggleMute()
     {
         IsMuted = !IsMuted;
+        if (IsMuted)
+        {
+            StopShuffleAndMix();
+        }
         PlayerPrefs.SetInt(MutePrefKey, IsMuted ? 1 : 0);
         PlayerPrefs.Save();
     }
 
-    public void PlayPlace() => PlayRandomized(tilePlaceClips, 0.86f);
-    public void PlaySlam(bool heavy = false) => PlayRandomized(heavy ? heavySlamClips : tileSlamClips, heavy ? 1.0f : 0.94f);
+    public float GetShuffleClipDuration()
+    {
+        return (shuffleMixClip != null && shuffleMixClip.length > 0.1f)
+            ? shuffleMixClip.length
+            : DefaultShuffleDurationSeconds;
+    }
+
+    public void PlayTilePlace()
+    {
+        if (regularHitClip != null)
+        {
+            PlayClipWithSubtlePitch(regularHitClip, 0.90f, 0.96f, 1.04f);
+            return;
+        }
+        PlayRandomized(tilePlaceClips, 0.86f);
+    }
+
+    public void PlayPlace() => PlayTilePlace();
+
+    public void PlaySlam(bool heavy = false)
+    {
+        if (hardSlamClip != null)
+        {
+            PlayClipWithSubtlePitch(hardSlamClip, heavy ? 1.0f : 0.94f, 0.96f, 1.04f);
+            return;
+        }
+        PlayRandomized(heavy ? heavySlamClips : tileSlamClips, heavy ? 1.0f : 0.94f);
+    }
+
+    public void PlayShuffleAndMix()
+    {
+        if (IsMuted || shuffleSource == null) return;
+        AudioClip clip = shuffleMixClip != null ? shuffleMixClip : fallbackShuffleClip;
+        if (clip == null) return;
+
+        shuffleSource.Stop();
+        shuffleSource.pitch = 1.0f;
+        shuffleSource.clip = clip;
+        shuffleSource.volume = 0.88f;
+        shuffleSource.Play();
+    }
+
+    public void StopShuffleAndMix()
+    {
+        if (shuffleSource != null && shuffleSource.isPlaying)
+        {
+            shuffleSource.Stop();
+        }
+    }
+
     public void PlayDeal() => PlayRandomized(tileDealClips, 0.72f);
     public void PlayDraw() => PlayRandomized(tileDealClips, 0.70f);
     public void PlayTap() => PlayFixed(clipTap, 0.52f);
@@ -151,6 +226,14 @@ public class RoatanSoundFX : MonoBehaviour
     public void PlaySixLovSting() => PlayFixed(clipSixLovSting, 0.85f);
     public void PlayCutThroatSting() => PlayFixed(clipCutThroatSting, 0.85f);
     public void PlayPipTick() => PlayFixed(clipPipTick, 0.42f);
+
+    private void PlayClipWithSubtlePitch(AudioClip clip, float baseVolume, float minPitch, float maxPitch)
+    {
+        if (IsMuted || clip == null || source == null) return;
+        source.pitch = Random.Range(minPitch, maxPitch);
+        float vol = Mathf.Clamp01(baseVolume * Random.Range(0.92f, 1.00f));
+        source.PlayOneShot(clip, vol);
+    }
 
     private void PlayRandomized(AudioClip[] clips, float baseVolume)
     {
@@ -168,6 +251,40 @@ public class RoatanSoundFX : MonoBehaviour
         if (IsMuted || clip == null || source == null) return;
         source.pitch = 1.0f;
         source.PlayOneShot(clip, volume);
+    }
+
+    private static AudioClip SynthesizeTableShuffleFallback()
+    {
+        int sr = 22050;
+        float duration = 4.6f;
+        int samples = (int)(sr * duration);
+        float[] data = new float[samples];
+        System.Random rng = new System.Random(515);
+        float lp = 0f;
+
+        // Layer soft rhythmic resin-clatter bursts simulating dominoes washing on mahogany
+        for (int i = 0; i < samples; i++)
+        {
+            float t = (float)i / sr;
+            float fadeIn = Mathf.Clamp01(t / 0.25f);
+            float fadeOut = Mathf.Clamp01((duration - t) / 0.45f);
+            float washPulse = 0.55f + 0.45f * Mathf.Sin(2f * Mathf.PI * 1.4f * t);
+            float white = (float)rng.NextDouble() * 2f - 1f;
+            lp = lp * 0.78f + white * 0.22f;
+
+            // Occasional crisp tile-on-tile micro-clicks
+            float clack = 0f;
+            if (rng.NextDouble() < 0.0022)
+            {
+                clack = ((float)rng.NextDouble() * 2f - 1f) * 0.65f;
+            }
+
+            data[i] = Mathf.Clamp((lp * 0.42f * washPulse + clack) * fadeIn * fadeOut, -1f, 1f);
+        }
+
+        AudioClip clip = AudioClip.Create("ProceduralTableShuffle", samples, 1, sr, false);
+        clip.SetData(data, 0);
+        return clip;
     }
 
     /// <summary>

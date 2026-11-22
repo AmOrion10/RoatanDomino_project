@@ -346,20 +346,44 @@ public class RoatanMobileApp : MonoBehaviour
         selectedHandDomino = null;
         slamArmed = false;
         if (slamButton != null) slamButton.gameObject.SetActive(false);
+        if (actionButton != null) actionButton.gameObject.SetActive(false);
         waitingForHumanInput = false;
         currentHumanMoves.Clear();
         playerPassedPips.Clear();
         botBrain.ResetForRound();
 
+        // Hide player hands and clear board while the 28-tile table shuffle plays
+        foreach (GameObject go in spawnedHandTiles) Destroy(go);
+        spawnedHandTiles.Clear();
         boardView.ClearBoard();
+        RefreshMatchHeader();
+        RefreshOpponentSeats();
+        RefreshHumanPassedPips();
+        RefreshHumanTakeoverIndicators();
+
+        turnRoutine = StartCoroutine(BeginRoundWithShuffleCoroutine(rematchAfterBreak));
+    }
+
+    private IEnumerator BeginRoundWithShuffleCoroutine(bool rematchAfterBreak)
+    {
+        UpdateStatusBanner("Shuffling & Mixing Tiles...");
+        RoatanSoundFX.Instance?.PlayShuffleAndMix();
+        float shuffleDuration = RoatanSoundFX.Instance != null
+            ? RoatanSoundFX.Instance.GetShuffleClipDuration()
+            : 5.0f;
+
+        yield return StartCoroutine(boardView.PlayTableShuffleAndDealCoroutine(
+            shuffleDuration,
+            engine.Players.Count,
+            UpdateStatusBanner));
+
         RoatanMatchEngine.PlacedTile opener = rematchAfterBreak
             ? engine.StartRematchAfterBreak()
             : engine.StartNewRound();
         RoatanMatchEngine.MatchPlayer starter = engine.Players.First(p => p.Id == opener.PlayerId);
 
         boardView.RebuildFromEngine(engine, animateLastTile: true);
-        RoatanSoundFX.Instance?.PlayDeal();
-        RoatanSoundFX.Instance?.PlayPlace();
+        RoatanSoundFX.Instance?.PlayTilePlace();
 
         RefreshMatchHeader();
         RefreshOpponentSeats();
@@ -1246,6 +1270,8 @@ public class RoatanMobileApp : MonoBehaviour
     private void StopMatchRoutine()
     {
         StopHumanTurnTimer();
+        boardView?.CancelShuffle();
+        RoatanSoundFX.Instance?.StopShuffleAndMix();
         if (turnRoutine != null)
         {
             StopCoroutine(turnRoutine);

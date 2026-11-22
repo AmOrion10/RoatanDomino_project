@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -140,6 +141,14 @@ public class RoatanOnlineController : MonoBehaviour
     private float onlineBotPacingRemaining;
     private bool onlineTurnActionDispatched;
 
+    // Online Pre-Deal 28-Tile Shuffle & Mix state (pauses turn timer until shuffle completes)
+    private bool onlineShufflePlaying;
+    private Coroutine onlineShuffleRoutine;
+    private readonly List<GameObject> onlineShuffleTiles = new List<GameObject>();
+    private readonly List<PlayerPlayDto> pendingOnlinePlaysDuringShuffle = new List<PlayerPlayDto>();
+    private PlayerTurnDto pendingOnlineTurnDuringShuffle;
+    private PossibleMovesDto pendingOnlineMovesDuringShuffle;
+
     private IClient subscribedClient;
     private bool isConnecting;
     private bool isSignedIn;
@@ -239,8 +248,28 @@ public class RoatanOnlineController : MonoBehaviour
 
     public void HideOnline()
     {
+        CancelOnlineShuffle();
         ChatManager.Instance?.SetActiveRoundChatLocked(false);
         onlineRoot.SetActive(false);
+    }
+
+    private void CancelOnlineShuffle()
+    {
+        onlineShufflePlaying = false;
+        if (onlineShuffleRoutine != null)
+        {
+            StopCoroutine(onlineShuffleRoutine);
+            onlineShuffleRoutine = null;
+        }
+        foreach (GameObject go in onlineShuffleTiles)
+        {
+            if (go != null) Destroy(go);
+        }
+        onlineShuffleTiles.Clear();
+        pendingOnlinePlaysDuringShuffle.Clear();
+        pendingOnlineTurnDuringShuffle = null;
+        pendingOnlineMovesDuringShuffle = null;
+        RoatanSoundFX.Instance?.StopShuffleAndMix();
     }
 
     // ==================== NETWORKING & EVENTS ====================
@@ -619,6 +648,7 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void EnterOnlineMatchTable()
     {
+        CancelOnlineShuffle();
         ClearOnlineBoardVisuals();
         onlineHand.Clear();
         onlinePossibleMoves = null;
@@ -674,6 +704,7 @@ public class RoatanOnlineController : MonoBehaviour
         }
 
         if (onlineGameView == null || !onlineGameView.activeSelf) return;
+        if (onlineShufflePlaying) return;
         if (subscribedClient?.User == null || onlineActiveUserId != subscribedClient.User.Id) return;
         if (onlineTurnActionDispatched) return;
 
@@ -716,10 +747,19 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineHandDistributed(HandDto dto)
     {
+        CancelOnlineShuffle();
+        ClearOnlineBoardVisuals();
         onlineHand.Clear();
+        onlinePossibleMoves = null;
+        onlineSelectedDomino = null;
+        onlineTurnTimerActive = false;
+        if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+        if (onlineDrawBtn != null) onlineDrawBtn.gameObject.SetActive(false);
+
+        List<DominoDto> dealtHand = new List<DominoDto>();
         if (dto?.Dominoes != null)
         {
-            onlineHand.AddRange(dto.Dominoes);
+            dealtHand.AddRange(dto.Dominoes);
         }
 
         // Persist active match session in PlayerPrefs so player can rejoin after disconnect/crash
@@ -732,12 +772,67 @@ public class RoatanOnlineController : MonoBehaviour
             RoatanMatchSessionStore.SaveSession(matchId, lobbyId, subscribedClient.User.Id, dto.ReconnectToken, host, port);
         }
 
+        onlineShufflePlaying = true;
+        onlineShuffleRoutine = StartCoroutine(PlayOnlinePreDealShuffleCoroutine(dealtHand));
+    }
+
+    private IEnumerator PlayOnlinePreDealShuffleCoroutine(List<DominoDto> dealtHand)
+    {
+        onlineMatchStatus.text = "Shuffling & Mixing Tiles...";
+        RoatanSoundFX.Instance?.PlayShuffleAndMix();
+        float shuffleDuration = RoatanSoundFX.Instance != null
+            ? RoatanSoundFX.Instance.GetShuffleClipDuration()
+            : 5.0f;
+
+        int playerCount = currentLobby != null && currentLobby.Players != null && currentLobby.Players.Count >= 2
+            ? currentLobby.Players.Count
+            : 4;
+
+        yield return StartCoroutine(RoatanBoardView.PlayShuffleAndDealOnLayerCoroutine(
+            onlineTilesLayer,
+            shuffleDuration,
+            playerCount,
+            onlineShuffleTiles,
+            msg => { if (onlineMatchStatus != null) onlineMatchStatus.text = msg; }));
+
+        onlineShufflePlaying = false;
+        onlineShuffleRoutine = null;
+
+        // Reveal dealt hand & apply any opening play/turn frames that arrived during the shuffle
+        onlineHand.Clear();
+        onlineHand.AddRange(dealtHand);
         RebuildOnlineHandUI();
+
+        List<PlayerPlayDto> queuedPlays = new List<PlayerPlayDto>(pendingOnlinePlaysDuringShuffle);
+        pendingOnlinePlaysDuringShuffle.Clear();
+        foreach (PlayerPlayDto queuedPlay in queuedPlays)
+        {
+            OnOnlinePlayerPlays(queuedPlay);
+        }
+
+        PlayerTurnDto queuedTurn = pendingOnlineTurnDuringShuffle;
+        pendingOnlineTurnDuringShuffle = null;
+        if (queuedTurn != null)
+        {
+            OnOnlineTurnChanged(queuedTurn);
+        }
+
+        PossibleMovesDto queuedMoves = pendingOnlineMovesDuringShuffle;
+        pendingOnlineMovesDuringShuffle = null;
+        if (queuedMoves != null)
+        {
+            OnOnlinePossibleMoves(queuedMoves);
+        }
     }
 
     private void OnOnlinePlayerPlays(PlayerPlayDto dto)
     {
         if (dto == null) return;
+        if (onlineShufflePlaying)
+        {
+            pendingOnlinePlaysDuringShuffle.Add(dto);
+            return;
+        }
 
         if (dto.PlayActionType == PlayActionType.PlaceDomino && dto.Moves != null)
         {
@@ -750,7 +845,7 @@ public class RoatanOnlineController : MonoBehaviour
             }
 
             SpawnOnlineBoardMove(dto.Moves);
-            RoatanSoundFX.Instance?.PlayPlace();
+            RoatanSoundFX.Instance?.PlayTilePlace();
             onlinePossibleMoves = null;
             onlineSelectedDomino = null;
             ClearOnlineSlots();
@@ -769,6 +864,12 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineTurnChanged(PlayerTurnDto dto)
     {
+        if (onlineShufflePlaying)
+        {
+            pendingOnlineTurnDuringShuffle = dto;
+            return;
+        }
+
         onlineActiveUserId = dto.IdUserPlaying;
         onlineTurnActionDispatched = false;
         bool isMyTurn = subscribedClient?.User != null && dto.IdUserPlaying == subscribedClient.User.Id;
@@ -828,6 +929,12 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlinePossibleMoves(PossibleMovesDto dto)
     {
+        if (onlineShufflePlaying)
+        {
+            pendingOnlineMovesDuringShuffle = dto;
+            return;
+        }
+
         onlinePossibleMoves = dto;
 
         bool isMyTurn = subscribedClient?.User != null && onlineActiveUserId == subscribedClient.User.Id;
@@ -1175,6 +1282,7 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void ApplyRejoinSnapshot(RejoinMatchSnapshotDto snap)
     {
+        CancelOnlineShuffle();
         isSignedIn = true;
         currentLobby = new LobbyDto
         {
