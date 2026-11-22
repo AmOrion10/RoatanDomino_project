@@ -39,6 +39,7 @@ public class RoatanMobileApp : MonoBehaviour
 
     // Home UI refs (Decluttered 2-step lobby + compact top bar + utility drawer)
     private TMP_Text subtitleLabel;
+    private TMP_Text subtitleShadowLabel;
     private TMP_Text activePresetPillLabel;
     private TMP_Text topLangPillLabel;
     private TMP_Text drawerStatsLabel;
@@ -956,7 +957,7 @@ public class RoatanMobileApp : MonoBehaviour
         sb.AppendLine();
         foreach (RoatanMatchEngine.MatchPlayer p in result.Standings)
         {
-            string tag = (!result.IsDraw && result.Winner != null && p.Id == result.Winner.Id) ? "★ " : "   ";
+            string tag = (!result.IsDraw && result.Winner != null && p.Id == result.Winner.Id) ? "* " : "  ";
             sb.AppendLine($"{tag}{p.Name,-10}   Hand: {p.HandPipSum(),2} pips ({p.Hand.Count} tiles)   |   Wins: {p.MatchScore}/{engine.TargetMatchScore}");
         }
 
@@ -1284,7 +1285,8 @@ public class RoatanMobileApp : MonoBehaviour
     private void RefreshStaticLabels()
     {
         if (subtitleLabel != null) subtitleLabel.text = RoatanLocalization.T("subtitle");
-        if (topLangPillLabel != null) topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} ▾";
+        if (subtitleShadowLabel != null) subtitleShadowLabel.text = RoatanLocalization.T("subtitle");
+        if (topLangPillLabel != null) topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} v";
         if (modeHeadingLabel != null) modeHeadingLabel.text = "TABLE STYLE";
         if (cerradoTitleLabel != null) cerradoTitleLabel.text = "Roatan Blocked";
         if (cerradoDescLabel != null) cerradoDescLabel.text = "No drawing • Pure strategy";
@@ -1309,7 +1311,7 @@ public class RoatanMobileApp : MonoBehaviour
     {
         if (topLangPillLabel != null)
         {
-            topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} ▾";
+            topLangPillLabel.text = $"{RoatanLocalization.CodeFor(RoatanLocalization.CurrentLanguage)} v";
         }
 
         foreach (KeyValuePair<RoatanGameMode, Image> kv in modeCardImages)
@@ -1650,7 +1652,7 @@ public class RoatanMobileApp : MonoBehaviour
     {
         homeScreen = CreateStretchPanel(safeAreaRoot, "HomeScreen", Color.clear);
 
-        // Compact Top Header Bar: Top-Left Language Pill (EN ▾) + Top-Right Utility Drawer Button (☰ Menu)
+        // Compact Top Header Bar: Top-Left Language Pill ("EN v") + Top-Right Utility Drawer Button (3-bar icon + "MENU")
         GameObject topBar = new GameObject("HomeTopBar");
         topBar.transform.SetParent(homeScreen.transform, false);
         RectTransform topBarRect = topBar.AddComponent<RectTransform>();
@@ -1660,11 +1662,11 @@ public class RoatanMobileApp : MonoBehaviour
         topBarRect.sizeDelta = new Vector2(0f, 92f);
         topBarRect.anchoredPosition = new Vector2(0f, -12f);
 
-        Button langPillBtn = CreatePillButton(topBar.transform, "BtnTopLang", "EN ▾", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(-392f, 0f), new Vector2(168f, 68f), 26, CycleLanguage);
+        Button langPillBtn = CreatePillButton(topBar.transform, "BtnTopLang", "EN v", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(-392f, 0f), new Vector2(168f, 68f), 26, CycleLanguage);
         topLangPillLabel = langPillBtn.GetComponentInChildren<TMP_Text>();
         topLangPillLabel.color = RoatanVisualAssets.IslandGold;
 
-        CreatePillButton(topBar.transform, "BtnUtilityMenu", "☰ Menu", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(376f, 0f), new Vector2(196f, 68f), 26, () =>
+        Button menuPillBtn = CreatePillButton(topBar.transform, "BtnUtilityMenu", "", new Color(0.09f, 0.24f, 0.30f, 0.95f), new Vector2(376f, 0f), new Vector2(196f, 68f), 24, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             RefreshHomeSelections();
@@ -1675,15 +1677,85 @@ public class RoatanMobileApp : MonoBehaviour
                 utilityDrawerOverlay.SetActive(true);
             }
         });
+        // Crisp 3-bar hamburger icon drawn with UI strips (never renders as missing glyph box on Android)
+        float[] barYs = { 10f, 0f, -10f };
+        for (int i = 0; i < barYs.Length; i++)
+        {
+            GameObject bar = new GameObject($"MenuBar_{i}");
+            bar.transform.SetParent(menuPillBtn.transform, false);
+            RectTransform br = bar.AddComponent<RectTransform>();
+            br.sizeDelta = new Vector2(28f, 4f);
+            br.anchoredPosition = new Vector2(-54f, barYs[i]);
+            Image bi = bar.AddComponent<Image>();
+            bi.color = RoatanVisualAssets.IslandGold;
+            bi.raycastTarget = false;
+        }
+        TMP_Text menuLabel = CreateText(menuPillBtn.transform, "MenuText", "MENU", 24, FontStyles.Bold, Color.white, new Vector2(20f, 0f), new Vector2(124f, 52f));
+        menuLabel.raycastTarget = false;
 
-        // Clean ROATAN DOMINO Logo Banner
-        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.05f, 0.19f, 0.25f, 0.94f), new Vector2(0f, 470f), new Vector2(940f, 270f));
+        // Roatan Island Caribbean Centerpiece Header Banner
+        GameObject headerCard = CreateCard(homeScreen.transform, "HeaderBanner", new Color(0.03f, 0.14f, 0.19f, 0.96f), new Vector2(0f, 470f), new Vector2(940f, 296f));
+        headerCard.AddComponent<RectMask2D>();
 
+        // Subtle gold border frame around the banner
+        GameObject hdrOutline = new GameObject("BannerOutline");
+        hdrOutline.transform.SetParent(headerCard.transform, false);
+        RectTransform hoRect = hdrOutline.AddComponent<RectTransform>();
+        hoRect.anchorMin = Vector2.zero;
+        hoRect.anchorMax = Vector2.one;
+        hoRect.offsetMin = Vector2.zero;
+        hoRect.offsetMax = Vector2.zero;
+        Image hoImg = hdrOutline.AddComponent<Image>();
+        hoImg.sprite = RoatanVisualAssets.RoundedOutlineSprite;
+        hoImg.type = Image.Type.Sliced;
+        hoImg.color = new Color(0.95f, 0.74f, 0.24f, 0.55f);
+        hoImg.raycastTarget = false;
+
+        // Layer 1: Tropical Sunset & Caribbean Reef Radial Glow Backdrop
+        GameObject glowObj = new GameObject("TropicalSunsetReefGlow");
+        glowObj.transform.SetParent(headerCard.transform, false);
+        RectTransform glowRect = glowObj.AddComponent<RectTransform>();
+        glowRect.anchoredPosition = new Vector2(0f, 6f);
+        glowRect.sizeDelta = new Vector2(930f, 292f);
+        Image glowImg = glowObj.AddComponent<Image>();
+        glowImg.sprite = RoatanVisualAssets.SunsetReefGlowSprite;
+        glowImg.raycastTarget = false;
+
+        // Layer 2: Stylized Curved Coconut Palm Silhouettes rising behind western/central ridge
+        SpawnBannerPalm(headerCard.transform, "PalmWest", new Vector2(-218f, -14f), new Vector2(168f, 198f), 7f, flipX: false, new Color(0.05f, 0.26f, 0.25f, 0.78f));
+        SpawnBannerPalm(headerCard.transform, "PalmRidgeCenter", new Vector2(-86f, 8f), new Vector2(182f, 212f), -8f, flipX: true, new Color(0.06f, 0.30f, 0.27f, 0.72f));
+        SpawnBannerPalm(headerCard.transform, "PalmEastCay", new Vector2(138f, -20f), new Vector2(142f, 168f), -13f, flipX: false, new Color(0.05f, 0.24f, 0.25f, 0.68f));
+
+        // Layer 3: Roatan Island Map Silhouette (Reef-Turquoise Glow Shadow + Rich Tropical Emerald-Gold Landmass)
+        GameObject mapShadowObj = new GameObject("RoatanIslandMapReefGlow");
+        mapShadowObj.transform.SetParent(headerCard.transform, false);
+        RectTransform msRect = mapShadowObj.AddComponent<RectTransform>();
+        msRect.anchoredPosition = new Vector2(2f, 2f);
+        msRect.sizeDelta = new Vector2(768f, 226f);
+        msRect.localScale = new Vector3(1.025f, 1.045f, 1f);
+        Image msImg = mapShadowObj.AddComponent<Image>();
+        msImg.sprite = RoatanVisualAssets.RoatanIslandMapSprite;
+        msImg.preserveAspect = true;
+        msImg.color = new Color(0.11f, 0.80f, 0.78f, 0.44f);
+        msImg.raycastTarget = false;
+
+        GameObject mapObj = new GameObject("RoatanIslandMap");
+        mapObj.transform.SetParent(headerCard.transform, false);
+        RectTransform mRect = mapObj.AddComponent<RectTransform>();
+        mRect.anchoredPosition = new Vector2(0f, 6f);
+        mRect.sizeDelta = new Vector2(752f, 218f);
+        Image mImg = mapObj.AddComponent<Image>();
+        mImg.sprite = RoatanVisualAssets.RoatanIslandMapSprite;
+        mImg.preserveAspect = true;
+        mImg.color = new Color(0.24f, 0.68f, 0.43f, 0.86f);
+        mImg.raycastTarget = false;
+
+        // Layer 4: Flanking [6|6] & [5|3] Domino Tiles + High-Readability Foreground Typography
         GameObject leftDom = new GameObject("LogoDomLeft");
         leftDom.transform.SetParent(headerCard.transform, false);
         RectTransform lRect = leftDom.AddComponent<RectTransform>();
         lRect.sizeDelta = new Vector2(82f, 164f);
-        lRect.anchoredPosition = new Vector2(-368f, 6f);
+        lRect.anchoredPosition = new Vector2(-372f, 4f);
         lRect.localRotation = Quaternion.Euler(0f, 0f, 16f);
         Image lImg = leftDom.AddComponent<Image>();
         lImg.sprite = RoatanVisualAssets.GetDominoSprite(6, 6);
@@ -1693,18 +1765,33 @@ public class RoatanMobileApp : MonoBehaviour
         rightDom.transform.SetParent(headerCard.transform, false);
         RectTransform rRect = rightDom.AddComponent<RectTransform>();
         rRect.sizeDelta = new Vector2(82f, 164f);
-        rRect.anchoredPosition = new Vector2(368f, 6f);
+        rRect.anchoredPosition = new Vector2(372f, 4f);
         rRect.localRotation = Quaternion.Euler(0f, 0f, -16f);
         Image rImg = rightDom.AddComponent<Image>();
         rImg.sprite = RoatanVisualAssets.GetDominoSprite(5, 3);
         rImg.raycastTarget = false;
 
-        CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 62, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 52f), new Vector2(640f, 78f));
-        subtitleLabel = CreateText(headerCard.transform, "Subtitle", RoatanLocalization.T("subtitle"), 26, FontStyles.Normal, new Color(0.84f, 0.95f, 0.96f), new Vector2(0f, -14f), new Vector2(660f, 44f));
-        statsLabel = CreateText(headerCard.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches (0%)", 23, FontStyles.Bold, Color.white, new Vector2(0f, -72f), new Vector2(680f, 38f));
+        // Crisp dark drop-shadow behind "ROATAN DOMINO" for high contrast over the island map
+        TMP_Text titleShadow = CreateText(headerCard.transform, "TitleShadow", "ROATAN DOMINO", 62, FontStyles.Bold, new Color(0.02f, 0.06f, 0.08f, 0.92f), new Vector2(3f, 52f), new Vector2(650f, 80f));
+        titleShadow.raycastTarget = false;
+        TMP_Text titleMain = CreateText(headerCard.transform, "Title", "ROATAN DOMINO", 62, FontStyles.Bold, new Color(0.969f, 0.788f, 0.282f, 1f), new Vector2(0f, 56f), new Vector2(650f, 80f));
+        titleMain.outlineWidth = 0.22f;
+        titleMain.outlineColor = new Color32(8, 22, 28, 255);
+        titleMain.raycastTarget = false;
+
+        subtitleShadowLabel = CreateText(headerCard.transform, "SubtitleShadow", RoatanLocalization.T("subtitle"), 25, FontStyles.Bold, new Color(0.02f, 0.06f, 0.08f, 0.85f), new Vector2(2f, -15f), new Vector2(670f, 44f));
+        subtitleShadowLabel.raycastTarget = false;
+        subtitleLabel = CreateText(headerCard.transform, "Subtitle", RoatanLocalization.T("subtitle"), 25, FontStyles.Bold, new Color(0.92f, 0.98f, 0.98f, 1f), new Vector2(0f, -13f), new Vector2(670f, 44f));
+        subtitleLabel.raycastTarget = false;
+
+        // Subtle dark pill behind Offline Record stat so it always reads crisply over the island ridge
+        GameObject statPill = CreateCard(headerCard.transform, "StatReadabilityPill", new Color(0.02f, 0.10f, 0.14f, 0.72f), new Vector2(0f, -84f), new Vector2(610f, 46f));
+        statPill.GetComponent<Image>().raycastTarget = false;
+        statsLabel = CreateText(statPill.transform, "Stats", "Offline Record: 0 Wins  •  0 Matches (0%)", 23, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(590f, 38f));
+        statsLabel.raycastTarget = false;
 
         // Active Preset Summary Chip
-        GameObject presetChip = CreateCard(homeScreen.transform, "ActivePresetChip", new Color(0.06f, 0.22f, 0.28f, 0.88f), new Vector2(0f, 250f), new Vector2(860f, 68f));
+        GameObject presetChip = CreateCard(homeScreen.transform, "ActivePresetChip", new Color(0.06f, 0.22f, 0.28f, 0.88f), new Vector2(0f, 240f), new Vector2(860f, 68f));
         activePresetPillLabel = CreateText(presetChip.transform, "PresetText", "Saved Preset: Six-Lov 2v2 • Roatan Blocked • Novice", 24, FontStyles.Bold, new Color(0.95f, 0.88f, 0.65f), Vector2.zero, new Vector2(820f, 54f));
 
         // 3 Focused Primary Buttons: PLAY OFFLINE | CUSTOM MATCH | PLAY ONLINE
@@ -1742,6 +1829,22 @@ public class RoatanMobileApp : MonoBehaviour
         CreateText(homeScreen.transform, "HomeFooterTip", "Tap CUSTOM MATCH to switch Six-Lov, Two-Best, Cut-Throat, or 1-1 Playoff", 22, FontStyles.Italic, new Color(0.80f, 0.92f, 0.94f, 0.88f), new Vector2(0f, -430f), new Vector2(860f, 52f));
     }
 
+    private static void SpawnBannerPalm(Transform parent, string name, Vector2 pos, Vector2 size, float rotZ, bool flipX, Color tint)
+    {
+        GameObject palm = new GameObject(name);
+        palm.transform.SetParent(parent, false);
+        RectTransform pr = palm.AddComponent<RectTransform>();
+        pr.anchoredPosition = pos;
+        pr.sizeDelta = size;
+        pr.localRotation = Quaternion.Euler(0f, 0f, rotZ);
+        pr.localScale = new Vector3(flipX ? -1f : 1f, 1f, 1f);
+        Image pi = palm.AddComponent<Image>();
+        pi.sprite = RoatanVisualAssets.CoconutPalmSprite;
+        pi.preserveAspect = true;
+        pi.color = tint;
+        pi.raycastTarget = false;
+    }
+
     private void BuildMatchSetupSheet()
     {
         matchSetupSheet = CreateStretchPanel(safeAreaRoot, "MatchSetupSheet", new Color(0f, 0f, 0f, 0.76f));
@@ -1761,7 +1864,7 @@ public class RoatanMobileApp : MonoBehaviour
             }
         });
 
-        CreatePillButton(sheet.transform, "BtnCloseSetup", "✕", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(400f, 655f), new Vector2(68f, 64f), 30, () =>
+        CreatePillButton(sheet.transform, "BtnCloseSetup", "X", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(400f, 655f), new Vector2(68f, 64f), 30, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             SaveMatchPreset();
@@ -1909,7 +2012,7 @@ public class RoatanMobileApp : MonoBehaviour
         dRect.offsetMax = new Vector2(-8f, -20f);
 
         CreateText(drawer.transform, "DrawerTitle", "ROATAN MENU", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-45f, 760f), new Vector2(440f, 64f));
-        CreatePillButton(drawer.transform, "BtnCloseDrawer", "✕", new Color(0.22f, 0.22f, 0.28f, 1f), new Vector2(240f, 760f), new Vector2(72f, 66f), 30, () =>
+        CreatePillButton(drawer.transform, "BtnCloseDrawer", "X", new Color(0.22f, 0.22f, 0.28f, 1f), new Vector2(240f, 760f), new Vector2(72f, 66f), 30, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             utilityDrawerOverlay.SetActive(false);
