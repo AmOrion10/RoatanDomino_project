@@ -144,7 +144,7 @@ public class RoatanTableTalkUI : MonoBehaviour
 
     private void BuildEmoteWheel()
     {
-        emoteWheelPanel = CreateCard(parentRoot, "QuickEmoteWheel", new Color(0.05f, 0.16f, 0.22f, 0.96f), Vector2.zero, new Vector2(860f, 360f));
+        emoteWheelPanel = CreateCard(parentRoot, "QuickEmoteWheel", new Color(0.05f, 0.16f, 0.22f, 0.96f), Vector2.zero, new Vector2(860f, 456f));
         RectTransform wheelRect = emoteWheelPanel.GetComponent<RectTransform>();
         wheelRect.anchorMin = new Vector2(0.5f, 0f);
         wheelRect.anchorMax = new Vector2(0.5f, 0f);
@@ -164,26 +164,28 @@ public class RoatanTableTalkUI : MonoBehaviour
         bImg.color = RoatanVisualAssets.IslandGold;
         bImg.raycastTarget = false;
 
-        CreateText(emoteWheelPanel.transform, "WheelTitle", "TABLE TALK  •  QUICK EMOTES", 25, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 144f), new Vector2(780f, 42f));
+        CreateText(emoteWheelPanel.transform, "WheelTitle", "TABLE TALK  •  QUICK EMOTES", 25, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 192f), new Vector2(780f, 42f));
 
-        // 2 rows x 3 columns Caribbean quick-emote buttons
+        // 2 rows x 3 columns + prominent centered 7th pill ("Key / Capicú!")
         Vector2[] offsets =
         {
-            new Vector2(-265f, 45f), new Vector2(0f, 45f), new Vector2(265f, 45f),
-            new Vector2(-265f, -72f), new Vector2(0f, -72f), new Vector2(265f, -72f)
+            new Vector2(-265f, 95f), new Vector2(0f, 95f), new Vector2(265f, 95f),
+            new Vector2(-265f, -15f), new Vector2(0f, -15f), new Vector2(265f, -15f),
+            new Vector2(0f, -135f)
         };
 
         for (int i = 0; i < RoatanQuickEmotes.Phrases.Length && i < offsets.Length; i++)
         {
             string phrase = RoatanQuickEmotes.Phrases[i];
+            bool isKeyEmote = i == 6;
             Button btn = CreatePillButton(
                 emoteWheelPanel.transform,
                 $"Emote_{i}",
                 phrase,
-                new Color(0.10f, 0.30f, 0.36f, 1f),
+                isKeyEmote ? new Color(0.58f, 0.39f, 0.08f, 1f) : new Color(0.10f, 0.30f, 0.36f, 1f),
                 offsets[i],
-                new Vector2(248f, 92f),
-                24,
+                isKeyEmote ? new Vector2(360f, 84f) : new Vector2(248f, 88f),
+                isKeyEmote ? 26 : 24,
                 () =>
                 {
                     emoteWheelPanel.SetActive(false);
@@ -192,7 +194,7 @@ public class RoatanTableTalkUI : MonoBehaviour
                     onHumanEmote?.Invoke(phrase);
                 });
             TMP_Text lbl = btn.GetComponentInChildren<TMP_Text>();
-            if (lbl != null) lbl.color = Color.white;
+            if (lbl != null) lbl.color = isKeyEmote ? new Color(1f, 0.96f, 0.78f, 1f) : Color.white;
         }
 
         emoteWheelPanel.SetActive(false);

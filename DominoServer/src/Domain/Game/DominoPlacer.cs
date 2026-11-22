@@ -7,6 +7,14 @@ public class DominoPlacer(GameGridDto gridDto)
     public MoveRecorder MoveHistory = new();
     private readonly MoveValidator validator = new(gridDto);
     private List<DominoEndPosition> endDominoes = [];
+    private int openEndA = -1;
+    private int openEndB = -1;
+
+    public (int End1, int End2)? GetOpenEnds()
+    {
+        if (openEndA < 0 || openEndB < 0) return null;
+        return (openEndA, openEndB);
+    }
 
     public void PlaceFirstDomino(GamePlayer currentPlayer, GameMove move)
     {
@@ -44,6 +52,8 @@ public class DominoPlacer(GameGridDto gridDto)
                 endDominoes.Add(new DominoEndPosition(new GridCell(move.Row, move.Col - 1), move.Domino));
                 break;
         }
+        openEndA = move.Domino.Side1;
+        openEndB = move.Domino.Side2;
         MoveHistory.AddToHistory(move);
         UpdatePlacementPositions(move);
     }
@@ -146,6 +156,17 @@ public class DominoPlacer(GameGridDto gridDto)
                 gridDto.Grid[move.Row + 1][move.Col] = move.Domino.Side1;
                 break;
         }
+        int matchedPip = gridDto.Grid[move.Row][move.Col];
+        int exposedPip = move.Domino.Side1 == matchedPip ? move.Domino.Side2 : move.Domino.Side1;
+        if (openEndA == matchedPip)
+        {
+            openEndA = exposedPip;
+        }
+        else if (openEndB == matchedPip)
+        {
+            openEndB = exposedPip;
+        }
+
         MoveHistory.AddToHistory(move);
         UpdatePlacementPositions(move);
     }

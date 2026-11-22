@@ -837,12 +837,35 @@ public class RoatanMobileApp : MonoBehaviour
         {
             RoatanSoundFX.Instance?.PlayBreakSting();
             boardView?.TriggerBoardShake(18f, 0.35f);
+            string keyBreakNote = result.IsKeyWin ? " (by Key / Capicú!)" : "";
             tableTalkUI?.ShowCelebrationBanner(
                 "GAME BRUK! (BREAK)",
-                $"{result.Winner?.Name} broke the streak! Scores reset to 0 — [6|6] poses next",
+                $"{result.Winner?.Name} broke the streak{keyBreakNote}! Scores reset to 0 — [6|6] poses next",
                 new Color(0.56f, 0.16f, 0.14f, 0.96f),
                 2.2f);
             yield return new WaitForSeconds(1.8f);
+        }
+        else if (result.MatchOver && engine.MatchFormat == MatchFormat.SIX_LOV && result.IsKeyWin)
+        {
+            RoatanSoundFX.Instance?.PlayKeySting();
+            boardView?.TriggerBoardShake(22f, 0.42f);
+            tableTalkUI?.ShowCelebrationBanner(
+                "SIX-LOV BY KEY! (CAPICÚ!)",
+                $"{result.Winner?.Name} sealed the 6–0 sweep with a Key (+2 wins)!",
+                new Color(0.58f, 0.38f, 0.06f, 0.96f),
+                2.8f);
+            yield return new WaitForSeconds(2.0f);
+        }
+        else if (result.IsKeyWin)
+        {
+            RoatanSoundFX.Instance?.PlayKeySting();
+            boardView?.TriggerBoardShake(18f, 0.36f);
+            tableTalkUI?.ShowCelebrationBanner(
+                "KEY! / CAPICÚ! (+2 WINS)",
+                $"{result.Winner?.Name} exhausted both open suits on the final tile!",
+                new Color(0.58f, 0.38f, 0.06f, 0.96f),
+                2.6f);
+            yield return new WaitForSeconds(1.9f);
         }
         else if (result.MatchOver && engine.MatchFormat == MatchFormat.SIX_LOV)
         {
@@ -926,6 +949,14 @@ public class RoatanMobileApp : MonoBehaviour
         {
             summaryTitleLabel.text = "GAME BRUK! (BREAK)";
         }
+        else if (hasChampion && result.IsKeyWin && engine.MatchFormat == MatchFormat.SIX_LOV)
+        {
+            summaryTitleLabel.text = "SIX-LOV BY KEY! (CAPICÚ!)";
+        }
+        else if (result.IsKeyWin && !hasChampion)
+        {
+            summaryTitleLabel.text = "KEY! / CAPICÚ! (+2 WINS)";
+        }
         else
         {
             summaryTitleLabel.text = hasChampion
@@ -947,7 +978,14 @@ public class RoatanMobileApp : MonoBehaviour
         }
         else
         {
-            sb.AppendLine($"{reason}   •   +{result.PointsAwarded} hand win to {result.Winner.Name}");
+            if (result.IsKeyWin)
+            {
+                sb.AppendLine($"Won by KEY / CAPICÚ (+{result.PointsAwarded}) — {result.Winner.Name}");
+            }
+            else
+            {
+                sb.AppendLine($"{reason}   •   +{result.PointsAwarded} hand win to {result.Winner.Name}");
+            }
             if (result.CutThroatedPlayers != null && result.CutThroatedPlayers.Count > 0)
             {
                 string victims = string.Join(", ", result.CutThroatedPlayers.Select(p => p.Name));

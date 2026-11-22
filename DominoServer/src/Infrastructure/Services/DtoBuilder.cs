@@ -240,6 +240,8 @@ public static class DtoBuilder
         {
             dto.BreakTriggered = game.LastHandResolution.BreakTriggered;
             dto.MatchOver = game.LastHandResolution.MatchOver;
+            dto.IsKeyWin = game.LastHandResolution.IsKeyWin;
+            dto.PointsAwarded = game.LastHandResolution.PointsAwarded;
             dto.AvailableActions = new List<PostHandAction>(game.LastHandResolution.AvailablePostHandActions);
         }
 

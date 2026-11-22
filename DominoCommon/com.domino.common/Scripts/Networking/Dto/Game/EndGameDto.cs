@@ -22,5 +22,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Game
 
         [JsonProperty(PropertyName = "act", NullValueHandling = NullValueHandling.Ignore)]
         public List<PostHandAction> AvailableActions { get; set; }
+
+        [JsonProperty(PropertyName = "key", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? IsKeyWin { get; set; }
+
+        [JsonProperty(PropertyName = "pts", NullValueHandling = NullValueHandling.Ignore)]
+        public int? PointsAwarded { get; set; }
     }
 }

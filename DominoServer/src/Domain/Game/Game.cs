@@ -72,6 +72,7 @@ public class Game
     private DominoPlacer placer;
     private int currentPlayerIndex;
     private bool currentHandScored;
+    private bool lastDominoOutWasKey;
     public List<GamePlayer> Classement { get; } = [];
 
     /// <summary>
@@ -237,6 +238,7 @@ public class Game
         HandNumber++;
         ConsecutivePasses = 0;
         currentHandScored = false;
+        lastDominoOutWasKey = false;
         LastHandResolution = null;
         Phase = MatchPhase.AWAITING_POSE;
 
@@ -418,10 +420,12 @@ public class Game
     {
         if (move.PlayerId == PlayerPlaying.Id)
         {
+            (int End1, int End2)? openEndsBefore = placer.GetOpenEnds();
             bool placed = placer.PlaceDomino(PlayerPlaying, new GameMove(move.Domino, move.Row, move.Col, move.Orientation, move.PlayerId));
             if (placed)
             {
                 ConsecutivePasses = 0;
+                lastDominoOutWasKey = PlayerPlaying.Hand.Count == 0 && IsNaturalKeyWin(move.Domino, openEndsBefore);
                 if (!isAutomated)
                 {
                     PlayerPlaying.RecordManualAction();
@@ -430,6 +434,40 @@ public class Game
             return placed;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Evaluates the Roatan "Key / Capicu" (+2 wins) rule on Domino Out:
+    /// 1. Non-double tile [A|B] (A != B).
+    /// 2. Both open playable ends before placement matched {A, B}.
+    /// 3. Zero remaining tiles containing suit A or suit B exist off-board (hands, boneyard, or locked pile).
+    /// </summary>
+    private bool IsNaturalKeyWin(Domino winningTile, (int End1, int End2)? openEndsBefore)
+    {
+        if (!openEndsBefore.HasValue) return false;
+        int a = winningTile.Side1;
+        int b = winningTile.Side2;
+        if (a == b) return false; // Doubles never count as Key/Capicu
+
+        (int e1, int e2) = openEndsBefore.Value;
+        bool matchesBothEnds = (e1 == a && e2 == b) || (e1 == b && e2 == a);
+        if (!matchesBothEnds) return false;
+
+        // Verify both suits A and B are completely exhausted from all remaining hands, boneyard, and locked pile
+        foreach (GamePlayer p in Players)
+        {
+            if (p.Hand.Any(d => d.Side1 == a || d.Side2 == a || d.Side1 == b || d.Side2 == b))
+            {
+                return false;
+            }
+        }
+
+        if (Stack.HasAnyRemainingTileWithSuit(a) || Stack.HasAnyRemainingTileWithSuit(b))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     public bool CanDraw(long idUser)
@@ -846,7 +884,8 @@ public class Game
                 IsDraw = false,
                 Winner = dominoOutWinner,
                 WinningTeamId = winnerTeam,
-                PointsAwarded = points,
+                PointsAwarded = lastDominoOutWasKey ? 2 : 1,
+                IsKeyWin = lastDominoOutWasKey,
                 BreakTriggered = false,
                 NextPoserId = dominoOutWinner.Id,
                 IndividualPipCounts = individualPips
@@ -940,6 +979,8 @@ public class Game
 
         GamePlayer winner = raw.Winner!;
         int winningTeam = raw.WinningTeamId;
+        bool isKeyWin = raw.IsKeyWin;
+        int winAward = isKeyWin ? 2 : 1;
         LastHandWasDraw = false;
         LastHandWinnerId = winner.Id;
 
@@ -950,6 +991,7 @@ public class Game
         long? partnerId = null;
         long? nextPoserId = winner.Id;
         bool canPlayAnyTile = true;
+        int awardedPoints = winAward;
         List<long> cutThroated = [];
 
         if (MatchFormat == MatchFormat.SIX_LOV && IsTeam2v2)
@@ -964,10 +1006,11 @@ public class Game
                 {
                     TeamScores[winningTeam] = 1;
                     TeamScores[oppTeam] = 1;
+                    awardedPoints = 1;
                 }
                 else if (winScore == 1 && oppScore == 1)
                 {
-                    TeamScores[winningTeam] = 2;
+                    TeamScores[winningTeam] = Math.Min(6, 1 + winAward);
                     TeamScores[oppTeam] = 0;
                 }
                 else if (oppScore >= 2 && oppScore <= 5)
@@ -975,10 +1018,11 @@ public class Game
                     TeamScores[0] = 0;
                     TeamScores[1] = 0;
                     breakTriggered = true;
+                    awardedPoints = 0;
                 }
                 else
                 {
-                    TeamScores[winningTeam] = winScore + 1;
+                    TeamScores[winningTeam] = Math.Min(6, winScore + winAward);
                 }
             }
             else
@@ -988,10 +1032,11 @@ public class Game
                     TeamScores[0] = 0;
                     TeamScores[1] = 0;
                     breakTriggered = true;
+                    awardedPoints = 0;
                 }
                 else
                 {
-                    TeamScores[winningTeam] = winScore + 1;
+                    TeamScores[winningTeam] = Math.Min(6, winScore + winAward);
                 }
             }
 
@@ -1026,7 +1071,7 @@ public class Game
         {
             if (IsTeam2v2)
             {
-                TeamScores[winningTeam]++;
+                TeamScores[winningTeam] = Math.Min(2, TeamScores[winningTeam] + winAward);
                 SyncTeamScoresToPlayers();
 
                 if (TeamScores[winningTeam] >= 2)
@@ -1049,7 +1094,7 @@ public class Game
             }
             else
             {
-                PlayerScores[winner.Id]++;
+                PlayerScores[winner.Id] = Math.Min(2, PlayerScores[winner.Id] + winAward);
                 winner.MatchScore = PlayerScores[winner.Id];
 
                 if (PlayerScores[winner.Id] >= 2)
@@ -1072,35 +1117,19 @@ public class Game
         }
         else // CUT_THROAT (Free-For-All: 2, 3, or 4 players)
         {
-            PlayerScores[winner.Id]++;
-            winner.MatchScore = PlayerScores[winner.Id];
+            bool everyoneHasScoredAfterWin = Players.All(p => p.Id == winner.Id || PlayerScores[p.Id] >= 1);
+            int nextScore = Math.Min(6, PlayerScores[winner.Id] + winAward);
 
-            if (PlayerScores[winner.Id] >= 6)
+            if (everyoneHasScoredAfterWin && nextScore < 6)
             {
-                matchOver = true;
-                IsMatchOver = true;
-                MatchWinner = winner;
-                MatchWinningTeamId = winningTeam;
-                CutThroatedPlayerIds.Clear();
-                foreach (GamePlayer p in Players)
-                {
-                    if (PlayerScores[p.Id] == 0)
-                    {
-                        CutThroatedPlayerIds.Add(p.Id);
-                        cutThroated.Add(p.Id);
-                    }
-                }
-                Phase = MatchPhase.MATCH_OVER;
-            }
-            else if (Players.All(p => PlayerScores[p.Id] >= 1))
-            {
-                // Cut-Throat Break: every player has won at least 1 hand -> reset all to 0 and force [6|6]/fallback
+                // Cut-Throat Break: every player now has at least 1 win -> reset all to 0 and force [6|6]/fallback
                 foreach (GamePlayer p in Players)
                 {
                     PlayerScores[p.Id] = 0;
                     p.MatchScore = 0;
                 }
                 breakTriggered = true;
+                awardedPoints = 0;
                 TriggerBreakReset();
                 nextPoserId = null;
                 canPlayAnyTile = false;
@@ -1108,11 +1137,34 @@ public class Game
             }
             else
             {
-                ConfirmedPoserId = winner.Id;
-                CanPoserPlayAnyTile = true;
-                nextPoserId = winner.Id;
-                canPlayAnyTile = true;
-                Phase = MatchPhase.HAND_OVER;
+                PlayerScores[winner.Id] = nextScore;
+                winner.MatchScore = nextScore;
+
+                if (PlayerScores[winner.Id] >= 6)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    CutThroatedPlayerIds.Clear();
+                    foreach (GamePlayer p in Players)
+                    {
+                        if (PlayerScores[p.Id] == 0)
+                        {
+                            CutThroatedPlayerIds.Add(p.Id);
+                            cutThroated.Add(p.Id);
+                        }
+                    }
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    ConfirmedPoserId = winner.Id;
+                    CanPoserPlayAnyTile = true;
+                    nextPoserId = winner.Id;
+                    canPlayAnyTile = true;
+                    Phase = MatchPhase.HAND_OVER;
+                }
             }
         }
 
@@ -1123,7 +1175,8 @@ public class Game
             IsDraw = false,
             Winner = winner,
             WinningTeamId = winningTeam,
-            PointsAwarded = breakTriggered ? 0 : 1,
+            PointsAwarded = awardedPoints,
+            IsKeyWin = isKeyWin,
             BreakTriggered = breakTriggered,
             MatchOver = matchOver,
             MatchWinner = matchOver ? winner : null,

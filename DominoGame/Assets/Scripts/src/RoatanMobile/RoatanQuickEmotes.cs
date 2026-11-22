@@ -9,7 +9,8 @@ public static class RoatanQuickEmotes
         "Game Bruk!",
         "Slam it!",
         "Six-Lov incoming!",
-        "Padna!"
+        "Padna!",
+        "Key / Capicú!"
     };
 
     public static bool IsAllowedQuickEmote(string message)
@@ -17,7 +18,10 @@ public static class RoatanQuickEmotes
         if (string.IsNullOrWhiteSpace(message)) return false;
         string trimmed = message.Trim();
 
-        if (string.Equals(trimmed, "Break!", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(trimmed, "Break!", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Key!", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Capicu!", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Capicú!", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

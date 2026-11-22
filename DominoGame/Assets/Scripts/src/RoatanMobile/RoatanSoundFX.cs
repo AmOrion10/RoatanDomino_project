@@ -33,6 +33,7 @@ public class RoatanSoundFX : MonoBehaviour
     private AudioClip clipBreakSting;
     private AudioClip clipSixLovSting;
     private AudioClip clipCutThroatSting;
+    private AudioClip clipKeySting;
     private AudioClip clipPipTick;
 
     private void Awake()
@@ -63,6 +64,7 @@ public class RoatanSoundFX : MonoBehaviour
         clipBreakSting = SynthesizeBreakSting();
         clipSixLovSting = SynthesizeSixLovFanfare();
         clipCutThroatSting = SynthesizeCutThroatSting();
+        clipKeySting = SynthesizeKeyCapicuSting();
         clipPipTick = SynthesizeSoftTone(760f, 0.032f, 0.14f);
     }
 
@@ -225,6 +227,7 @@ public class RoatanSoundFX : MonoBehaviour
     public void PlayBreakSting() => PlayFixed(clipBreakSting, 0.85f);
     public void PlaySixLovSting() => PlayFixed(clipSixLovSting, 0.85f);
     public void PlayCutThroatSting() => PlayFixed(clipCutThroatSting, 0.85f);
+    public void PlayKeySting() => PlayFixed(clipKeySting, 0.92f);
     public void PlayPipTick() => PlayFixed(clipPipTick, 0.42f);
 
     private void PlayClipWithSubtlePitch(AudioClip clip, float baseVolume, float minPitch, float maxPitch)
@@ -536,6 +539,36 @@ public class RoatanSoundFX : MonoBehaviour
         }
 
         AudioClip clip = AudioClip.Create("CutThroatSting", samples, 1, sampleRate, false);
+        clip.SetData(data, 0);
+        return clip;
+    }
+
+    private static AudioClip SynthesizeKeyCapicuSting()
+    {
+        int sampleRate = 22050;
+        int samples = (int)(sampleRate * 0.86f);
+        float[] data = new float[samples];
+        // Bright Caribbean rising steel-pan & brass fanfare for KEY / CAPICU (+2 wins)
+        float[] notes = { 587.33f, 739.99f, 880.00f, 1174.66f, 1479.98f };
+
+        for (int i = 0; i < samples; i++)
+        {
+            float t = (float)i / sampleRate;
+            // Warm punchy bass accent on beat 1
+            float val = Mathf.Sin(2f * Mathf.PI * 146.83f * t) * Mathf.Exp(-t * 8f) * 0.36f;
+            for (int n = 0; n < notes.Length; n++)
+            {
+                float start = n * 0.08f;
+                if (t < start) continue;
+                float lt = t - start;
+                float env = Mathf.Exp(-lt * 4.8f);
+                val += (Mathf.Sin(2f * Mathf.PI * notes[n] * lt) * 0.24f
+                      + Mathf.Sin(2f * Mathf.PI * notes[n] * 2f * lt) * 0.10f) * env;
+            }
+            data[i] = Mathf.Clamp(val, -1f, 1f);
+        }
+
+        AudioClip clip = AudioClip.Create("KeyCapicuSting", samples, 1, sampleRate, false);
         clip.SetData(data, 0);
         return clip;
     }

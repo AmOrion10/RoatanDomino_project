@@ -69,6 +69,7 @@ public class RoatanMatchEngine
         public int PartnerCandidateIndex { get; set; } = -1;
         public bool CanPoserPlayAnyTile { get; set; }
         public int PointsAwarded { get; set; }
+        public bool IsKeyWin { get; set; }
         public int NextPoserIndex { get; set; } = -1;
         public List<MatchPlayer> CutThroatedPlayers { get; set; } = new List<MatchPlayer>();
         public List<PostHandAction> AvailablePostHandActions { get; set; } = new List<PostHandAction>();
@@ -129,6 +130,7 @@ public class RoatanMatchEngine
     private int currentPlayerIndex;
     private int consecutivePasses;
     private int lastRoundWinnerIndex = -1;
+    private bool lastDominoOutWasKey;
 
     private static readonly string[] IslandBotNames = { "Anthony", "Patrik", "Astor" };
 
@@ -288,6 +290,7 @@ public class RoatanMatchEngine
         LeftEndPip = -1;
         RightEndPip = -1;
         consecutivePasses = 0;
+        lastDominoOutWasKey = false;
         Phase = MatchPhase.AWAITING_POSE;
 
         bool excludeDoubleBlank = Players.Count == 3 && TableStyle == TableStyle.BLOCK;
@@ -485,6 +488,8 @@ public class RoatanMatchEngine
         DominoDto inHand = FindInHand(player, move.Domino);
         if (inHand == null) return null;
 
+        int leftBefore = LeftEndPip;
+        int rightBefore = RightEndPip;
         int targetPip = move.End == BoardEnd.Left ? LeftEndPip : RightEndPip;
         if (inHand.Side1 != targetPip && inHand.Side2 != targetPip)
         {
@@ -516,9 +521,52 @@ public class RoatanMatchEngine
         player.Hand.Remove(inHand);
         playedDominoes.Add(Clone(inHand));
         consecutivePasses = 0;
+        lastDominoOutWasKey = player.Hand.Count == 0 && IsNaturalKeyWin(inHand, leftBefore, rightBefore);
 
         currentPlayerIndex = StepTurnIndex(currentPlayerIndex);
         return placed;
+    }
+
+    private bool IsNaturalKeyWin(DominoDto winningTile, int leftOpenBefore, int rightOpenBefore)
+    {
+        if (winningTile == null || leftOpenBefore < 0 || rightOpenBefore < 0) return false;
+        int a = winningTile.Side1;
+        int b = winningTile.Side2;
+        if (a == b) return false; // Doubles never qualify as Key/Capicu
+
+        bool matchesBothEnds = (leftOpenBefore == a && rightOpenBefore == b) ||
+                               (leftOpenBefore == b && rightOpenBefore == a);
+        if (!matchesBothEnds) return false;
+
+        // Verify both suits A and B are completely exhausted from all hands, boneyard, and locked pile
+        foreach (MatchPlayer p in Players)
+        {
+            foreach (DominoDto d in p.Hand)
+            {
+                if (d.Side1 == a || d.Side2 == a || d.Side1 == b || d.Side2 == b)
+                {
+                    return false;
+                }
+            }
+        }
+
+        foreach (DominoDto d in boneyard)
+        {
+            if (d.Side1 == a || d.Side2 == a || d.Side1 == b || d.Side2 == b)
+            {
+                return false;
+            }
+        }
+
+        foreach (DominoDto d in lockedPile)
+        {
+            if (d.Side1 == a || d.Side2 == a || d.Side1 == b || d.Side2 == b)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public DominoDto DrawFromBoneyard()
@@ -795,6 +843,10 @@ public class RoatanMatchEngine
         int winnerIdx = Players.FindIndex(p => p.Id == winner.Id);
         lastRoundWinnerIndex = winnerIdx;
 
+        bool isKeyWin = !wasBlocked && lastDominoOutWasKey;
+        int winAward = isKeyWin ? 2 : 1;
+        int awardedPoints = winAward;
+
         bool breakTriggered = false;
         bool matchOver = false;
         bool requiresChoosePoser = false;
@@ -816,10 +868,11 @@ public class RoatanMatchEngine
                 {
                     TeamScores[winningTeam] = 1;
                     TeamScores[oppTeam] = 1;
+                    awardedPoints = 1;
                 }
                 else if (winScore == 1 && oppScore == 1)
                 {
-                    TeamScores[winningTeam] = 2;
+                    TeamScores[winningTeam] = Math.Min(6, 1 + winAward);
                     TeamScores[oppTeam] = 0;
                 }
                 else if (oppScore >= 2 && oppScore <= 5)
@@ -827,10 +880,11 @@ public class RoatanMatchEngine
                     TeamScores[0] = 0;
                     TeamScores[1] = 0;
                     breakTriggered = true;
+                    awardedPoints = 0;
                 }
                 else
                 {
-                    TeamScores[winningTeam] = winScore + 1;
+                    TeamScores[winningTeam] = Math.Min(6, winScore + winAward);
                 }
             }
             else
@@ -840,10 +894,11 @@ public class RoatanMatchEngine
                     TeamScores[0] = 0;
                     TeamScores[1] = 0;
                     breakTriggered = true;
+                    awardedPoints = 0;
                 }
                 else
                 {
-                    TeamScores[winningTeam] = winScore + 1;
+                    TeamScores[winningTeam] = Math.Min(6, winScore + winAward);
                 }
             }
 
@@ -878,7 +933,7 @@ public class RoatanMatchEngine
         {
             if (IsTeam2v2)
             {
-                TeamScores[winningTeam]++;
+                TeamScores[winningTeam] = Math.Min(2, TeamScores[winningTeam] + winAward);
                 SyncTeamScores();
 
                 if (TeamScores[winningTeam] >= 2)
@@ -901,7 +956,7 @@ public class RoatanMatchEngine
             }
             else
             {
-                winner.MatchScore++;
+                winner.MatchScore = Math.Min(2, winner.MatchScore + winAward);
                 if (winner.MatchScore >= 2)
                 {
                     matchOver = true;
@@ -920,31 +975,17 @@ public class RoatanMatchEngine
         }
         else // CUT_THROAT (Free-For-All)
         {
-            winner.MatchScore++;
-            if (winner.MatchScore >= 6)
-            {
-                matchOver = true;
-                IsMatchOver = true;
-                MatchWinner = winner;
-                MatchWinningTeamId = winningTeam;
-                CutThroatedPlayers.Clear();
-                foreach (MatchPlayer p in Players)
-                {
-                    if (p.MatchScore == 0)
-                    {
-                        CutThroatedPlayers.Add(p);
-                        cutThroated.Add(p);
-                    }
-                }
-                Phase = MatchPhase.MATCH_OVER;
-            }
-            else if (Players.All(p => p.MatchScore >= 1))
+            bool everyoneHasScoredAfterWin = Players.All(p => p.Id == winner.Id || p.MatchScore >= 1);
+            int nextScore = Math.Min(6, winner.MatchScore + winAward);
+
+            if (everyoneHasScoredAfterWin && nextScore < 6)
             {
                 foreach (MatchPlayer p in Players)
                 {
                     p.MatchScore = 0;
                 }
                 breakTriggered = true;
+                awardedPoints = 0;
                 TriggerBreakReset();
                 nextPoserIdx = -1;
                 canPlayAnyTile = false;
@@ -952,9 +993,30 @@ public class RoatanMatchEngine
             }
             else
             {
-                ConfirmedPoserIndex = winnerIdx;
-                CanPoserPlayAnyTile = true;
-                Phase = MatchPhase.HAND_OVER;
+                winner.MatchScore = nextScore;
+                if (winner.MatchScore >= 6)
+                {
+                    matchOver = true;
+                    IsMatchOver = true;
+                    MatchWinner = winner;
+                    MatchWinningTeamId = winningTeam;
+                    CutThroatedPlayers.Clear();
+                    foreach (MatchPlayer p in Players)
+                    {
+                        if (p.MatchScore == 0)
+                        {
+                            CutThroatedPlayers.Add(p);
+                            cutThroated.Add(p);
+                        }
+                    }
+                    Phase = MatchPhase.MATCH_OVER;
+                }
+                else
+                {
+                    ConfirmedPoserIndex = winnerIdx;
+                    CanPoserPlayAnyTile = true;
+                    Phase = MatchPhase.HAND_OVER;
+                }
             }
         }
 
@@ -972,7 +1034,8 @@ public class RoatanMatchEngine
             PoserChooserIndex = chooserIdx,
             PartnerCandidateIndex = partnerIdx,
             CanPoserPlayAnyTile = canPlayAnyTile,
-            PointsAwarded = breakTriggered ? 0 : 1,
+            PointsAwarded = awardedPoints,
+            IsKeyWin = isKeyWin,
             NextPoserIndex = nextPoserIdx,
             CutThroatedPlayers = cutThroated,
             AvailablePostHandActions = GetPostHandActions(breakTriggered, matchOver),

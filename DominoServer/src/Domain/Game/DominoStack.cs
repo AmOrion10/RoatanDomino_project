@@ -81,6 +81,11 @@ public class DominoStack
         return dominoes.Count;
     }
 
+    public bool HasAnyRemainingTileWithSuit(int suit)
+    {
+        return dominoes.Any(d => d.Side1 == suit || d.Side2 == suit);
+    }
+
     public void Add(Domino domino)
     {
         dominoes.Add(domino);

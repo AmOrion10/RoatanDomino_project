@@ -1106,6 +1106,9 @@ public class RoatanOnlineController : MonoBehaviour
 
         bool breakTriggered = dto != null && dto.BreakTriggered == true;
         bool matchOver = dto == null || dto.MatchOver != false;
+        bool isKeyWin = dto != null && dto.IsKeyWin == true;
+        int ptsAwarded = dto != null && dto.PointsAwarded.HasValue ? dto.PointsAwarded.Value : (isKeyWin ? 2 : 1);
+        bool isSixLov = currentLobby != null && currentLobby.MatchFormat == MatchFormat.SIX_LOV;
 
         // Clear saved session ONLY when match officially ends (MATCH_OVER)
         if (matchOver && !breakTriggered)
@@ -1118,6 +1121,10 @@ public class RoatanOnlineController : MonoBehaviour
         {
             RoatanSoundFX.Instance?.PlayBreakSting();
         }
+        else if (isKeyWin)
+        {
+            RoatanSoundFX.Instance?.PlayKeySting();
+        }
         else
         {
             RoatanSoundFX.Instance?.PlayWin();
@@ -1129,15 +1136,35 @@ public class RoatanOnlineController : MonoBehaviour
             PlayerDto w = currentLobby.Players.FirstOrDefault(p => p.Id == dto.Rankings[0].Id);
             if (w != null) winnerName = $"Winner: {w.Name}!";
         }
-        onlineMatchStatus.text = breakTriggered ? "GAME BRUK! (BREAK)" : winnerName;
+        onlineMatchStatus.text = breakTriggered
+            ? "GAME BRUK! (BREAK)"
+            : (isKeyWin
+                ? (matchOver && isSixLov ? "SIX-LOV BY KEY! (CAPICÚ!)" : $"KEY! / CAPICÚ! (+{ptsAwarded} WINS) — {winnerName}")
+                : winnerName);
         onlineDrawBtn.gameObject.SetActive(false);
 
         if (onlineEndOverlay != null)
         {
-            onlineEndTitleLabel.text = breakTriggered ? "GAME BRUK! (BREAK)" : (matchOver ? "MATCH COMPLETE" : "HAND COMPLETE");
-            onlineEndBodyLabel.text = breakTriggered
-                ? $"{winnerName}\nScores reset to 0 — [6|6] poses next on Rematch."
-                : winnerName;
+            if (breakTriggered)
+            {
+                onlineEndTitleLabel.text = "GAME BRUK! (BREAK)";
+                onlineEndBodyLabel.text = $"{winnerName}\nScores reset to 0 — [6|6] poses next on Rematch.";
+            }
+            else if (isKeyWin && matchOver && isSixLov)
+            {
+                onlineEndTitleLabel.text = "SIX-LOV BY KEY! (CAPICÚ!)";
+                onlineEndBodyLabel.text = $"{winnerName}\nWon by KEY / CAPICÚ (+{ptsAwarded}) — 6–0 Clean Sweep!";
+            }
+            else if (isKeyWin)
+            {
+                onlineEndTitleLabel.text = "KEY! / CAPICÚ! (+2 WINS)";
+                onlineEndBodyLabel.text = $"{winnerName}\nWon by KEY / CAPICÚ (+{ptsAwarded})";
+            }
+            else
+            {
+                onlineEndTitleLabel.text = matchOver ? "MATCH COMPLETE" : "HAND COMPLETE";
+                onlineEndBodyLabel.text = winnerName;
+            }
 
             bool showRematchLayout = breakTriggered || matchOver;
             onlineEndPrimaryBtn.onClick.RemoveAllListeners();

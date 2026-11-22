@@ -10,6 +10,7 @@ public class HandResolution
     public GamePlayer? Winner { get; init; }
     public int WinningTeamId { get; init; } = -1;
     public int PointsAwarded { get; init; }
+    public bool IsKeyWin { get; init; }
     public bool BreakTriggered { get; init; }
     public bool MatchOver { get; init; }
     public GamePlayer? MatchWinner { get; init; }
