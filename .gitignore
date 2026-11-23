@@ -401,3 +401,10 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Unity / Android Build Artifacts & Signing Keys
+**/Builds/
+*.apk
+*.aab
+*.keystore
+*.jks

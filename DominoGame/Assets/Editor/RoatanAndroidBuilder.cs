@@ -1,14 +1,21 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using Debug = UnityEngine.Debug;
 
 public static class RoatanAndroidBuilder
 {
     public const string DefaultApkOutputPath = "Builds/Android/RoatanDomino.apk";
+    public const string FallbackScenePath = "Assets/Scenes/TutorialScene.unity";
+    public const string SecondaryFallbackScenePath = "Assets/Scenes/MenuScene.unity";
     public const string AppIconAssetPath = "Assets/Resources/Images/RoatanAppIcon.png";
 
     [MenuItem("Roatan Domino/Build Android APK")]
@@ -16,22 +23,25 @@ public static class RoatanAndroidBuilder
     {
         ConfigureMobilePlayerSettings();
         ConfigureAppIcon();
-        bool releaseSigned = ConfigureReleaseSigningFromEnv();
+        bool releaseSigned = ConfigureReleaseSigning(out bool configuredFromEnv);
 
-        string outputDir = Path.GetDirectoryName(DefaultApkOutputPath);
+        string fullOutputPath = Path.GetFullPath(DefaultApkOutputPath);
+        string outputDir = Path.GetDirectoryName(fullOutputPath);
         if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
         {
             Directory.CreateDirectory(outputDir);
         }
 
-        string[] scenes = EditorBuildSettings.scenes
-            .Where(s => s.enabled && File.Exists(s.path))
-            .Select(s => s.path)
-            .ToArray();
-
+        bool existedBeforeBuild = File.Exists(fullOutputPath);
+        string[] scenes = ResolveBuildScenes();
         if (scenes.Length == 0)
         {
-            scenes = new[] { "Assets/Scenes/MenuScene.unity" };
+            Debug.LogError($"[RoatanAndroidBuilder] Build aborted: no valid build scenes found (checked active scene, EditorBuildSettings, and fallback '{FallbackScenePath}').");
+            if (Application.isBatchMode)
+            {
+                EditorApplication.Exit(1);
+            }
+            return;
         }
 
         EditorUserBuildSettings.buildAppBundle = false;
@@ -45,32 +55,86 @@ public static class RoatanAndroidBuilder
             options = BuildOptions.None
         };
 
-        Debug.Log($"[RoatanAndroidBuilder] Starting Android APK build ({(releaseSigned ? "RELEASE-SIGNED" : "DEBUG-SIGNED")}) -> {DefaultApkOutputPath} ({scenes.Length} scenes)...");
-        BuildReport report = BuildPipeline.BuildPlayer(options);
-        BuildSummary summary = report.summary;
+        string signingLabel = releaseSigned ? "RELEASE-SIGNED" : "DEBUG-SIGNED";
+        Debug.Log($"[RoatanAndroidBuilder] Starting Android ARM64/IL2CPP APK build ({signingLabel}) -> {fullOutputPath} ({scenes.Length} scenes: {string.Join(", ", scenes)})...");
 
-        // Clear local keystore path/secrets so ProjectSettings.asset never stores machine-specific paths
-        if (releaseSigned)
+        BuildReport report;
+        try
         {
-            PlayerSettings.Android.keystorePass = string.Empty;
-            PlayerSettings.Android.keyaliasPass = string.Empty;
-            PlayerSettings.Android.keystoreName = string.Empty;
-            PlayerSettings.Android.keyaliasName = string.Empty;
-            PlayerSettings.Android.useCustomKeystore = false;
+            report = BuildPipeline.BuildPlayer(options);
         }
+        finally
+        {
+            // Clear env-injected keystore path/secrets so ProjectSettings.asset never stores machine-specific paths or credentials
+            if (configuredFromEnv)
+            {
+                PlayerSettings.Android.keystorePass = string.Empty;
+                PlayerSettings.Android.keyaliasPass = string.Empty;
+                PlayerSettings.Android.keystoreName = string.Empty;
+                PlayerSettings.Android.keyaliasName = string.Empty;
+                PlayerSettings.Android.useCustomKeystore = false;
+            }
+        }
+
+        BuildSummary summary = report.summary;
+        string commitHash = GetGitShortCommitHash();
 
         if (summary.result == BuildResult.Succeeded)
         {
-            Debug.Log($"[RoatanAndroidBuilder] Build SUCCEEDED ({(releaseSigned ? "RELEASE-SIGNED" : "DEBUG-SIGNED")})! Size: {summary.totalSize / (1024f * 1024f):F2} MB -> {Path.GetFullPath(DefaultApkOutputPath)}");
+            long fileBytes = File.Exists(fullOutputPath) ? new FileInfo(fullOutputPath).Length : (long)summary.totalSize;
+            double sizeMb = fileBytes / (1024d * 1024d);
+            string actionWord = existedBeforeBuild ? "Overwrote" : "Created";
+            Debug.Log($"[RoatanAndroidBuilder] Build SUCCEEDED ({signingLabel} | commit {commitHash})! {actionWord} APK: {fullOutputPath} ({sizeMb:F2} MB / {fileBytes:N0} bytes)");
         }
         else
         {
-            Debug.LogError($"[RoatanAndroidBuilder] Build FAILED: {summary.result} (Errors: {summary.totalErrors})");
+            Debug.LogError($"[RoatanAndroidBuilder] Build FAILED ({signingLabel} | commit {commitHash}): {summary.result} (Errors: {summary.totalErrors})");
             if (Application.isBatchMode)
             {
                 EditorApplication.Exit(1);
             }
         }
+    }
+
+    public static string[] ResolveBuildScenes()
+    {
+        List<string> resolved = EditorBuildSettings.scenes
+            .Where(s => s != null && s.enabled && !string.IsNullOrEmpty(s.path) && File.Exists(s.path))
+            .Select(s => s.path)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Scene activeScene = EditorSceneManager.GetActiveScene();
+        bool activeSceneIsSaved = activeScene.IsValid()
+            && !string.IsNullOrEmpty(activeScene.path)
+            && File.Exists(activeScene.path);
+
+        if (resolved.Count == 0)
+        {
+            if (activeSceneIsSaved)
+            {
+                resolved.Add(activeScene.path);
+            }
+            else
+            {
+                Debug.LogWarning($"[RoatanAndroidBuilder] Active scene is unsaved/Untitled and EditorBuildSettings has no enabled scenes; defaulting to '{FallbackScenePath}'.");
+                if (File.Exists(FallbackScenePath))
+                {
+                    resolved.Add(FallbackScenePath);
+                }
+                else if (File.Exists(SecondaryFallbackScenePath))
+                {
+                    resolved.Add(SecondaryFallbackScenePath);
+                }
+            }
+        }
+        else if (!activeSceneIsSaved)
+        {
+            // Never allow an unsaved/Untitled scene to sneak into the build; ensure fallback exists if needed
+            Debug.Log($"[RoatanAndroidBuilder] Active scene is unsaved/Untitled; using {resolved.Count} saved scene(s) from EditorBuildSettings.");
+        }
+
+        return resolved.ToArray();
     }
 
     public static void ConfigureMobilePlayerSettings()
@@ -141,12 +205,19 @@ public static class RoatanAndroidBuilder
         Debug.Log($"[RoatanAndroidBuilder] Configured Android app icon from {AppIconAssetPath} ({iconTex.width}x{iconTex.height})");
     }
 
-    private static bool ConfigureReleaseSigningFromEnv()
+    private static bool ConfigureReleaseSigning(out bool configuredFromEnv)
     {
+        configuredFromEnv = false;
+
         string keystorePath = Environment.GetEnvironmentVariable("ROATAN_KEYSTORE_PATH");
         string keystorePass = Environment.GetEnvironmentVariable("ROATAN_KEYSTORE_PASS");
         string keyAlias = Environment.GetEnvironmentVariable("ROATAN_KEY_ALIAS");
         string keyPass = Environment.GetEnvironmentVariable("ROATAN_KEY_PASS");
+
+        bool anyEnvVarSet = !string.IsNullOrWhiteSpace(keystorePath)
+            || !string.IsNullOrWhiteSpace(keystorePass)
+            || !string.IsNullOrWhiteSpace(keyAlias)
+            || !string.IsNullOrWhiteSpace(keyPass);
 
         if (!string.IsNullOrWhiteSpace(keystorePath) &&
             File.Exists(keystorePath) &&
@@ -159,12 +230,71 @@ public static class RoatanAndroidBuilder
             PlayerSettings.Android.keystorePass = keystorePass;
             PlayerSettings.Android.keyaliasName = keyAlias;
             PlayerSettings.Android.keyaliasPass = keyPass;
-            Debug.Log($"[RoatanAndroidBuilder] Using Release Keystore: {keystorePath} (alias: {keyAlias})");
+            configuredFromEnv = true;
+            Debug.Log($"[RoatanAndroidBuilder] Using Release Keystore from environment: {keystorePath} (alias: {keyAlias})");
             return true;
         }
 
-        PlayerSettings.Android.useCustomKeystore = false;
-        Debug.LogWarning("[RoatanAndroidBuilder] Release keystore env vars not set; falling back to debug signing.");
+        if (anyEnvVarSet)
+        {
+            Debug.LogWarning($"[RoatanAndroidBuilder] WARNING: Incomplete Release Keystore environment configuration (path exists: {!string.IsNullOrWhiteSpace(keystorePath) && File.Exists(keystorePath)}, alias set: {!string.IsNullOrWhiteSpace(keyAlias)}, passwords set: {!string.IsNullOrWhiteSpace(keystorePass) && !string.IsNullOrWhiteSpace(keyPass)}). Verify ROATAN_KEYSTORE_PATH, ROATAN_KEYSTORE_PASS, ROATAN_KEY_ALIAS, and ROATAN_KEY_PASS.");
+        }
+
+        // Preserve and validate any Release Keystore already configured in Unity Publishing Settings
+        if (PlayerSettings.Android.useCustomKeystore)
+        {
+            string configuredKeystore = PlayerSettings.Android.keystoreName;
+            bool keystoreFileExists = !string.IsNullOrWhiteSpace(configuredKeystore) && File.Exists(configuredKeystore);
+            bool hasCredentials = keystoreFileExists
+                && !string.IsNullOrWhiteSpace(PlayerSettings.Android.keystorePass)
+                && !string.IsNullOrWhiteSpace(PlayerSettings.Android.keyaliasName)
+                && !string.IsNullOrWhiteSpace(PlayerSettings.Android.keyaliasPass);
+
+            if (hasCredentials)
+            {
+                Debug.Log($"[RoatanAndroidBuilder] Using ProjectSettings Release Keystore: {configuredKeystore} (alias: {PlayerSettings.Android.keyaliasName})");
+                return true;
+            }
+
+            Debug.LogWarning($"[RoatanAndroidBuilder] WARNING: Custom Release Keystore is enabled in Project Settings, but keystore file or passwords are missing (keystore='{configuredKeystore}', alias='{PlayerSettings.Android.keyaliasName}'). Enter credentials in Project Settings -> Player -> Publishing Settings or set ROATAN_KEYSTORE_* environment variables; refusing to silently switch to debug signing.");
+            return false;
+        }
+
+        Debug.LogWarning("[RoatanAndroidBuilder] WARNING: Release Keystore credentials are missing! Configure Project Settings -> Player -> Publishing Settings (Custom Keystore) or set ROATAN_KEYSTORE_PATH, ROATAN_KEYSTORE_PASS, ROATAN_KEY_ALIAS, and ROATAN_KEY_PASS. Building without release signing will produce a debug-signed APK whose signature will mismatch existing release installs.");
         return false;
+    }
+
+    private static string GetGitShortCommitHash()
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "rev-parse --short HEAD",
+                WorkingDirectory = Directory.GetCurrentDirectory(),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using (Process proc = Process.Start(psi))
+            {
+                if (proc == null) return "unknown";
+                string output = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit(3000);
+                if (proc.ExitCode == 0 && !string.IsNullOrEmpty(output))
+                {
+                    return output;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[RoatanAndroidBuilder] Could not resolve Git commit hash: {ex.Message}");
+        }
+
+        return "unknown";
     }
 }

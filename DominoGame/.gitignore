@@ -58,6 +58,8 @@ sysinfo.txt
 # Builds
 *.apk
 *.aab
+*.keystore
+*.jks
 *.unitypackage
 *.app
 
