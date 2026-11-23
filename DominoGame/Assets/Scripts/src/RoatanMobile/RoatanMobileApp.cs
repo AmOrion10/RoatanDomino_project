@@ -279,6 +279,7 @@ public class RoatanMobileApp : MonoBehaviour
     {
         StopMatchRoutine();
         ChatManager.Instance?.SetActiveRoundChatLocked(false);
+        tableTalkUI?.ClearAllBubbles();
         tableTalkUI?.HideAllOverlays();
         pipRevealOverlay?.HideImmediate();
         rootCanvas.gameObject.SetActive(true);
@@ -300,6 +301,7 @@ public class RoatanMobileApp : MonoBehaviour
         SaveMatchPreset();
         StopMatchRoutine();
         ChatManager.Instance?.SetActiveRoundChatLocked(true);
+        tableTalkUI?.ClearAllBubbles();
         tableTalkUI?.HideAllOverlays();
         pipRevealOverlay?.HideImmediate();
 
@@ -342,6 +344,7 @@ public class RoatanMobileApp : MonoBehaviour
         StopMatchRoutine();
         StopHumanTurnTimer();
         roundSummaryOverlay.SetActive(false);
+        tableTalkUI?.ClearAllBubbles();
         tableTalkUI?.HideAllOverlays();
         pipRevealOverlay?.HideImmediate();
         selectedHandDomino = null;
@@ -367,6 +370,7 @@ public class RoatanMobileApp : MonoBehaviour
 
     private IEnumerator BeginRoundWithShuffleCoroutine(bool rematchAfterBreak)
     {
+        tableTalkUI?.ClearAllBubbles();
         UpdateStatusBanner("Shuffling & Mixing Tiles...");
         RoatanSoundFX.Instance?.PlayShuffleAndMix();
         float shuffleDuration = RoatanSoundFX.Instance != null
@@ -402,6 +406,8 @@ public class RoatanMobileApp : MonoBehaviour
     {
         RoatanSoundFX.Instance?.PlayTap();
         StopMatchRoutine();
+        tableTalkUI?.ClearAllBubbles();
+        tableTalkUI?.HideAllOverlays();
         homeScreen.SetActive(false);
         if (matchSetupSheet != null) matchSetupSheet.SetActive(false);
         if (utilityDrawerOverlay != null) utilityDrawerOverlay.SetActive(false);
@@ -1203,7 +1209,7 @@ public class RoatanMobileApp : MonoBehaviour
                           : seatSlot == 1 ? new Vector2(-280f, 445f)
                           : new Vector2(280f, 445f);
 
-        tableTalkUI.ShowSpeechBubble(bot.Name, phrase, bubblePos);
+        tableTalkUI.ShowSpeechBubble(seatSlot, bot.Name, phrase, bubblePos);
     }
 
     private void RecordPlayerPassedOpenEnds(int playerId)
@@ -2227,13 +2233,13 @@ public class RoatanMobileApp : MonoBehaviour
         emoteRect.pivot = new Vector2(1f, 0f);
         emoteRect.anchoredPosition = new Vector2(-24f, 424f);
 
-        // Visible 10s Turn Timer / 5s Auto-Pass Pill (left side above status banner)
+        // Visible 10s Turn Timer / 5s Auto-Pass Pill (left side with clean breathing room above status banner)
         humanTimerBadgeObj = CreateCard(matchScreen.transform, "HumanTurnTimerBadge", new Color(0.08f, 0.34f, 0.38f, 0.96f), Vector2.zero, new Vector2(275f, 64f));
         RectTransform timerRect = humanTimerBadgeObj.GetComponent<RectTransform>();
         timerRect.anchorMin = new Vector2(0f, 0f);
         timerRect.anchorMax = new Vector2(0f, 0f);
         timerRect.pivot = new Vector2(0f, 0f);
-        timerRect.anchoredPosition = new Vector2(24f, 424f);
+        timerRect.anchoredPosition = new Vector2(24f, 446f);
         humanTimerBadgeBg = humanTimerBadgeObj.GetComponent<Image>();
         humanTimerLabel = CreateText(humanTimerBadgeObj.transform, "TimerText", "TURN TIMER: 10s", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(255f, 52f));
         humanTimerBadgeObj.SetActive(false);
@@ -2244,7 +2250,7 @@ public class RoatanMobileApp : MonoBehaviour
         botIndRect.anchorMin = new Vector2(0f, 0f);
         botIndRect.anchorMax = new Vector2(0f, 0f);
         botIndRect.pivot = new Vector2(0f, 0f);
-        botIndRect.anchoredPosition = new Vector2(24f, 496f);
+        botIndRect.anchoredPosition = new Vector2(24f, 518f);
         humanBotIndicatorLabel = CreateText(humanBotIndicatorObj.transform, "BotIndText", "Bot Auto-Playing", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(270f, 46f));
         humanBotIndicatorObj.SetActive(false);
 

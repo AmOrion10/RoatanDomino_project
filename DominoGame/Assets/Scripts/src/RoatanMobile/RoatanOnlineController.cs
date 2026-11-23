@@ -1880,13 +1880,13 @@ public class RoatanOnlineController : MonoBehaviour
         onlineDrawBtnLabel.color = Color.black;
         onlineDrawBtn.gameObject.SetActive(false);
 
-        // Online 10s Turn Timer / 5s Auto-Pass Pill
+        // Online 10s Turn Timer / 5s Auto-Pass Pill (clean breathing room above status card)
         onlineTimerBadgeObj = CreateCard(onlineGameView.transform, "OnlineTurnTimerBadge", new Color(0.08f, 0.34f, 0.38f, 0.96f), Vector2.zero, new Vector2(275f, 64f));
         RectTransform otRect = onlineTimerBadgeObj.GetComponent<RectTransform>();
         otRect.anchorMin = new Vector2(0f, 0f);
         otRect.anchorMax = new Vector2(0f, 0f);
         otRect.pivot = new Vector2(0f, 0f);
-        otRect.anchoredPosition = new Vector2(24f, 430f);
+        otRect.anchoredPosition = new Vector2(24f, 452f);
         onlineTimerBadgeBg = onlineTimerBadgeObj.GetComponent<Image>();
         onlineTimerLabel = CreateText(onlineTimerBadgeObj.transform, "TimerText", "TURN TIMER: 10s", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(255f, 52f));
         onlineTimerBadgeObj.SetActive(false);
@@ -1897,7 +1897,7 @@ public class RoatanOnlineController : MonoBehaviour
         obiRect.anchorMin = new Vector2(0f, 0f);
         obiRect.anchorMax = new Vector2(0f, 0f);
         obiRect.pivot = new Vector2(0f, 0f);
-        obiRect.anchoredPosition = new Vector2(24f, 502f);
+        obiRect.anchoredPosition = new Vector2(24f, 524f);
         CreateText(onlineBotIndicatorObj.transform, "BotText", "Bot Auto-Playing", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(270f, 46f));
         onlineBotIndicatorObj.SetActive(false);
 

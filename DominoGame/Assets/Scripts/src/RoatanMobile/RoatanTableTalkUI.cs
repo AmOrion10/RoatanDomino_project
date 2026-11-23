@@ -15,6 +15,14 @@ using UnityEngine.UI;
 /// </summary>
 public class RoatanTableTalkUI : MonoBehaviour
 {
+    public const int MaxSeatBubbles = 4; // 0: Top, 1: Left, 2: Right, 3: Human (Bottom)
+    public const int HumanSeatIndex = 3;
+
+    private const float BubblePopDuration = 0.18f;
+    private const float BubbleHoldDuration = 2.10f;
+    private const float BubbleFadeDuration = 0.35f;
+    private const float BubbleHardTimeoutMargin = 0.25f;
+
     private TMP_FontAsset uiFont;
     private Transform parentRoot;
     private Action<string> onHumanEmote;
@@ -22,12 +30,24 @@ public class RoatanTableTalkUI : MonoBehaviour
     // Quick-Emote Wheel overlay
     private GameObject emoteWheelPanel;
 
+    // Per-seat tracked speech bubbles (reused & watchdog-protected so none can ever stick)
+    private readonly GameObject[] seatBubbleObjs = new GameObject[MaxSeatBubbles];
+    private readonly RectTransform[] seatBubbleRects = new RectTransform[MaxSeatBubbles];
+    private readonly CanvasGroup[] seatBubbleCanvasGroups = new CanvasGroup[MaxSeatBubbles];
+    private readonly TMP_Text[] seatBubbleLabels = new TMP_Text[MaxSeatBubbles];
+    private readonly Coroutine[] activeBubbleCoroutines = new Coroutine[MaxSeatBubbles];
+    private readonly float[] bubbleHideAtUnscaledTime = new float[MaxSeatBubbles];
+    private readonly int[] seatBubbleGenerations = new int[MaxSeatBubbles];
+
     // Celebratory banner
     private GameObject celebrationBannerObj;
     private Image celebrationBannerBg;
+    private CanvasGroup celebrationCanvasGroup;
     private TMP_Text celebrationTitleLabel;
     private TMP_Text celebrationSubLabel;
     private Coroutine celebrationRoutine;
+    private float celebrationHideAtUnscaledTime;
+    private int celebrationGeneration;
 
     // "Call Your Padna" CHOOSE_POSER modal
     private GameObject choosePoserOverlay;
@@ -53,6 +73,47 @@ public class RoatanTableTalkUI : MonoBehaviour
         BuildChoosePoserModal();
     }
 
+    private void Update()
+    {
+        float now = Time.unscaledTime;
+
+        for (int i = 0; i < MaxSeatBubbles; i++)
+        {
+            if (seatBubbleObjs[i] != null && seatBubbleObjs[i].activeSelf)
+            {
+                if (bubbleHideAtUnscaledTime[i] <= 0f || now >= bubbleHideAtUnscaledTime[i])
+                {
+                    seatBubbleGenerations[i]++;
+                    if (activeBubbleCoroutines[i] != null)
+                    {
+                        StopCoroutine(activeBubbleCoroutines[i]);
+                        activeBubbleCoroutines[i] = null;
+                    }
+                    ForceHideSeatBubble(i);
+                }
+            }
+        }
+
+        if (celebrationBannerObj != null && celebrationBannerObj.activeSelf)
+        {
+            if (celebrationHideAtUnscaledTime <= 0f || now >= celebrationHideAtUnscaledTime)
+            {
+                celebrationGeneration++;
+                if (celebrationRoutine != null)
+                {
+                    StopCoroutine(celebrationRoutine);
+                    celebrationRoutine = null;
+                }
+                ForceHideCelebrationBanner();
+            }
+        }
+    }
+
+    private void OnDisable()
+    {
+        ClearAllBubbles();
+    }
+
     public void ToggleEmoteWheel()
     {
         if (emoteWheelPanel == null) return;
@@ -61,10 +122,36 @@ public class RoatanTableTalkUI : MonoBehaviour
         if (next) emoteWheelPanel.transform.SetAsLastSibling();
     }
 
+    /// <summary>
+    /// Immediately stops all active speech-bubble and celebration-banner coroutines and hides
+    /// every seat bubble and banner. Call on round start, match/mode start, and menu transitions.
+    /// </summary>
+    public void ClearAllBubbles()
+    {
+        for (int i = 0; i < MaxSeatBubbles; i++)
+        {
+            seatBubbleGenerations[i]++;
+            if (activeBubbleCoroutines[i] != null)
+            {
+                StopCoroutine(activeBubbleCoroutines[i]);
+                activeBubbleCoroutines[i] = null;
+            }
+            ForceHideSeatBubble(i);
+        }
+
+        celebrationGeneration++;
+        if (celebrationRoutine != null)
+        {
+            StopCoroutine(celebrationRoutine);
+            celebrationRoutine = null;
+        }
+        ForceHideCelebrationBanner();
+    }
+
     public void HideAllOverlays()
     {
+        ClearAllBubbles();
         if (emoteWheelPanel != null) emoteWheelPanel.SetActive(false);
-        if (celebrationBannerObj != null) celebrationBannerObj.SetActive(false);
         if (choosePoserOverlay != null) choosePoserOverlay.SetActive(false);
         if (choosePoserRoutine != null)
         {
@@ -75,15 +162,56 @@ public class RoatanTableTalkUI : MonoBehaviour
 
     public void ShowSpeechBubble(string speakerName, string phrase, Vector2 anchoredPos)
     {
-        if (parentRoot == null) return;
-        StartCoroutine(AnimateSpeechBubbleCoroutine(speakerName, phrase, anchoredPos));
+        int inferredSeat = anchoredPos.y < 0f
+            ? HumanSeatIndex
+            : (anchoredPos.x < -100f ? 1 : (anchoredPos.x > 100f ? 2 : 0));
+        ShowSpeechBubble(inferredSeat, speakerName, phrase, anchoredPos);
+    }
+
+    public void ShowSpeechBubble(int seatIndex, string speakerName, string phrase, Vector2 anchoredPos)
+    {
+        if (parentRoot == null || !isActiveAndEnabled) return;
+        int slot = (seatIndex >= 0 && seatIndex < MaxSeatBubbles) ? seatIndex : 0;
+
+        if (activeBubbleCoroutines[slot] != null)
+        {
+            StopCoroutine(activeBubbleCoroutines[slot]);
+            activeBubbleCoroutines[slot] = null;
+        }
+
+        EnsureSeatBubble(slot);
+
+        int gen = ++seatBubbleGenerations[slot];
+        GameObject bubbleObj = seatBubbleObjs[slot];
+        RectTransform rect = seatBubbleRects[slot];
+        CanvasGroup cg = seatBubbleCanvasGroups[slot];
+        TMP_Text label = seatBubbleLabels[slot];
+
+        label.text = $"{speakerName}: \"{phrase}\"";
+        rect.anchoredPosition = anchoredPos;
+        rect.localScale = Vector3.one * 0.6f;
+        cg.alpha = 1f;
+        bubbleObj.SetActive(true);
+        bubbleObj.transform.SetAsLastSibling();
+
+        float totalDuration = BubblePopDuration + BubbleHoldDuration + BubbleFadeDuration;
+        bubbleHideAtUnscaledTime[slot] = Time.unscaledTime + totalDuration + BubbleHardTimeoutMargin;
+        activeBubbleCoroutines[slot] = StartCoroutine(AnimateSpeechBubbleCoroutine(slot, gen, anchoredPos));
     }
 
     public void ShowCelebrationBanner(string title, string subtitle, Color accentColor, float holdSeconds = 2.6f)
     {
-        if (celebrationBannerObj == null) return;
-        if (celebrationRoutine != null) StopCoroutine(celebrationRoutine);
-        celebrationRoutine = StartCoroutine(AnimateCelebrationBannerCoroutine(title, subtitle, accentColor, holdSeconds));
+        if (celebrationBannerObj == null || !isActiveAndEnabled) return;
+        if (celebrationRoutine != null)
+        {
+            StopCoroutine(celebrationRoutine);
+            celebrationRoutine = null;
+        }
+
+        int gen = ++celebrationGeneration;
+        float clampedHold = Mathf.Max(0.4f, holdSeconds);
+        celebrationHideAtUnscaledTime = Time.unscaledTime + 0.24f + clampedHold + 0.30f + 0.35f;
+        celebrationRoutine = StartCoroutine(AnimateCelebrationBannerCoroutine(gen, title, subtitle, accentColor, clampedHold));
     }
 
     public void ShowChoosePoserPrompt(string partnerName, float timeoutSeconds, Action<PoserChoice> onConfirmed)
@@ -190,7 +318,7 @@ public class RoatanTableTalkUI : MonoBehaviour
                 {
                     emoteWheelPanel.SetActive(false);
                     RoatanSoundFX.Instance?.PlayEmoteCallout();
-                    ShowSpeechBubble("You", phrase, new Vector2(0f, -430f));
+                    ShowSpeechBubble(HumanSeatIndex, "You", phrase, new Vector2(0f, -430f));
                     onHumanEmote?.Invoke(phrase);
                 });
             TMP_Text lbl = btn.GetComponentInChildren<TMP_Text>();
@@ -204,6 +332,10 @@ public class RoatanTableTalkUI : MonoBehaviour
     {
         celebrationBannerObj = CreateCard(parentRoot, "EventCelebrationBanner", new Color(0.08f, 0.14f, 0.20f, 0.96f), new Vector2(0f, 340f), new Vector2(920f, 178f));
         celebrationBannerBg = celebrationBannerObj.GetComponent<Image>();
+        celebrationBannerBg.raycastTarget = false;
+        celebrationCanvasGroup = celebrationBannerObj.AddComponent<CanvasGroup>();
+        celebrationCanvasGroup.alpha = 0f;
+        celebrationCanvasGroup.blocksRaycasts = false;
 
         GameObject border = new GameObject("Outline");
         border.transform.SetParent(celebrationBannerObj.transform, false);
@@ -265,12 +397,19 @@ public class RoatanTableTalkUI : MonoBehaviour
         choosePoserOverlay.SetActive(false);
     }
 
-    private IEnumerator AnimateSpeechBubbleCoroutine(string speakerName, string phrase, Vector2 pos)
+    private void EnsureSeatBubble(int seatIndex)
     {
-        GameObject bubble = CreateCard(parentRoot, "EmoteBubble", new Color(0.99f, 0.96f, 0.88f, 0.98f), pos, new Vector2(360f, 84f));
-        bubble.transform.SetAsLastSibling();
+        if (seatBubbleObjs[seatIndex] != null) return;
+
+        GameObject bubble = CreateCard(parentRoot, $"EmoteBubble_Seat{seatIndex}", new Color(0.99f, 0.96f, 0.88f, 0.98f), Vector2.zero, new Vector2(360f, 84f));
+        Image bg = bubble.GetComponent<Image>();
+        if (bg != null) bg.raycastTarget = false;
+
         RectTransform rect = bubble.GetComponent<RectTransform>();
         CanvasGroup cg = bubble.AddComponent<CanvasGroup>();
+        cg.alpha = 0f;
+        cg.blocksRaycasts = false;
+        cg.interactable = false;
 
         GameObject border = new GameObject("Border");
         border.transform.SetParent(bubble.transform, false);
@@ -285,71 +424,143 @@ public class RoatanTableTalkUI : MonoBehaviour
         bImg.color = RoatanVisualAssets.IslandGold;
         bImg.raycastTarget = false;
 
-        CreateText(bubble.transform, "Phrase", $"{speakerName}: \"{phrase}\"", 25, FontStyles.Bold, new Color(0.08f, 0.16f, 0.20f, 1f), Vector2.zero, new Vector2(334f, 70f));
+        TMP_Text phraseLabel = CreateText(bubble.transform, "Phrase", "", 25, FontStyles.Bold, new Color(0.08f, 0.16f, 0.20f, 1f), Vector2.zero, new Vector2(334f, 70f));
 
-        // Pop-in
-        float t = 0f;
-        while (t < 0.18f && rect != null)
-        {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / 0.18f);
-            rect.localScale = Vector3.one * Mathf.Lerp(0.6f, 1f, 1f - (1f - p) * (1f - p));
-            yield return null;
-        }
-        if (rect != null) rect.localScale = Vector3.one;
+        bubble.SetActive(false);
 
-        yield return new WaitForSeconds(2.1f);
-
-        // Drift up and fade out
-        t = 0f;
-        Vector2 startPos = rect != null ? rect.anchoredPosition : pos;
-        while (t < 0.35f && rect != null)
-        {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / 0.35f);
-            cg.alpha = 1f - p;
-            rect.anchoredPosition = startPos + new Vector2(0f, p * 36f);
-            yield return null;
-        }
-
-        if (bubble != null) Destroy(bubble);
+        seatBubbleObjs[seatIndex] = bubble;
+        seatBubbleRects[seatIndex] = rect;
+        seatBubbleCanvasGroups[seatIndex] = cg;
+        seatBubbleLabels[seatIndex] = phraseLabel;
     }
 
-    private IEnumerator AnimateCelebrationBannerCoroutine(string title, string subtitle, Color accentColor, float holdSeconds)
+    private void ForceHideSeatBubble(int seatIndex)
     {
+        bubbleHideAtUnscaledTime[seatIndex] = 0f;
+        if (seatBubbleCanvasGroups[seatIndex] != null)
+        {
+            seatBubbleCanvasGroups[seatIndex].alpha = 0f;
+        }
+        if (seatBubbleObjs[seatIndex] != null)
+        {
+            seatBubbleObjs[seatIndex].SetActive(false);
+        }
+    }
+
+    private void ForceHideCelebrationBanner()
+    {
+        celebrationHideAtUnscaledTime = 0f;
+        if (celebrationCanvasGroup != null)
+        {
+            celebrationCanvasGroup.alpha = 0f;
+        }
+        if (celebrationBannerObj != null)
+        {
+            celebrationBannerObj.SetActive(false);
+        }
+    }
+
+    private IEnumerator AnimateSpeechBubbleCoroutine(int seatIndex, int generation, Vector2 basePos)
+    {
+        GameObject bubbleObj = seatBubbleObjs[seatIndex];
+        RectTransform rect = seatBubbleRects[seatIndex];
+        CanvasGroup cg = seatBubbleCanvasGroups[seatIndex];
+
+        try
+        {
+            // Pop-in (unscaled time so pauses/timeScale changes never stall the bubble)
+            float t = 0f;
+            while (t < BubblePopDuration && rect != null)
+            {
+                t += Time.unscaledDeltaTime;
+                float p = Mathf.Clamp01(t / BubblePopDuration);
+                rect.localScale = Vector3.one * Mathf.Lerp(0.6f, 1f, 1f - (1f - p) * (1f - p));
+                yield return null;
+            }
+            if (rect != null) rect.localScale = Vector3.one;
+
+            // Hold (unscaled time)
+            float holdElapsed = 0f;
+            while (holdElapsed < BubbleHoldDuration)
+            {
+                holdElapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            // Drift up and fade out (unscaled time)
+            t = 0f;
+            while (t < BubbleFadeDuration && rect != null && cg != null)
+            {
+                t += Time.unscaledDeltaTime;
+                float p = Mathf.Clamp01(t / BubbleFadeDuration);
+                cg.alpha = 1f - p;
+                rect.anchoredPosition = basePos + new Vector2(0f, p * 36f);
+                yield return null;
+            }
+        }
+        finally
+        {
+            if (seatBubbleGenerations[seatIndex] == generation)
+            {
+                if (cg != null) cg.alpha = 0f;
+                if (bubbleObj != null) bubbleObj.SetActive(false);
+                bubbleHideAtUnscaledTime[seatIndex] = 0f;
+                activeBubbleCoroutines[seatIndex] = null;
+            }
+        }
+    }
+
+    private IEnumerator AnimateCelebrationBannerCoroutine(int generation, string title, string subtitle, Color accentColor, float holdSeconds)
+    {
+        RectTransform rect = celebrationBannerObj.GetComponent<RectTransform>();
+        if (celebrationCanvasGroup == null)
+        {
+            celebrationCanvasGroup = celebrationBannerObj.GetComponent<CanvasGroup>();
+            if (celebrationCanvasGroup == null) celebrationCanvasGroup = celebrationBannerObj.AddComponent<CanvasGroup>();
+        }
+
         celebrationBannerBg.color = accentColor;
         celebrationTitleLabel.text = title;
         celebrationSubLabel.text = subtitle;
+        celebrationCanvasGroup.alpha = 1f;
         celebrationBannerObj.SetActive(true);
         celebrationBannerObj.transform.SetAsLastSibling();
 
-        RectTransform rect = celebrationBannerObj.GetComponent<RectTransform>();
-        CanvasGroup cg = celebrationBannerObj.GetComponent<CanvasGroup>();
-        if (cg == null) cg = celebrationBannerObj.AddComponent<CanvasGroup>();
-        cg.alpha = 1f;
-
-        float t = 0f;
-        while (t < 0.24f)
+        try
         {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / 0.24f);
-            rect.localScale = Vector3.one * Mathf.Lerp(0.65f, 1.03f, 1f - (1f - p) * (1f - p));
-            yield return null;
+            float t = 0f;
+            while (t < 0.24f)
+            {
+                t += Time.unscaledDeltaTime;
+                float p = Mathf.Clamp01(t / 0.24f);
+                rect.localScale = Vector3.one * Mathf.Lerp(0.65f, 1.03f, 1f - (1f - p) * (1f - p));
+                yield return null;
+            }
+            rect.localScale = Vector3.one;
+
+            float holdElapsed = 0f;
+            while (holdElapsed < holdSeconds)
+            {
+                holdElapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            t = 0f;
+            while (t < 0.30f)
+            {
+                t += Time.unscaledDeltaTime;
+                celebrationCanvasGroup.alpha = 1f - Mathf.Clamp01(t / 0.30f);
+                yield return null;
+            }
         }
-        rect.localScale = Vector3.one;
-
-        yield return new WaitForSeconds(holdSeconds);
-
-        t = 0f;
-        while (t < 0.30f)
+        finally
         {
-            t += Time.deltaTime;
-            cg.alpha = 1f - Mathf.Clamp01(t / 0.30f);
-            yield return null;
+            if (celebrationGeneration == generation)
+            {
+                ForceHideCelebrationBanner();
+                celebrationRoutine = null;
+            }
         }
-
-        celebrationBannerObj.SetActive(false);
-        celebrationRoutine = null;
     }
 
     private static GameObject CreateCard(Transform parent, string name, Color bgColor, Vector2 pos, Vector2 size)
