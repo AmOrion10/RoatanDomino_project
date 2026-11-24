@@ -1,14 +1,62 @@
-version: '3'
-
 services:
+  domino-server:
+    build:
+      context: .
+      dockerfile: DominoServer/Dockerfile
+    container_name: roatan-domino-server
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+      DOTNET_ENVIRONMENT: Production
+      DOMINO_MAX_CLIENTS: ${DOMINO_MAX_CLIENTS:-200}
+      # Leave empty for instant zero-config InMemory DB (great for local Cloudflare Tunnel friend testing).
+      # Set MYSQL_CONNECTION_STRING in .env on your VPS to persist accounts/history in MySQL.
+      MysqlConnectionString: ${MYSQL_CONNECTION_STRING:-}
+    ports:
+      # Exposed locally so `cloudflared tunnel --url http://localhost:5000` works immediately
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/5000 && printf \"GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Production reverse proxy with automatic Let's Encrypt TLS (wss:// & https://)
+  # Run on Miami VPS with: DOMINO_DOMAIN=play.yourdomain.com docker compose --profile production up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: roatan-domino-caddy
+    profiles:
+      - production
+    restart: unless-stopped
+    depends_on:
+      domino-server:
+        condition: service_healthy
+    environment:
+      DOMINO_DOMAIN: ${DOMINO_DOMAIN:-domino.roatandomino.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Optional MySQL + phpMyAdmin stack for persistent VPS deployments
+  # Start alongside server with: docker compose --profile database up -d
   db:
     image: mysql:8.3.0
     container_name: mysql-db
+    profiles:
+      - database
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: db
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-db}
+      MYSQL_USER: ${MYSQL_USER:-user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
     ports:
       - "6033:3306"
     volumes:
@@ -17,14 +65,19 @@ services:
   phpmyadmin:
     image: phpmyadmin:5.2.1
     container_name: phpmyadmin
-    links:
+    profiles:
+      - database
+    restart: unless-stopped
+    depends_on:
       - db
     environment:
       PMA_HOST: db
       PMA_PORT: 3306
       PMA_ARBITRARY: 1
     ports:
-      - 8080:80
+      - "8080:80"
 
 volumes:
+  caddy_data:
+  caddy_config:
   dbdata:

@@ -185,6 +185,8 @@ public static class RoatanAndroidBuilder
         PlayerSettings.Android.bundleVersionCode = 1;
         PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
         PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
+        PlayerSettings.Android.forceInternetPermission = true;
+        PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
         PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
     }

@@ -17,10 +17,23 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
+public enum RoatanServerPreset
+{
+    Production = 0,
+    CustomTunnel = 1,
+    Localhost = 2
+}
+
 public class RoatanOnlineController : MonoBehaviour
 {
     private const string PrefHostKey = "RoatanDomino_ServerHost";
     private const string PrefPortKey = "RoatanDomino_ServerPort";
+    private const string PrefServerUrlKey = "RoatanDomino_ServerUrl";
+    private const string PrefServerPresetKey = "RoatanDomino_ServerPreset";
+    private const string PrefCustomServerUrlKey = "RoatanDomino_CustomServerUrl";
+
+    public const string ProductionServerUrl = "https://domino.roatandomino.com";
+    public static event Action ServerEndpointChanged;
 
     private TMP_FontAsset uiFont;
     private Action onReturnHome;
@@ -50,8 +63,11 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text feedbackToast;
 
     // Auth view
-    private TMP_InputField hostInput;
-    private TMP_InputField portInput;
+    private TMP_InputField serverUrlInput;
+    private TMP_Text serverEndpointPreviewLabel;
+    private readonly Dictionary<RoatanServerPreset, Image> serverPresetBtns = new Dictionary<RoatanServerPreset, Image>();
+    private RoatanServerPreset activeServerPreset = RoatanServerPreset.Localhost;
+    private bool suppressServerInputEvents;
     private TMP_Text connectBtnLabel;
     private Image signInTabImg;
     private Image registerTabImg;
@@ -162,6 +178,7 @@ public class RoatanOnlineController : MonoBehaviour
         BuildOnlineScreen(safeRoot);
         BuildRejoinModal(safeRoot);
         RoatanLocalization.LanguageChanged += RefreshLocalizedTexts;
+        ServerEndpointChanged += SyncServerEndpointFieldsFromPrefs;
         RefreshLocalizedTexts();
         onlineRoot.SetActive(false);
     }
@@ -192,9 +209,17 @@ public class RoatanOnlineController : MonoBehaviour
         {
             waitingForConnectToCheckRejoin = true;
             isConnecting = true;
-            string host = saved.ServerHost;
-            int port = saved.ServerPort;
-            Task.Run(() => Networking.Instance.ConnectOnline(host, port, false));
+            if (!string.IsNullOrWhiteSpace(saved.ServerUrl))
+            {
+                string savedUrl = saved.ServerUrl;
+                Task.Run(() => Networking.Instance.ConnectOnlineUrl(savedUrl));
+            }
+            else
+            {
+                string host = saved.ServerHost;
+                int port = saved.ServerPort;
+                Task.Run(() => Networking.Instance.ConnectOnline(host, port, false));
+            }
         }
     }
 
@@ -213,6 +238,7 @@ public class RoatanOnlineController : MonoBehaviour
     private void OnDestroy()
     {
         RoatanLocalization.LanguageChanged -= RefreshLocalizedTexts;
+        ServerEndpointChanged -= SyncServerEndpointFieldsFromPrefs;
         UnsubscribeClient();
         if (Networking.Instance != null)
         {
@@ -242,8 +268,15 @@ public class RoatanOnlineController : MonoBehaviour
         }
 
         RefreshConnectionBadge();
+        SyncServerEndpointFieldsFromPrefs();
         RefreshLocalizedTexts();
         CheckPendingRejoinOnStartup();
+    }
+
+    public void ConnectConfiguredServer()
+    {
+        SyncServerEndpointFieldsFromPrefs();
+        AttemptServerConnect();
     }
 
     public void HideOnline()
@@ -342,20 +375,32 @@ public class RoatanOnlineController : MonoBehaviour
         if (isConnecting || Networking.Instance == null) return;
         RoatanSoundFX.Instance?.PlayTap();
 
-        string host = string.IsNullOrWhiteSpace(hostInput.text) ? GetDefaultHost() : hostInput.text.Trim();
-        int port = 10000;
-        int.TryParse(portInput.text, out port);
-        if (port <= 0) port = 10000;
+        string rawUrl = serverUrlInput != null && !string.IsNullOrWhiteSpace(serverUrlInput.text)
+            ? serverUrlInput.text.Trim()
+            : GetSavedServerUrl();
 
-        PlayerPrefs.SetString(PrefHostKey, host);
-        PlayerPrefs.SetInt(PrefPortKey, port);
-        PlayerPrefs.Save();
+        if (!TryResolveServerEndpoint(
+            rawUrl,
+            out _,
+            out string normalizedDisplayUrl,
+            out _,
+            out _,
+            out _,
+            out _,
+            out string errorMessage))
+        {
+            SetFeedback($"Invalid server URL: {errorMessage}", RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        RoatanServerPreset resolvedPreset = DetectPresetForUrl(normalizedDisplayUrl, activeServerPreset);
+        SaveServerEndpoint(resolvedPreset, normalizedDisplayUrl);
 
         isConnecting = true;
-        SetFeedback(RoatanLocalization.T("connecting"), RoatanVisualAssets.IslandGold);
+        SetFeedback($"{RoatanLocalization.T("connecting")} ({normalizedDisplayUrl})", RoatanVisualAssets.IslandGold);
         RefreshConnectionBadge();
 
-        Task.Run(() => Networking.Instance.ConnectOnline(host, port, false));
+        Task.Run(() => Networking.Instance.ConnectOnlineUrl(normalizedDisplayUrl));
     }
 
     private void OnConnectionStatusChanged()
@@ -768,8 +813,9 @@ public class RoatanOnlineController : MonoBehaviour
             int matchId = dto.MatchId ?? (currentLobby != null ? currentLobby.Id : 0);
             int lobbyId = dto.LobbyId ?? (currentLobby != null ? currentLobby.Id : matchId);
             string host = Networking.Instance != null ? Networking.Instance.CurrentHost : GetDefaultHost();
-            int port = Networking.Instance != null ? Networking.Instance.CurrentPort : 10000;
-            RoatanMatchSessionStore.SaveSession(matchId, lobbyId, subscribedClient.User.Id, dto.ReconnectToken, host, port);
+            int port = Networking.Instance != null ? Networking.Instance.CurrentPort : 5000;
+            string serverUrl = Networking.Instance != null ? Networking.Instance.CurrentServerUrl : GetSavedServerUrl();
+            RoatanMatchSessionStore.SaveSession(matchId, lobbyId, subscribedClient.User.Id, dto.ReconnectToken, host, port, 1800, serverUrl);
         }
 
         onlineShufflePlaying = true;
@@ -1606,7 +1652,7 @@ public class RoatanOnlineController : MonoBehaviour
         toastRect.anchorMax = new Vector2(0.5f, 0f);
         toastRect.pivot = new Vector2(0.5f, 0f);
         toastRect.anchoredPosition = new Vector2(0f, 22f);
-        feedbackToast = CreateText(toastCard.transform, "ToastText", "Enter your DominoServer IP or return Home to play Offline vs Bots.", 22, FontStyles.Normal, new Color(0.88f, 0.96f, 0.98f), Vector2.zero, new Vector2(900f, 60f));
+        feedbackToast = CreateText(toastCard.transform, "ToastText", "Paste your Cloudflare Tunnel / Production URL or return Home to play Offline.", 22, FontStyles.Normal, new Color(0.88f, 0.96f, 0.98f), Vector2.zero, new Vector2(900f, 60f));
 
         BuildAuthView(onlineRoot.transform);
         BuildHubView(onlineRoot.transform);
@@ -1618,44 +1664,62 @@ public class RoatanOnlineController : MonoBehaviour
     {
         authView = CreateStretchPanel(parent, "AuthView", Color.clear);
 
-        // Server Connection Card
-        GameObject serverCard = CreateCard(authView.transform, "ServerCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 525f), new Vector2(940f, 230f));
-        CreateText(serverCard.transform, "ServerHdr", "SERVER CONNECTION", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 78f), new Vector2(880f, 36f));
+        // Server Connection Card (Presets + Single Normalized https/wss Server URL)
+        GameObject serverCard = CreateCard(authView.transform, "ServerCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 520f), new Vector2(940f, 308f));
+        CreateText(serverCard.transform, "ServerHdr", "SERVER URL & PRESETS", 23, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 122f), new Vector2(880f, 34f));
 
-        string savedHost = PlayerPrefs.GetString(PrefHostKey, GetDefaultHost());
-        int savedPort = PlayerPrefs.GetInt(PrefPortKey, 10000);
+        RoatanServerPreset[] presets = { RoatanServerPreset.Production, RoatanServerPreset.CustomTunnel, RoatanServerPreset.Localhost };
+        string[] presetLabels = { "Production", "Custom / Tunnel", "Localhost" };
+        float[] presetXs = { -292f, 0f, 292f };
+        for (int i = 0; i < presets.Length; i++)
+        {
+            RoatanServerPreset capturedPreset = presets[i];
+            Button pBtn = CreatePillButton(serverCard.transform, $"Preset_{capturedPreset}", presetLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(presetXs[i], 64f), new Vector2(276f, 54f), 22, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                SelectServerPresetInAuthView(capturedPreset);
+            });
+            serverPresetBtns[capturedPreset] = pBtn.GetComponent<Image>();
+        }
 
-        hostInput = CreateInputField(serverCard.transform, "HostInput", "Server IP (e.g. 10.0.2.2)", savedHost, new Vector2(-150f, 12f), new Vector2(560f, 68f));
-        portInput = CreateInputField(serverCard.transform, "PortInput", "Port", savedPort.ToString(), new Vector2(285f, 12f), new Vector2(250f, 68f));
+        string savedUrl = GetSavedServerUrl();
+        activeServerPreset = GetSavedPreset();
 
-        Button connBtn = CreatePillButton(serverCard.transform, "BtnConnect", "Connect / Retry", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -72f), new Vector2(440f, 68f), 26, AttemptServerConnect);
+        serverUrlInput = CreateInputField(serverCard.transform, "ServerUrlInput", "https://your-tunnel.trycloudflare.com", savedUrl, new Vector2(0f, -4f), new Vector2(876f, 64f));
+        serverUrlInput.onValueChanged.AddListener(OnAuthServerUrlChanged);
+
+        serverEndpointPreviewLabel = CreateText(serverCard.transform, "EndpointPreview", "", 18, FontStyles.Italic, new Color(0.75f, 0.92f, 0.96f), new Vector2(0f, -54f), new Vector2(870f, 28f));
+
+        Button connBtn = CreatePillButton(serverCard.transform, "BtnConnect", "Connect / Retry", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -108f), new Vector2(460f, 62f), 25, AttemptServerConnect);
         connectBtnLabel = connBtn.GetComponentInChildren<TMP_Text>();
 
-        // Sign In / Create Account Card
-        GameObject formCard = CreateCard(authView.transform, "AuthFormCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -85f), new Vector2(940f, 890f));
+        SyncServerEndpointFieldsFromPrefs();
 
-        Button tabIn = CreatePillButton(formCard.transform, "TabSignIn", "Sign In", RoatanVisualAssets.BrightLagoon, new Vector2(-215f, 375f), new Vector2(410f, 76f), 28, () => SelectAuthTab(true));
+        // Sign In / Create Account Card
+        GameObject formCard = CreateCard(authView.transform, "AuthFormCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -110f), new Vector2(940f, 840f));
+
+        Button tabIn = CreatePillButton(formCard.transform, "TabSignIn", "Sign In", RoatanVisualAssets.BrightLagoon, new Vector2(-215f, 355f), new Vector2(410f, 72f), 28, () => SelectAuthTab(true));
         signInTabImg = tabIn.GetComponent<Image>();
         signInTabLabel = tabIn.GetComponentInChildren<TMP_Text>();
 
-        Button tabReg = CreatePillButton(formCard.transform, "TabRegister", "Create Account", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(215f, 375f), new Vector2(410f, 76f), 28, () => SelectAuthTab(false));
+        Button tabReg = CreatePillButton(formCard.transform, "TabRegister", "Create Account", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(215f, 355f), new Vector2(410f, 72f), 28, () => SelectAuthTab(false));
         registerTabImg = tabReg.GetComponent<Image>();
         registerTabLabel = tabReg.GetComponentInChildren<TMP_Text>();
 
         // Sign In Panel
         signInPanel = CreateStretchPanel(formCard.transform, "SignInPanel", Color.clear);
-        loginUserInput = CreateInputField(signInPanel.transform, "LoginUser", "Username", "", new Vector2(0f, 170f), new Vector2(820f, 84f));
-        loginPassInput = CreateInputField(signInPanel.transform, "LoginPass", "Password", "", new Vector2(0f, 55f), new Vector2(820f, 84f), isPassword: true);
-        Button loginSubmit = CreatePillButton(signInPanel.transform, "BtnSubmitLogin", "Sign In", RoatanVisualAssets.PalmGreen, new Vector2(0f, -100f), new Vector2(620f, 102f), 34, SubmitLogin);
+        loginUserInput = CreateInputField(signInPanel.transform, "LoginUser", "Username", "", new Vector2(0f, 165f), new Vector2(820f, 82f));
+        loginPassInput = CreateInputField(signInPanel.transform, "LoginPass", "Password", "", new Vector2(0f, 52f), new Vector2(820f, 82f), isPassword: true);
+        Button loginSubmit = CreatePillButton(signInPanel.transform, "BtnSubmitLogin", "Sign In", RoatanVisualAssets.PalmGreen, new Vector2(0f, -98f), new Vector2(620f, 98f), 34, SubmitLogin);
         signInSubmitLabel = loginSubmit.GetComponentInChildren<TMP_Text>();
 
         // Register Panel
         registerPanel = CreateStretchPanel(formCard.transform, "RegisterPanel", Color.clear);
-        regEmailInput = CreateInputField(registerPanel.transform, "RegEmail", "Email Address", "", new Vector2(0f, 225f), new Vector2(820f, 78f));
-        regUserInput = CreateInputField(registerPanel.transform, "RegUser", "Username", "", new Vector2(0f, 125f), new Vector2(820f, 78f));
-        regPassInput = CreateInputField(registerPanel.transform, "RegPass", "Password", "", new Vector2(0f, 25f), new Vector2(820f, 78f), isPassword: true);
-        regBirthInput = CreateInputField(registerPanel.transform, "RegBirth", "Birthdate (DD/MM/YYYY)", "01/01/2000", new Vector2(0f, -75f), new Vector2(820f, 78f));
-        Button regSubmit = CreatePillButton(registerPanel.transform, "BtnSubmitReg", "Create Account", RoatanVisualAssets.PalmGreen, new Vector2(0f, -210f), new Vector2(620f, 96f), 32, SubmitRegister);
+        regEmailInput = CreateInputField(registerPanel.transform, "RegEmail", "Email Address", "", new Vector2(0f, 215f), new Vector2(820f, 76f));
+        regUserInput = CreateInputField(registerPanel.transform, "RegUser", "Username", "", new Vector2(0f, 120f), new Vector2(820f, 76f));
+        regPassInput = CreateInputField(registerPanel.transform, "RegPass", "Password", "", new Vector2(0f, 25f), new Vector2(820f, 76f), isPassword: true);
+        regBirthInput = CreateInputField(registerPanel.transform, "RegBirth", "Birthdate (DD/MM/YYYY)", "01/01/2000", new Vector2(0f, -70f), new Vector2(820f, 76f));
+        Button regSubmit = CreatePillButton(registerPanel.transform, "BtnSubmitReg", "Create Account", RoatanVisualAssets.PalmGreen, new Vector2(0f, -200f), new Vector2(620f, 92f), 32, SubmitRegister);
         registerSubmitLabel = regSubmit.GetComponentInChildren<TMP_Text>();
 
         SelectAuthTab(isSignIn: true);
@@ -2019,7 +2083,7 @@ public class RoatanOnlineController : MonoBehaviour
         }
         else if (connected)
         {
-            connectionBadgeText.text = $"{RoatanLocalization.T("server_connected")} ({Networking.Instance.CurrentHost}:{Networking.Instance.CurrentPort})";
+            connectionBadgeText.text = $"{RoatanLocalization.T("server_connected")} ({Networking.Instance.CurrentServerUrl})";
             connectionBadgeBg.color = new Color(0.11f, 0.45f, 0.28f, 0.95f);
         }
         else
@@ -2150,6 +2214,374 @@ public class RoatanOnlineController : MonoBehaviour
         if (feedbackToast == null) return;
         feedbackToast.text = msg;
         feedbackToast.color = color;
+    }
+
+    // ==================== SERVER ENDPOINT & URL NORMALIZATION ====================
+
+    public static string GetLocalhostServerUrl()
+    {
+        return Application.platform == RuntimePlatform.Android
+            ? "http://10.0.2.2:5000"
+            : "http://localhost:5000";
+    }
+
+    public static string GetPresetUrl(RoatanServerPreset preset)
+    {
+        switch (preset)
+        {
+            case RoatanServerPreset.Production:
+                return ProductionServerUrl;
+            case RoatanServerPreset.CustomTunnel:
+                return PlayerPrefs.GetString(PrefCustomServerUrlKey, string.Empty).Trim();
+            case RoatanServerPreset.Localhost:
+            default:
+                return GetLocalhostServerUrl();
+        }
+    }
+
+    public static RoatanServerPreset GetSavedPreset()
+    {
+        int raw = PlayerPrefs.GetInt(PrefServerPresetKey, (int)RoatanServerPreset.Localhost);
+        if (raw < 0 || raw > 2) return RoatanServerPreset.Localhost;
+        return (RoatanServerPreset)raw;
+    }
+
+    public static string GetSavedServerUrl()
+    {
+        string saved = PlayerPrefs.GetString(PrefServerUrlKey, string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(saved))
+        {
+            return saved;
+        }
+
+        // Graceful fallback if only legacy host/port PlayerPrefs existed
+        if (PlayerPrefs.HasKey(PrefHostKey))
+        {
+            string legacyHost = PlayerPrefs.GetString(PrefHostKey, GetDefaultHost()).Trim();
+            int legacyPort = PlayerPrefs.GetInt(PrefPortKey, 5000);
+            if (!string.IsNullOrWhiteSpace(legacyHost))
+            {
+                return legacyHost.Contains("://")
+                    ? legacyHost
+                    : $"http://{legacyHost}:{(legacyPort > 0 ? legacyPort : 5000)}";
+            }
+        }
+
+        RoatanServerPreset preset = GetSavedPreset();
+        string presetUrl = GetPresetUrl(preset);
+        return string.IsNullOrWhiteSpace(presetUrl) ? GetLocalhostServerUrl() : presetUrl;
+    }
+
+    public static RoatanServerPreset DetectPresetForUrl(string rawUrl, RoatanServerPreset fallback)
+    {
+        string normalized = NormalizeDisplayUrl(rawUrl);
+        if (string.Equals(normalized, NormalizeDisplayUrl(ProductionServerUrl), StringComparison.OrdinalIgnoreCase))
+        {
+            return RoatanServerPreset.Production;
+        }
+
+        if (string.Equals(normalized, NormalizeDisplayUrl(GetLocalhostServerUrl()), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "http://localhost:5000", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "http://127.0.0.1:5000", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "http://10.0.2.2:5000", StringComparison.OrdinalIgnoreCase))
+        {
+            return RoatanServerPreset.Localhost;
+        }
+
+        return string.IsNullOrWhiteSpace(rawUrl) ? fallback : RoatanServerPreset.CustomTunnel;
+    }
+
+    public static void SaveServerEndpoint(RoatanServerPreset preset, string rawUrl)
+    {
+        string trimmed = string.IsNullOrWhiteSpace(rawUrl) ? GetPresetUrl(preset) : rawUrl.Trim();
+        string displayUrl = NormalizeDisplayUrl(trimmed);
+
+        PlayerPrefs.SetInt(PrefServerPresetKey, (int)preset);
+        PlayerPrefs.SetString(PrefServerUrlKey, displayUrl);
+        if (preset == RoatanServerPreset.CustomTunnel && !string.IsNullOrWhiteSpace(displayUrl))
+        {
+            PlayerPrefs.SetString(PrefCustomServerUrlKey, displayUrl);
+        }
+
+        if (TryResolveServerEndpoint(displayUrl, out Uri wsUri, out _, out bool isTcp, out string tcpHost, out int tcpPort, out _, out _))
+        {
+            PlayerPrefs.SetString(PrefHostKey, isTcp ? tcpHost : wsUri.Host);
+            PlayerPrefs.SetInt(PrefPortKey, isTcp ? tcpPort : wsUri.Port);
+        }
+
+        PlayerPrefs.Save();
+        ServerEndpointChanged?.Invoke();
+    }
+
+    public static string NormalizeDisplayUrl(string rawUrl)
+    {
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            return GetLocalhostServerUrl();
+        }
+
+        string candidate = rawUrl.Trim().TrimEnd('/');
+        if (!candidate.Contains("://"))
+        {
+            bool local = IsLocalOrLanHost(candidate);
+            candidate = (local ? "http://" : "https://") + candidate;
+        }
+
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out Uri parsed))
+        {
+            return rawUrl.Trim().TrimEnd('/');
+        }
+
+        UriBuilder ub = new UriBuilder(parsed);
+        if ((string.Equals(ub.Scheme, "https", StringComparison.OrdinalIgnoreCase) || string.Equals(ub.Scheme, "wss", StringComparison.OrdinalIgnoreCase)) && ub.Port == 443)
+        {
+            ub.Port = -1;
+        }
+        else if ((string.Equals(ub.Scheme, "http", StringComparison.OrdinalIgnoreCase) || string.Equals(ub.Scheme, "ws", StringComparison.OrdinalIgnoreCase)) && ub.Port == 80)
+        {
+            ub.Port = -1;
+        }
+        else if (IsLocalOrLanHost(ub.Host) && parsed.IsDefaultPort && !rawUrl.Contains(":"))
+        {
+            ub.Port = 5000;
+        }
+
+        string path = ub.Path?.TrimEnd('/') ?? string.Empty;
+        ub.Path = string.IsNullOrEmpty(path) ? string.Empty : path;
+        return ub.Uri.ToString().TrimEnd('/');
+    }
+
+    /// <summary>
+    /// Normalizes any https://, wss://, http://, ws://, bare domain (e.g. Cloudflare Tunnel),
+    /// or legacy tcp:// endpoint into a ready-to-connect WebSocket URI or TCP target.
+    /// </summary>
+    public static bool TryResolveServerEndpoint(
+        string rawUrl,
+        out Uri wsUri,
+        out string normalizedDisplayUrl,
+        out bool isLegacyTcp,
+        out string tcpHost,
+        out int tcpPort,
+        out bool tcpUseSsl,
+        out string errorMessage)
+    {
+        wsUri = null;
+        normalizedDisplayUrl = string.Empty;
+        isLegacyTcp = false;
+        tcpHost = string.Empty;
+        tcpPort = 0;
+        tcpUseSsl = false;
+        errorMessage = string.Empty;
+
+        string trimmed = string.IsNullOrWhiteSpace(rawUrl) ? GetLocalhostServerUrl() : rawUrl.Trim();
+        trimmed = trimmed.TrimEnd('/');
+
+        // Explicit legacy TCP scheme (tcp://host:port or tcps://host:port)
+        if (trimmed.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("tcps://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out Uri tcpUri) || string.IsNullOrWhiteSpace(tcpUri.Host))
+            {
+                errorMessage = "Malformed TCP endpoint.";
+                return false;
+            }
+
+            isLegacyTcp = true;
+            tcpHost = tcpUri.Host;
+            tcpPort = tcpUri.Port > 0 ? tcpUri.Port : 10000;
+            tcpUseSsl = trimmed.StartsWith("tcps://", StringComparison.OrdinalIgnoreCase);
+            normalizedDisplayUrl = $"{(tcpUseSsl ? "tcps" : "tcp")}://{tcpHost}:{tcpPort}";
+            return true;
+        }
+
+        string withScheme = trimmed;
+        bool hadExplicitPort = false;
+        if (!withScheme.Contains("://"))
+        {
+            hadExplicitPort = withScheme.Contains(":");
+            bool local = IsLocalOrLanHost(withScheme);
+            withScheme = (local ? "http://" : "https://") + withScheme;
+        }
+        else
+        {
+            int schemeEnd = withScheme.IndexOf("://", StringComparison.Ordinal) + 3;
+            string authority = withScheme.Substring(schemeEnd);
+            int slashIdx = authority.IndexOf('/');
+            if (slashIdx >= 0) authority = authority.Substring(0, slashIdx);
+            hadExplicitPort = authority.Contains(":");
+        }
+
+        if (!Uri.TryCreate(withScheme, UriKind.Absolute, out Uri parsed) || string.IsNullOrWhiteSpace(parsed.Host))
+        {
+            errorMessage = "Enter a valid https://, wss://, or http:// URL.";
+            return false;
+        }
+
+        string lowerScheme = parsed.Scheme.ToLowerInvariant();
+        if (lowerScheme != "https" && lowerScheme != "http" && lowerScheme != "wss" && lowerScheme != "ws")
+        {
+            errorMessage = $"Unsupported scheme '{parsed.Scheme}'. Use https:// or wss://.";
+            return false;
+        }
+
+        bool isSecure = lowerScheme == "https" || lowerScheme == "wss";
+        string wsScheme = isSecure ? "wss" : "ws";
+
+        UriBuilder wsBuilder = new UriBuilder(parsed)
+        {
+            Scheme = wsScheme
+        };
+
+        // Strip redundant default ports (:443 for wss, :80 for ws); default local hosts without port to :5000
+        if (isSecure && (parsed.IsDefaultPort || wsBuilder.Port == 443 || wsBuilder.Port == 80))
+        {
+            wsBuilder.Port = -1;
+        }
+        else if (!isSecure && !hadExplicitPort && IsLocalOrLanHost(parsed.Host))
+        {
+            wsBuilder.Port = 5000;
+        }
+        else if (!isSecure && (parsed.IsDefaultPort || wsBuilder.Port == 80))
+        {
+            wsBuilder.Port = -1;
+        }
+
+        string cleanPath = (wsBuilder.Path ?? string.Empty).TrimEnd('/');
+        if (string.IsNullOrEmpty(cleanPath))
+        {
+            wsBuilder.Path = "/ws";
+        }
+        else
+        {
+            wsBuilder.Path = cleanPath;
+        }
+
+        wsUri = wsBuilder.Uri;
+
+        UriBuilder displayBuilder = new UriBuilder(wsUri)
+        {
+            Scheme = lowerScheme == "ws" || lowerScheme == "wss" ? lowerScheme : (isSecure ? "https" : "http"),
+            Path = string.Equals(cleanPath, "/ws", StringComparison.OrdinalIgnoreCase) ? string.Empty : cleanPath
+        };
+        if ((isSecure && displayBuilder.Port == 443) || (!isSecure && displayBuilder.Port == 80))
+        {
+            displayBuilder.Port = -1;
+        }
+        normalizedDisplayUrl = displayBuilder.Uri.ToString().TrimEnd('/');
+        return true;
+    }
+
+    private static bool IsLocalOrLanHost(string hostOrAuthority)
+    {
+        if (string.IsNullOrWhiteSpace(hostOrAuthority)) return true;
+        string hostOnly = hostOrAuthority.Trim();
+        int slashIdx = hostOnly.IndexOf('/');
+        if (slashIdx >= 0) hostOnly = hostOnly.Substring(0, slashIdx);
+        int colonIdx = hostOnly.IndexOf(':');
+        if (colonIdx >= 0) hostOnly = hostOnly.Substring(0, colonIdx);
+
+        if (string.Equals(hostOnly, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            hostOnly == "127.0.0.1" ||
+            hostOnly == "10.0.2.2")
+        {
+            return true;
+        }
+
+        return hostOnly.StartsWith("192.168.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("10.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.16.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.17.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.18.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.19.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.2", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.30.", StringComparison.Ordinal) ||
+               hostOnly.StartsWith("172.31.", StringComparison.Ordinal);
+    }
+
+    private void SelectServerPresetInAuthView(RoatanServerPreset preset)
+    {
+        activeServerPreset = preset;
+        string targetUrl = GetPresetUrl(preset);
+
+        if (serverUrlInput != null)
+        {
+            suppressServerInputEvents = true;
+            serverUrlInput.text = targetUrl;
+            suppressServerInputEvents = false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetUrl))
+        {
+            SaveServerEndpoint(preset, targetUrl);
+        }
+        else
+        {
+            PlayerPrefs.SetInt(PrefServerPresetKey, (int)preset);
+            PlayerPrefs.Save();
+            RefreshServerPresetVisuals();
+            UpdateServerEndpointPreview(targetUrl);
+        }
+    }
+
+    private void OnAuthServerUrlChanged(string newText)
+    {
+        if (suppressServerInputEvents) return;
+        activeServerPreset = DetectPresetForUrl(newText, RoatanServerPreset.CustomTunnel);
+        RefreshServerPresetVisuals();
+        UpdateServerEndpointPreview(newText);
+    }
+
+    private void SyncServerEndpointFieldsFromPrefs()
+    {
+        activeServerPreset = GetSavedPreset();
+        string savedUrl = GetSavedServerUrl();
+        if (serverUrlInput != null)
+        {
+            suppressServerInputEvents = true;
+            serverUrlInput.text = savedUrl;
+            suppressServerInputEvents = false;
+        }
+        RefreshServerPresetVisuals();
+        UpdateServerEndpointPreview(savedUrl);
+    }
+
+    private void RefreshServerPresetVisuals()
+    {
+        foreach (KeyValuePair<RoatanServerPreset, Image> kv in serverPresetBtns)
+        {
+            if (kv.Value == null) continue;
+            bool selected = kv.Key == activeServerPreset;
+            kv.Value.color = selected ? RoatanVisualAssets.IslandGold : new Color(0.14f, 0.22f, 0.28f, 1f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = selected ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+            }
+        }
+    }
+
+    private void UpdateServerEndpointPreview(string rawUrl)
+    {
+        if (serverEndpointPreviewLabel == null) return;
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            serverEndpointPreviewLabel.text = "Paste your Cloudflare Tunnel URL (e.g. https://random-words.trycloudflare.com)";
+            serverEndpointPreviewLabel.color = new Color(0.75f, 0.90f, 0.94f);
+            return;
+        }
+
+        if (TryResolveServerEndpoint(rawUrl, out Uri wsUri, out _, out bool isTcp, out string tcpHost, out int tcpPort, out bool tcpSsl, out string err))
+        {
+            serverEndpointPreviewLabel.text = isTcp
+                ? $"Endpoint: {(tcpSsl ? "tcps" : "tcp")}://{tcpHost}:{tcpPort}"
+                : $"WebSocket: {wsUri}";
+            serverEndpointPreviewLabel.color = new Color(0.68f, 0.95f, 0.80f);
+        }
+        else
+        {
+            serverEndpointPreviewLabel.text = err;
+            serverEndpointPreviewLabel.color = RoatanVisualAssets.SunsetCoral;
+        }
     }
 
     private static string GetDefaultHost()

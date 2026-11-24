@@ -1,3 +1,5 @@
+using System.Net.WebSockets;
+
 using Application.Common;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
@@ -106,10 +108,32 @@ public class ClientManager(IServiceScopeFactory serviceScopeFactory, ITokenManag
                 logger.LogError("IOException occurs for client {id} : {ex}", client.Id, ex);
                 break;
             }
+            catch (WebSocketException ex)
+            {
+                logger.LogInformation("WebSocket disconnected for client {id}: {message}", client.Id, ex.Message);
+                break;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 logger.LogError("Uncatched exception occurs for client {id} : {ex}", client.Id, ex);
             }
+        }
+
+        try
+        {
+            client.CloseConnection();
+        }
+        catch
+        {
+            // Ignore close errors during cleanup
         }
 
         await clientDisconnectionManager.ProcessDisconnection(await dispatcher.Dispatch(new LogoutUserCommand(client, isSocketDrop: true)));

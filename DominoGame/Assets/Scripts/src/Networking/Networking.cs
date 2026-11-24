@@ -10,12 +10,13 @@ public class Networking : MonoBehaviour
     public bool IsOfflineMode { get; private set; }
     public OfflineBotClient ActiveOfflineClient { get; private set; }
 
-    [SerializeField] private int port = 10000;
+    [SerializeField] private int port = 5000;
     [SerializeField] private string host = "127.0.0.1";
     [SerializeField] private bool mock = false;
     [SerializeField] private string targetHost = "domino6b";
     [SerializeField] private bool useSsl = false;
 
+    private string currentServerUrl = string.Empty;
     private IClient client;
     private IClient onlineClient;
     private bool isActive = true;
@@ -29,18 +30,32 @@ public class Networking : MonoBehaviour
             Destroy(gameObject);
             return;
         }
-        onlineClient = mock ? new ClientMock() : new Client(port, host, useSsl, targetHost);
-        client = onlineClient;
-        try
+
+        currentServerUrl = RoatanOnlineController.GetSavedServerUrl();
+
+        if (mock)
         {
-            client.Start();
-            IsConnected = true;
+            onlineClient = new ClientMock();
+            client = onlineClient;
+            try
+            {
+                client.Start();
+                IsConnected = true;
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"Error while starting mock client : {ex}");
+                IsConnected = false;
+            }
         }
-        catch (Exception ex)
+        else
         {
-            Debug.Log($"Error while starting client : {ex}");
+            // Keep onlineClient non-null before first connect without blocking mobile app launch on a remote socket.
+            onlineClient = new Client(port, host, useSsl, targetHost);
+            client = onlineClient;
             IsConnected = false;
         }
+
         Instance = this;
         DontDestroyOnLoad(gameObject);
     }
@@ -83,7 +98,11 @@ public class Networking : MonoBehaviour
         }
     }
 
-    public void ConnectOnline(string newHost, int newPort, bool newUseSsl = false)
+    /// <summary>
+    /// Connects to a DominoServer endpoint using https://, wss://, http://, ws://,
+    /// bare domain (e.g. random-words.trycloudflare.com), or legacy tcp://host:port.
+    /// </summary>
+    public void ConnectOnlineUrl(string rawServerUrl)
     {
         StopOfflineMode();
 
@@ -92,11 +111,43 @@ public class Networking : MonoBehaviour
             try { onlineClient.Stop(); } catch { }
         }
 
-        host = string.IsNullOrWhiteSpace(newHost) ? "127.0.0.1" : newHost.Trim();
-        port = newPort > 0 ? newPort : 10000;
-        useSsl = newUseSsl;
+        if (!RoatanOnlineController.TryResolveServerEndpoint(
+            rawServerUrl,
+            out Uri wsUri,
+            out string normalizedDisplayUrl,
+            out bool isLegacyTcp,
+            out string tcpHost,
+            out int tcpPort,
+            out bool tcpUseSsl,
+            out string errorMessage))
+        {
+            Debug.LogWarning($"Invalid server URL '{rawServerUrl}': {errorMessage}");
+            IsConnected = false;
+            NotifyConnectionChanged();
+            return;
+        }
 
-        onlineClient = mock ? new ClientMock() : new Client(port, host, useSsl, targetHost);
+        currentServerUrl = normalizedDisplayUrl;
+
+        if (mock)
+        {
+            onlineClient = new ClientMock();
+        }
+        else if (isLegacyTcp)
+        {
+            host = tcpHost;
+            port = tcpPort;
+            useSsl = tcpUseSsl;
+            onlineClient = new Client(port, host, useSsl, targetHost);
+        }
+        else
+        {
+            host = wsUri.Host;
+            port = wsUri.Port;
+            useSsl = string.Equals(wsUri.Scheme, "wss", StringComparison.OrdinalIgnoreCase);
+            onlineClient = new Client(wsUri);
+        }
+
         client = onlineClient;
 
         try
@@ -106,7 +157,7 @@ public class Networking : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.Log($"Error while connecting to {host}:{port} : {ex.Message}");
+            Debug.Log($"Error while connecting to {normalizedDisplayUrl} : {ex.Message}");
             IsConnected = false;
         }
 
@@ -115,6 +166,35 @@ public class Networking : MonoBehaviour
             ChatManager.Instance.RefreshClient();
         }
 
+        NotifyConnectionChanged();
+    }
+
+    public void ConnectOnline(string newHost, int newPort, bool newUseSsl = false)
+    {
+        string trimmed = string.IsNullOrWhiteSpace(newHost) ? "127.0.0.1" : newHost.Trim();
+
+        // Automatically handle full URLs (https://, wss://, http://, ws://, tcp://) or domain names cleanly
+        if (trimmed.Contains("://") || (!System.Net.IPAddress.TryParse(trimmed, out _) && !string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase)))
+        {
+            ConnectOnlineUrl(trimmed);
+            return;
+        }
+
+        // Default HTTP/WebSocket container port 5000 uses WebSocket transport
+        if (newPort <= 0 || newPort == 5000)
+        {
+            string scheme = newUseSsl ? "wss" : "ws";
+            ConnectOnlineUrl($"{scheme}://{trimmed}:{(newPort > 0 ? newPort : 5000)}");
+            return;
+        }
+
+        // Legacy raw TCP port (e.g. 10000)
+        string legacyScheme = newUseSsl ? "tcps" : "tcp";
+        ConnectOnlineUrl($"{legacyScheme}://{trimmed}:{newPort}");
+    }
+
+    private void NotifyConnectionChanged()
+    {
         if (MainThread.Instance != null)
         {
             MainThread.Instance.AddActionToQueue(() => ConnectionEvent?.Invoke());
@@ -127,10 +207,11 @@ public class Networking : MonoBehaviour
 
     public string CurrentHost => host;
     public int CurrentPort => port;
+    public string CurrentServerUrl => string.IsNullOrWhiteSpace(currentServerUrl) ? $"{host}:{port}" : currentServerUrl;
 
     private void OnDisable()
     {
-        if (!isActive || !IsConnected)
+        if (!isActive || !IsConnected || client == null)
         {
             return;
         }
@@ -139,17 +220,7 @@ public class Networking : MonoBehaviour
 
     public void RetryConnection()
     {
-        try
-        {
-            client.Start();
-            IsConnected = true;
-        }
-        catch (Exception ex)
-        {
-            Debug.Log($"Error while starting client : {ex}");
-            IsConnected = false;
-        }
-        MainThread.Instance.AddActionToQueue(() => ConnectionEvent?.Invoke());
+        ConnectOnlineUrl(CurrentServerUrl);
     }
 
     public IClient GetClient()

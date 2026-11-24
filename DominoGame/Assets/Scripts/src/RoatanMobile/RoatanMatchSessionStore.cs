@@ -31,6 +31,9 @@ public static class RoatanMatchSessionStore
         [JsonProperty("serverPort")]
         public int ServerPort { get; set; }
 
+        [JsonProperty("serverUrl")]
+        public string ServerUrl { get; set; }
+
         public bool IsExpired()
         {
             if (string.IsNullOrWhiteSpace(ExpiresAtUtc)) return true;
@@ -49,7 +52,8 @@ public static class RoatanMatchSessionStore
         string reconnectToken,
         string serverHost,
         int serverPort,
-        int ttlSeconds = 1800)
+        int ttlSeconds = 1800,
+        string serverUrl = null)
     {
         if (playerId <= 0 || string.IsNullOrWhiteSpace(reconnectToken))
         {
@@ -64,7 +68,8 @@ public static class RoatanMatchSessionStore
             ReconnectToken = reconnectToken,
             ExpiresAtUtc = DateTime.UtcNow.AddSeconds(Math.Max(40, ttlSeconds)).ToString("O"),
             ServerHost = string.IsNullOrWhiteSpace(serverHost) ? "127.0.0.1" : serverHost.Trim(),
-            ServerPort = serverPort > 0 ? serverPort : 10000
+            ServerPort = serverPort > 0 ? serverPort : 5000,
+            ServerUrl = string.IsNullOrWhiteSpace(serverUrl) ? null : serverUrl.Trim()
         };
 
         PlayerPrefs.SetString(PrefSessionKey, JsonConvert.SerializeObject(data));

@@ -1,0 +1,16 @@
+# Roatan Domino — Production Caddyfile (Automatic Let's Encrypt HTTPS + WSS)
+# Set DOMINO_DOMAIN in your VPS environment or .env file before running:
+#   DOMINO_DOMAIN=play.yourdomain.com docker compose --profile production up -d
+
+{$DOMINO_DOMAIN:domino.roatandomino.com} {
+	encode zstd gzip
+
+	# Reverse-proxy HTTP (/health, /) and WebSocket/SignalR (/ws, /) to domino-server:5000.
+	# Caddy v2 handles WebSocket Upgrade / Connection / X-Forwarded-* headers automatically.
+	reverse_proxy domino-server:5000 {
+		flush_interval -1
+		health_uri /health
+		health_interval 30s
+		health_timeout 5s
+	}
+}

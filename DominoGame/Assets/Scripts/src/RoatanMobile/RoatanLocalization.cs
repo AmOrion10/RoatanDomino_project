@@ -112,7 +112,7 @@ public static class RoatanLocalization
         ["got_it"] = new[] { "Got It!", "¡Entendido!", "Compris !", "Verstanden!" },
         ["online_title"] = new[] { "ONLINE MULTIPLAYER", "MULTIJUGADOR EN LÍNEA", "MULTIJOUEUR EN LIGNE", "ONLINE-MEHRSPIELER" },
         ["server_connected"] = new[] { "Server Connected", "Servidor Conectado", "Serveur Connecté", "Server Verbunden" },
-        ["server_offline"] = new[] { "Server Unreachable — Check IP or Play Offline", "Servidor No Disponible — Verifica IP o Juega Sin Conexión", "Serveur Inaccessible — Vérifiez l'IP ou Jouez Hors Ligne", "Server Nicht Erreichbar — IP prüfen oder Offline spielen" },
+        ["server_offline"] = new[] { "Server Unreachable — Check Server URL or Play Offline", "Servidor No Disponible — Verifica URL o Juega Sin Conexión", "Serveur Inaccessible — Vérifiez l'URL ou Jouez Hors Ligne", "Server Nicht Erreichbar — URL prüfen oder Offline spielen" },
         ["connecting"] = new[] { "Connecting to server...", "Conectando al servidor...", "Connexion au serveur...", "Verbinde mit Server..." },
         ["connect_retry"] = new[] { "Connect / Retry", "Conectar / Reintentar", "Connecter / Réessayer", "Verbinden / Neu" },
         ["sign_in"] = new[] { "Sign In", "Iniciar Sesión", "Connexion", "Anmelden" },

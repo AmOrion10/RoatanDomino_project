@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,6 +44,11 @@ public class RoatanMobileApp : MonoBehaviour
     private TMP_Text activePresetPillLabel;
     private TMP_Text topLangPillLabel;
     private TMP_Text drawerStatsLabel;
+    private TMP_InputField drawerServerUrlInput;
+    private TMP_Text drawerServerPreviewLabel;
+    private readonly Dictionary<RoatanServerPreset, Image> drawerServerPresetBtns = new Dictionary<RoatanServerPreset, Image>();
+    private RoatanServerPreset drawerServerPreset = RoatanServerPreset.Localhost;
+    private bool suppressDrawerServerEvents;
     private TMP_Text statsLabel;
     private TMP_Text modeHeadingLabel;
     private TMP_Text cerradoTitleLabel;
@@ -244,6 +250,7 @@ public class RoatanMobileApp : MonoBehaviour
     private void OnDestroy()
     {
         RoatanLocalization.LanguageChanged -= OnLanguageChanged;
+        RoatanOnlineController.ServerEndpointChanged -= SyncDrawerServerEndpointFromPrefs;
         SceneManager.activeSceneChanged -= OnSceneChanged;
     }
 
@@ -2063,12 +2070,12 @@ public class RoatanMobileApp : MonoBehaviour
         });
 
         // 1. Offline Record / Stats Card
-        GameObject statsCard = CreateCard(drawer.transform, "DrawerStatsCard", new Color(0.06f, 0.20f, 0.26f, 0.96f), new Vector2(0f, 520f), new Vector2(540f, 260f));
-        CreateText(statsCard.transform, "StatsHdr", "OFFLINE RECORD & STATS", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 84f), new Vector2(500f, 40f));
-        drawerStatsLabel = CreateText(statsCard.transform, "StatsBody", "Wins: 0\nMatches Played: 0\nWin Rate: 0%", 28, FontStyles.Normal, Color.white, new Vector2(0f, -22f), new Vector2(500f, 160f));
+        GameObject statsCard = CreateCard(drawer.transform, "DrawerStatsCard", new Color(0.06f, 0.20f, 0.26f, 0.96f), new Vector2(0f, 565f), new Vector2(540f, 224f));
+        CreateText(statsCard.transform, "StatsHdr", "OFFLINE RECORD & STATS", 23, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 72f), new Vector2(500f, 36f));
+        drawerStatsLabel = CreateText(statsCard.transform, "StatsBody", "Wins: 0\nMatches Played: 0\nWin Rate: 0%", 26, FontStyles.Normal, Color.white, new Vector2(0f, -20f), new Vector2(500f, 140f));
 
         // 2. Sound ON/OFF Toggle
-        Button soundBtn = CreatePillButton(drawer.transform, "BtnDrawerSound", RoatanLocalization.T("sound_on"), new Color(0.10f, 0.28f, 0.34f, 1f), new Vector2(0f, 250f), new Vector2(540f, 102f), 30, () =>
+        Button soundBtn = CreatePillButton(drawer.transform, "BtnDrawerSound", RoatanLocalization.T("sound_on"), new Color(0.10f, 0.28f, 0.34f, 1f), new Vector2(0f, 385f), new Vector2(540f, 84f), 28, () =>
         {
             RoatanSoundFX.Instance?.ToggleMute();
             RoatanSoundFX.Instance?.PlayTap();
@@ -2077,7 +2084,7 @@ public class RoatanMobileApp : MonoBehaviour
         homeSoundBtnLabel = soundBtn.GetComponentInChildren<TMP_Text>();
 
         // 3. How to Play (opens Tabbed Rule Guide)
-        Button howBtn = CreatePillButton(drawer.transform, "BtnDrawerHowToPlay", RoatanLocalization.T("how_to_play"), RoatanVisualAssets.BrightLagoon, new Vector2(0f, 115f), new Vector2(540f, 102f), 30, () =>
+        Button howBtn = CreatePillButton(drawer.transform, "BtnDrawerHowToPlay", RoatanLocalization.T("how_to_play"), RoatanVisualAssets.BrightLagoon, new Vector2(0f, 282f), new Vector2(540f, 84f), 28, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             utilityDrawerOverlay.SetActive(false);
@@ -2087,10 +2094,162 @@ public class RoatanMobileApp : MonoBehaviour
         });
         howToPlayBtnLabel = howBtn.GetComponentInChildren<TMP_Text>();
 
-        // Language quick cycle inside drawer too
-        CreatePillButton(drawer.transform, "BtnDrawerLang", "Switch Language (EN/ES/FR/DE)", new Color(0.10f, 0.24f, 0.30f, 1f), new Vector2(0f, -20f), new Vector2(540f, 92f), 25, CycleLanguage);
+        // 4. Language quick cycle inside drawer too
+        CreatePillButton(drawer.transform, "BtnDrawerLang", "Switch Language (EN/ES/FR/DE)", new Color(0.10f, 0.24f, 0.30f, 1f), new Vector2(0f, 180f), new Vector2(540f, 80f), 24, CycleLanguage);
+
+        // 5. Online Server Endpoint Configuration (Production / Custom Tunnel URL / Localhost)
+        GameObject serverCard = CreateCard(drawer.transform, "DrawerServerCard", new Color(0.06f, 0.20f, 0.26f, 0.96f), new Vector2(0f, -110f), new Vector2(540f, 444f));
+        CreateText(serverCard.transform, "ServerHdr", "ONLINE SERVER URL", 23, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 182f), new Vector2(500f, 36f));
+
+        RoatanServerPreset[] presets = { RoatanServerPreset.Production, RoatanServerPreset.CustomTunnel, RoatanServerPreset.Localhost };
+        string[] presetLabels = { "Production", "Tunnel", "Localhost" };
+        float[] presetXs = { -168f, 0f, 168f };
+        for (int i = 0; i < presets.Length; i++)
+        {
+            RoatanServerPreset capturedPreset = presets[i];
+            Button presetBtn = CreatePillButton(serverCard.transform, $"DrawerPreset_{capturedPreset}", presetLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(presetXs[i], 122f), new Vector2(158f, 54f), 21, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                SelectDrawerServerPreset(capturedPreset);
+            });
+            drawerServerPresetBtns[capturedPreset] = presetBtn.GetComponent<Image>();
+        }
+
+        drawerServerUrlInput = CreateInputField(serverCard.transform, "DrawerServerUrlInput", "https://...trycloudflare.com", RoatanOnlineController.GetSavedServerUrl(), new Vector2(0f, 44f), new Vector2(496f, 68f));
+        drawerServerUrlInput.onValueChanged.AddListener(OnDrawerServerUrlChanged);
+
+        drawerServerPreviewLabel = CreateText(serverCard.transform, "DrawerServerPreview", "", 18, FontStyles.Italic, new Color(0.75f, 0.92f, 0.96f), new Vector2(0f, -20f), new Vector2(496f, 44f));
+
+        CreatePillButton(serverCard.transform, "BtnDrawerSaveServer", "Save Server URL", RoatanVisualAssets.PalmGreen, new Vector2(0f, -94f), new Vector2(496f, 68f), 25, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SaveDrawerServerUrl();
+        });
+
+        CreatePillButton(serverCard.transform, "BtnDrawerConnectOnline", "Save & Open Online", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -172f), new Vector2(496f, 64f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            if (SaveDrawerServerUrl())
+            {
+                OpenOnlineScreen();
+                onlineController?.ConnectConfiguredServer();
+            }
+        });
+
+        RoatanOnlineController.ServerEndpointChanged -= SyncDrawerServerEndpointFromPrefs;
+        RoatanOnlineController.ServerEndpointChanged += SyncDrawerServerEndpointFromPrefs;
+        SyncDrawerServerEndpointFromPrefs();
 
         utilityDrawerOverlay.SetActive(false);
+    }
+
+    private void SelectDrawerServerPreset(RoatanServerPreset preset)
+    {
+        drawerServerPreset = preset;
+        string presetUrl = RoatanOnlineController.GetPresetUrl(preset);
+
+        if (drawerServerUrlInput != null)
+        {
+            suppressDrawerServerEvents = true;
+            drawerServerUrlInput.text = presetUrl;
+            suppressDrawerServerEvents = false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(presetUrl))
+        {
+            RoatanOnlineController.SaveServerEndpoint(preset, presetUrl);
+        }
+        else
+        {
+            RefreshDrawerServerPresetVisuals();
+            UpdateDrawerServerPreview(presetUrl);
+        }
+    }
+
+    private void OnDrawerServerUrlChanged(string newText)
+    {
+        if (suppressDrawerServerEvents) return;
+        drawerServerPreset = RoatanOnlineController.DetectPresetForUrl(newText, RoatanServerPreset.CustomTunnel);
+        RefreshDrawerServerPresetVisuals();
+        UpdateDrawerServerPreview(newText);
+    }
+
+    private bool SaveDrawerServerUrl()
+    {
+        string raw = drawerServerUrlInput != null ? drawerServerUrlInput.text.Trim() : string.Empty;
+        if (!RoatanOnlineController.TryResolveServerEndpoint(raw, out Uri wsUri, out string displayUrl, out bool isTcp, out string tcpHost, out int tcpPort, out bool tcpSsl, out string err))
+        {
+            if (drawerServerPreviewLabel != null)
+            {
+                drawerServerPreviewLabel.text = err;
+                drawerServerPreviewLabel.color = RoatanVisualAssets.SunsetCoral;
+            }
+            return false;
+        }
+
+        RoatanServerPreset resolvedPreset = RoatanOnlineController.DetectPresetForUrl(displayUrl, drawerServerPreset);
+        RoatanOnlineController.SaveServerEndpoint(resolvedPreset, displayUrl);
+        if (drawerServerPreviewLabel != null)
+        {
+            drawerServerPreviewLabel.text = isTcp
+                ? $"Saved: {(tcpSsl ? "tcps" : "tcp")}://{tcpHost}:{tcpPort}"
+                : $"Saved: {wsUri}";
+            drawerServerPreviewLabel.color = new Color(0.68f, 0.95f, 0.80f);
+        }
+        return true;
+    }
+
+    private void SyncDrawerServerEndpointFromPrefs()
+    {
+        drawerServerPreset = RoatanOnlineController.GetSavedPreset();
+        string saved = RoatanOnlineController.GetSavedServerUrl();
+        if (drawerServerUrlInput != null)
+        {
+            suppressDrawerServerEvents = true;
+            drawerServerUrlInput.text = saved;
+            suppressDrawerServerEvents = false;
+        }
+        RefreshDrawerServerPresetVisuals();
+        UpdateDrawerServerPreview(saved);
+    }
+
+    private void RefreshDrawerServerPresetVisuals()
+    {
+        foreach (KeyValuePair<RoatanServerPreset, Image> kv in drawerServerPresetBtns)
+        {
+            if (kv.Value == null) continue;
+            bool selected = kv.Key == drawerServerPreset;
+            kv.Value.color = selected ? RoatanVisualAssets.IslandGold : new Color(0.14f, 0.22f, 0.28f, 1f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = selected ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+            }
+        }
+    }
+
+    private void UpdateDrawerServerPreview(string rawUrl)
+    {
+        if (drawerServerPreviewLabel == null) return;
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            drawerServerPreviewLabel.text = "Paste your Cloudflare Tunnel URL above";
+            drawerServerPreviewLabel.color = new Color(0.75f, 0.90f, 0.94f);
+            return;
+        }
+
+        if (RoatanOnlineController.TryResolveServerEndpoint(rawUrl, out Uri wsUri, out _, out bool isTcp, out string tcpHost, out int tcpPort, out bool tcpSsl, out string err))
+        {
+            drawerServerPreviewLabel.text = isTcp
+                ? $"Endpoint: {(tcpSsl ? "tcps" : "tcp")}://{tcpHost}:{tcpPort}"
+                : $"WSS/WS: {wsUri}";
+            drawerServerPreviewLabel.color = new Color(0.68f, 0.95f, 0.80f);
+        }
+        else
+        {
+            drawerServerPreviewLabel.text = err;
+            drawerServerPreviewLabel.color = RoatanVisualAssets.SunsetCoral;
+        }
     }
 
     private Button CreateCompactModeCard(Transform parent, string name, string title, string subtitle, Vector2 pos, Vector2 size, System.Action onClick, out TMP_Text titleOut, out TMP_Text descOut)
@@ -2588,6 +2747,47 @@ public class RoatanMobileApp : MonoBehaviour
         TMP_Text txt = CreateText(obj.transform, "Label", label, fontSize, FontStyles.Bold, Color.white, Vector2.zero, size - new Vector2(20f, 10f));
         txt.raycastTarget = false;
         return btn;
+    }
+
+    private TMP_InputField CreateInputField(Transform parent, string name, string placeholder, string initialValue, Vector2 pos, Vector2 size, bool isPassword = false)
+    {
+        GameObject obj = CreateCard(parent, name, new Color(0.04f, 0.11f, 0.16f, 1f), pos, size);
+
+        GameObject textArea = new GameObject("TextArea");
+        textArea.transform.SetParent(obj.transform, false);
+        RectTransform taRect = textArea.AddComponent<RectTransform>();
+        taRect.anchorMin = Vector2.zero;
+        taRect.anchorMax = Vector2.one;
+        taRect.offsetMin = new Vector2(18f, 6f);
+        taRect.offsetMax = new Vector2(-18f, -6f);
+        textArea.AddComponent<RectMask2D>();
+
+        TMP_Text ph = CreateText(textArea.transform, "Placeholder", placeholder, 22, FontStyles.Italic, new Color(0.55f, 0.68f, 0.74f, 0.85f), Vector2.zero, Vector2.zero);
+        RectTransform phRect = ph.GetComponent<RectTransform>();
+        phRect.anchorMin = Vector2.zero;
+        phRect.anchorMax = Vector2.one;
+        phRect.offsetMin = Vector2.zero;
+        phRect.offsetMax = Vector2.zero;
+        ph.alignment = TextAlignmentOptions.MidlineLeft;
+        ph.enableWordWrapping = false;
+
+        TMP_Text txt = CreateText(textArea.transform, "Text", "", 22, FontStyles.Normal, Color.white, Vector2.zero, Vector2.zero);
+        RectTransform tRect = txt.GetComponent<RectTransform>();
+        tRect.anchorMin = Vector2.zero;
+        tRect.anchorMax = Vector2.one;
+        tRect.offsetMin = Vector2.zero;
+        tRect.offsetMax = Vector2.zero;
+        txt.alignment = TextAlignmentOptions.MidlineLeft;
+        txt.enableWordWrapping = false;
+
+        TMP_InputField input = obj.AddComponent<TMP_InputField>();
+        input.textViewport = taRect;
+        input.textComponent = txt;
+        input.placeholder = ph;
+        input.contentType = isPassword ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
+        input.text = initialValue ?? string.Empty;
+
+        return input;
     }
 
     private TMP_Text CreateText(Transform parent, string name, string content, int fontSize, FontStyles style, Color color, Vector2 pos, Vector2 size)

@@ -1,0 +1,19 @@
+# Ignore Unity project, git metadata, build outputs, and docs during Docker builds
+.git
+.gitignore
+.gitlab-ci.yml
+DominoGame
+img
+Tutos
+Builds
+PRIVACY_POLICY.md
+README.md
+**/bin
+**/obj
+**/.vs
+**/.idea
+**/*.user
+**/*.suo
+*.apk
+*.aab
+*.keystore
