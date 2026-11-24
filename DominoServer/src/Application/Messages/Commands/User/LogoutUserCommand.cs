@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Exceptions.Chat;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
@@ -9,9 +9,10 @@ namespace Application.Messages.Commands.User;
 using Domain;
 using Domain.Game;
 
-public class LogoutUserCommand(IClient client) : ICommand<DisconnectionResult>
+public class LogoutUserCommand(IClient client, bool isSocketDrop = false) : ICommand<DisconnectionResult>
 {
     public IClient Client { get; set; } = client;
+    public bool IsSocketDrop { get; set; } = isSocketDrop;
 }
 
 public class LogoutUserCommandHandler(IMessageDispatcher dispatcher, ITokenManager tokenManager, ILobbyManager lobbyManager, IChatManager chatManager, IGameManager gameManager) : ICommandHandler<LogoutUserCommand, DisconnectionResult>
@@ -44,7 +45,15 @@ public class LogoutUserCommandHandler(IMessageDispatcher dispatcher, ITokenManag
         Game? game = gameManager.GetForClient(request.Client);
         if (game is not null)
         {
-            result.LeaveGameResult = await dispatcher.Dispatch(new LeaveGameCommand(request.Client));
+            if (request.IsSocketDrop && request.Client.User is not null)
+            {
+                // Socket dropped during active match: hold seat in 40s grace window instead of aborting/removing
+                game.MarkPlayerDisconnected(request.Client.User.Id);
+            }
+            else
+            {
+                result.LeaveGameResult = await dispatcher.Dispatch(new LeaveGameCommand(request.Client));
+            }
         }
 
         result.GlobalChat = chatManager.GetById(chatManager.GlobalChatId) ?? throw new ChatNotFoundException($"Chat with id {chatManager.GlobalChatId} not found");

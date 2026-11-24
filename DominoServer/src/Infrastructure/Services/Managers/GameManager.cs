@@ -1,4 +1,4 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 using Application.Interfaces.Managers;
 
 using Domain;
@@ -25,10 +25,30 @@ public class GameManager(IChatManager chatManager) : IGameManager
     public void CreateGameFromLobby(Lobby lobby, int seed)
     {
         List<GamePlayer> players = lobby.PlayersInLobby.Select(lobbyPlayer => new GamePlayer(lobbyPlayer)).ToList();
-        Game game = new(lobby.Id, players, lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked, seed)
+        GameMode mode = lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked;
+        Game game;
+        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue || lobby.OneOnePlayoff.HasValue)
         {
-            ChatId = chatManager.CreateChat("Game")
-        };
+            TableStyle tableStyle = lobby.TableStyle ?? TableStyle.DRAW;
+            MatchFormat matchFormat = lobby.MatchFormat ?? MatchFormat.CUT_THROAT;
+            bool isTeam2v2 = players.Count == 4 && matchFormat != MatchFormat.CUT_THROAT;
+            bool oneOnePlayoff = lobby.OneOnePlayoff ?? false;
+            game = new Game(lobby.Id, players, mode, tableStyle, matchFormat, seed, isTeam2v2: isTeam2v2, oneOnePlayoff: oneOnePlayoff)
+            {
+                ChatId = chatManager.CreateChat("Game"),
+                LobbyId = lobby.Id,
+                MatchTitle = lobby.Name
+            };
+        }
+        else
+        {
+            game = new Game(lobby.Id, players, mode, seed)
+            {
+                ChatId = chatManager.CreateChat("Game"),
+                LobbyId = lobby.Id,
+                MatchTitle = lobby.Name
+            };
+        }
         lock (games)
         {
             games.Add(game);
@@ -126,7 +146,9 @@ public class GameManager(IChatManager chatManager) : IGameManager
         {
             Game game = games.First(g => g.Id == gameId);
             game.PlayerTurnTimer.HasStarted = true;
-            game.PlayerTurnTimer.Duration = IGameManager.GameTimerPerPlayer;
+            game.PlayerTurnTimer.Duration = game.IsLegacyDrawAdvance
+                ? IGameManager.GameTimerPerPlayer
+                : game.GetActiveTurnDurationSeconds();
         }
     }
 
@@ -171,6 +193,37 @@ public class GameManager(IChatManager chatManager) : IGameManager
         {
             Game game = games.First(g => g.Players.Any(p => p.Id == playerLeaving.User!.Id));
             return game.PlayerLeave(game.Players.First(p => p.Id == playerLeaving.User!.Id));
+        }
+    }
+
+    public List<Game> GetAllActiveGames()
+    {
+        lock (games)
+        {
+            return games.ToList();
+        }
+    }
+
+    public Game? FindRejoinableGame(int matchId, long playerId, string reconnectToken, out int remainingGraceSeconds)
+    {
+        remainingGraceSeconds = 0;
+        if (string.IsNullOrWhiteSpace(reconnectToken))
+        {
+            return null;
+        }
+
+        lock (games)
+        {
+            Game? game = matchId > 0
+                ? games.FirstOrDefault(g => g.Id == matchId)
+                : games.FirstOrDefault(g => g.Players.Any(p => p.Id == playerId));
+
+            if (game is null) return null;
+            if (game.CanPlayerRejoin(playerId, reconnectToken, out remainingGraceSeconds))
+            {
+                return game;
+            }
+            return null;
         }
     }
 }

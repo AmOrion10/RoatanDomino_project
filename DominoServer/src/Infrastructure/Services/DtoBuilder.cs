@@ -1,4 +1,4 @@
-﻿using Domain;
+using Domain;
 using Domain.Game;
 
 using DominoCommon.com.domino.common.Scripts;
@@ -40,7 +40,10 @@ public static class DtoBuilder
                 IsPublic = lobby.IsPublic,
                 MaxNumberOfPlayer = lobby.MaxNumberOfPlayer,
                 Ranked = lobby.Ranked,
-                Code = lobby.Code
+                Code = lobby.Code,
+                TableStyle = lobby.TableStyle,
+                MatchFormat = lobby.MatchFormat,
+                OneOnePlayoff = lobby.OneOnePlayoff
             }
         };
     }
@@ -94,7 +97,10 @@ public static class DtoBuilder
                     MaxNumberOfPlayer = l.MaxNumberOfPlayer,
                     NumberOfPlayer = l.PlayersInLobby.Count,
                     Name = l.Name,
-                    IsPublic = l.IsPublic
+                    IsPublic = l.IsPublic,
+                    TableStyle = l.TableStyle,
+                    MatchFormat = l.MatchFormat,
+                    OneOnePlayoff = l.OneOnePlayoff
                 }).ToList()
             }
         };
@@ -175,6 +181,23 @@ public static class DtoBuilder
         };
     }
 
+    public static PlayerTurnDto GetPlayerTurnDto(Game game, TimerDto timer)
+    {
+        if (game.IsLegacyDrawAdvance)
+        {
+            return GetPlayerTurnDto(game.PlayerPlaying.Id, timer);
+        }
+
+        return new PlayerTurnDto
+        {
+            IdUserPlaying = game.PlayerPlaying.Id,
+            Timer = timer,
+            IsAutoPassTurn = game.IsCurrentPlayerAutoPassTurn(),
+            IsBotControlled = game.PlayerPlaying.IsBotControlled,
+            ConsecutiveAutoPlays = game.PlayerPlaying.ConsecutiveAutoPlays
+        };
+    }
+
     public static PlayerPlayDto GetPlayerPlayDto(long playerId, PlayActionType type)
     {
         return new PlayerPlayDto
@@ -207,11 +230,22 @@ public static class DtoBuilder
             };
             playerClassement.Add(newPlayerClassement);
         }
-        return new EndGameDto
+        EndGameDto dto = new()
         {
             NormalFinish = normalFinish,
             Rankings = playerClassement
         };
+
+        if (!game.IsLegacyDrawAdvance && game.LastHandResolution is not null)
+        {
+            dto.BreakTriggered = game.LastHandResolution.BreakTriggered;
+            dto.MatchOver = game.LastHandResolution.MatchOver;
+            dto.IsKeyWin = game.LastHandResolution.IsKeyWin;
+            dto.PointsAwarded = game.LastHandResolution.PointsAwarded;
+            dto.AvailableActions = new List<PostHandAction>(game.LastHandResolution.AvailablePostHandActions);
+        }
+
+        return dto;
     }
 
     public static EndGameDto GetEndGameDto(bool normalFinish)
@@ -281,6 +315,110 @@ public static class DtoBuilder
                 Side1 = d.Side1,
                 Side2 = d.Side2,
             }).ToList()
+        };
+    }
+
+    public static HandDto GetHandDto(Game game, GamePlayer player)
+    {
+        HandDto dto = GetHandDto(player);
+        if (!game.IsLegacyDrawAdvance)
+        {
+            dto.MatchId = game.Id;
+            dto.LobbyId = game.LobbyId > 0 ? game.LobbyId : game.Id;
+            dto.ReconnectToken = player.ReconnectToken;
+        }
+        return dto;
+    }
+
+    public static ResponseObjectDto<ActiveMatchCheckResponseDto> GetActiveMatchCheckResponseDto(
+        Game? game,
+        long playerId,
+        int remainingGraceSeconds)
+    {
+        if (game is null)
+        {
+            return new ResponseObjectDto<ActiveMatchCheckResponseDto>
+            {
+                OkResult = true,
+                Object = new ActiveMatchCheckResponseDto
+                {
+                    HasActiveMatch = false,
+                    PlayerId = playerId,
+                    RemainingGraceSeconds = 0
+                }
+            };
+        }
+
+        return new ResponseObjectDto<ActiveMatchCheckResponseDto>
+        {
+            OkResult = true,
+            Object = new ActiveMatchCheckResponseDto
+            {
+                HasActiveMatch = true,
+                MatchId = game.Id,
+                LobbyId = game.LobbyId > 0 ? game.LobbyId : game.Id,
+                PlayerId = playerId,
+                RemainingGraceSeconds = remainingGraceSeconds,
+                MatchFormat = game.MatchFormat,
+                TableStyle = game.TableStyle,
+                MatchTitle = game.MatchTitle
+            }
+        };
+    }
+
+    public static ResponseObjectDto<RejoinMatchSnapshotDto> GetRejoinMatchSnapshotDto(
+        Game game,
+        GamePlayer player,
+        Guid authToken)
+    {
+        return new ResponseObjectDto<RejoinMatchSnapshotDto>
+        {
+            OkResult = true,
+            Object = new RejoinMatchSnapshotDto
+            {
+                MatchId = game.Id,
+                LobbyId = game.LobbyId > 0 ? game.LobbyId : game.Id,
+                PlayerId = player.Id,
+                ReconnectToken = player.ReconnectToken,
+                AuthToken = authToken.ToString(),
+                User = new UserDto
+                {
+                    Id = player.Id,
+                    Login = player.Login,
+                    Email = player.Email,
+                    Score = player.Score,
+                    BirthDate = player.Birthdate.ToString(Constants.ShortFormatDate),
+                    DateSignup = player.DateSignup.ToString(Constants.LongFormatDate),
+                    Nationality = player.Nationality
+                },
+                MatchTitle = game.MatchTitle,
+                MatchFormat = game.MatchFormat,
+                TableStyle = game.TableStyle,
+                OneOnePlayoff = game.OneOnePlayoff,
+                HandNumber = game.HandNumber,
+                CurrentTurnPlayerId = game.PlayerPlaying.Id,
+                TurnTimer = GetTimerDto(game.PlayerTurnTimer),
+                IsAutoPassTurn = game.IsCurrentPlayerAutoPassTurn(),
+                BoardMoves = game.MoveHistory.MoveHistory.Select(m => new MoveDto
+                {
+                    Domino = new DominoDto { Side1 = m.Domino.Side1, Side2 = m.Domino.Side2 },
+                    Row = m.Row,
+                    Col = m.Col,
+                    Orientation = m.Orientation,
+                    PlayerId = m.PlayerId
+                }).ToList(),
+                Hand = player.Hand.Select(d => new DominoDto { Side1 = d.Side1, Side2 = d.Side2 }).ToList(),
+                PossibleMoves = game.PlayerPlaying.Id == player.Id ? GetPlayerPossibleMovesDto(game) : null,
+                NumberOfDominoPerPlayer = game.GetNumberOfDominoAllPlayer(),
+                TeamScores = new Dictionary<int, int>(game.TeamScores),
+                PlayerScores = new Dictionary<long, int>(game.PlayerScores),
+                Players = game.Players.Select(p => new PlayerDto
+                {
+                    Id = p.Id,
+                    Name = p.Login,
+                    Elo = p.Score
+                }).ToList()
+            }
         };
     }
 

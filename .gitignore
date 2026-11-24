@@ -401,3 +401,13 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Unity / Android Build Artifacts & Signing Keys
+**/Builds/
+**/RoatanDomino_Keystore/
+*.apk
+*.aab
+*.keystore
+*.jks
+.roatan-keystore.env
+KEYSTORE_BACKUP_KEEP_SAFE.txt

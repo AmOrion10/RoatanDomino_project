@@ -55,9 +55,14 @@ ExportedObj/
 # Unity3D generated file on crash reports
 sysinfo.txt
 
-# Builds
+# Builds & Signing Keys
 *.apk
 *.aab
+*.keystore
+*.jks
+**/RoatanDomino_Keystore/
+.roatan-keystore.env
+KEYSTORE_BACKUP_KEEP_SAFE.txt
 *.unitypackage
 *.app
 

@@ -12,6 +12,10 @@ public static class RoatanVisualAssets
     public static Sprite WoodFrameSprite { get; private set; }
     public static Sprite DominoBackSprite { get; private set; }
     public static Sprite GlowSlotSprite { get; private set; }
+    public static Sprite ShockwaveRingSprite { get; private set; }
+    public static Sprite RoatanIslandMapSprite { get; private set; }
+    public static Sprite SunsetReefGlowSprite { get; private set; }
+    public static Sprite CoconutPalmSprite { get; private set; }
 
     private static readonly Dictionary<string, Sprite> DominoFaceCache = new Dictionary<string, Sprite>();
 
@@ -21,6 +25,7 @@ public static class RoatanVisualAssets
     public static readonly Color WarmTeak = new Color(0.36f, 0.20f, 0.10f, 1f);
     public static readonly Color RichMahogany = new Color(0.24f, 0.13f, 0.06f, 1f);
     public static readonly Color IslandGold = new Color(0.95f, 0.74f, 0.24f, 1f);
+    public static readonly Color AmberHighlight = new Color(0.95f, 0.62f, 0.12f, 1f);
     public static readonly Color SunsetCoral = new Color(0.91f, 0.38f, 0.28f, 1f);
     public static readonly Color PalmGreen = new Color(0.14f, 0.66f, 0.39f, 1f);
     public static readonly Color IvoryTile = new Color(0.98f, 0.96f, 0.91f, 1f);
@@ -38,6 +43,10 @@ public static class RoatanVisualAssets
         WoodFrameSprite = CreateWoodStripSprite(128, 128);
         DominoBackSprite = CreateDominoBackSprite(128, 256);
         GlowSlotSprite = CreateGlowSlotSprite(128, 256);
+        ShockwaveRingSprite = CreateShockwaveRingSprite(192);
+        RoatanIslandMapSprite = LoadOrCreateRoatanIslandMapSprite();
+        SunsetReefGlowSprite = CreateSunsetReefGlowSprite(512, 256);
+        CoconutPalmSprite = CreateCoconutPalmSprite(256, 256);
     }
 
     public static Sprite GetDominoSprite(int topPip, int bottomPip)
@@ -114,6 +123,38 @@ public static class RoatanVisualAssets
                 float dist = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
                 float alpha = Mathf.Clamp01(r - dist + 1f);
                 pixels[y * size + x] = new Color(color.r, color.g, color.b, alpha);
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    private static Sprite CreateShockwaveRingSprite(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        Color[] pixels = new Color[size * size];
+        float c = (size - 1) * 0.5f;
+        float maxR = c - 2f;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dist = Vector2.Distance(new Vector2(x, y), new Vector2(c, c)) / maxR;
+                if (dist > 1f)
+                {
+                    pixels[y * size + x] = Color.clear;
+                    continue;
+                }
+
+                // Crisp outer shockwave ring + softer inner dust ripple
+                float outerRing = Mathf.Exp(-Mathf.Pow((dist - 0.84f) / 0.11f, 2f));
+                float innerRipple = Mathf.Exp(-Mathf.Pow((dist - 0.52f) / 0.18f, 2f)) * 0.42f;
+                float alpha = Mathf.Clamp01(outerRing * 0.92f + innerRipple);
+                pixels[y * size + x] = new Color(1f, 0.96f, 0.84f, alpha);
             }
         }
 
@@ -392,5 +433,197 @@ public static class RoatanVisualAssets
         float py = Mathf.Abs(y - (halfH - 0.5f)) - (halfH - r);
         float dist = Mathf.Sqrt(Mathf.Max(px, 0f) * Mathf.Max(px, 0f) + Mathf.Max(py, 0f) * Mathf.Max(py, 0f)) + Mathf.Min(Mathf.Max(px, py), 0f) - r;
         return Mathf.Clamp01(0.5f - dist);
+    }
+
+    private static Sprite LoadOrCreateRoatanIslandMapSprite()
+    {
+        Sprite loaded = Resources.Load<Sprite>("Images/roatan_islandmap");
+        if (loaded != null)
+        {
+            return loaded;
+        }
+
+        Texture2D tex = Resources.Load<Texture2D>("Images/roatan_islandmap");
+        if (tex != null)
+        {
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        // Procedural fallback silhouette resembling Roatan + Morat & Barbareta cays
+        const int w = 512;
+        const int h = 192;
+        Texture2D fallback = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        fallback.filterMode = FilterMode.Bilinear;
+        Color[] pixels = new Color[w * h];
+
+        for (int y = 0; y < h; y++)
+        {
+            float ny = (float)y / (h - 1);
+            for (int x = 0; x < w; x++)
+            {
+                float nx = (float)x / (w - 1);
+                float alpha = 0f;
+
+                // Main Roatan island arc (SW West End -> NE Oak Ridge / Camp Bay)
+                if (nx >= 0.03f && nx <= 0.83f)
+                {
+                    float u = (nx - 0.03f) / 0.80f;
+                    float spineY = 0.14f + 0.72f * Mathf.Sin(u * Mathf.PI * 0.62f) + 0.04f * Mathf.Sin(u * 14f);
+                    float halfThick = (0.04f + 0.095f * Mathf.Sin(u * Mathf.PI)) * (0.85f + 0.15f * Mathf.Cos(u * 18f));
+                    float d = Mathf.Abs(ny - spineY);
+                    alpha = Mathf.Max(alpha, Mathf.Clamp01((halfThick - d) * 32f));
+                }
+
+                // Morat & Barbareta cays at the eastern tip
+                float dMorat = Vector2.Distance(new Vector2((nx - 0.875f) * 2.5f, ny - 0.80f), Vector2.zero);
+                alpha = Mathf.Max(alpha, Mathf.Clamp01((0.038f - dMorat) * 40f));
+
+                float dBarbareta = Vector2.Distance(new Vector2((nx - 0.945f) * 1.4f, (ny - 0.86f) * 1.8f), Vector2.zero);
+                alpha = Mathf.Max(alpha, Mathf.Clamp01((0.068f - dBarbareta) * 35f));
+
+                pixels[y * w + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+
+        fallback.SetPixels(pixels);
+        fallback.Apply();
+        return Sprite.Create(fallback, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    private static Sprite CreateSunsetReefGlowSprite(int w, int h)
+    {
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        Color[] pixels = new Color[w * h];
+
+        Color warmGold = new Color(0.97f, 0.77f, 0.28f, 1f);
+        Color reefTeal = new Color(0.10f, 0.74f, 0.72f, 1f);
+
+        for (int y = 0; y < h; y++)
+        {
+            float ny = (float)y / (h - 1);
+            for (int x = 0; x < w; x++)
+            {
+                float nx = (float)x / (w - 1);
+
+                // Warm golden sunset halo slightly above center
+                float dxG = (nx - 0.50f) * 1.45f;
+                float dyG = (ny - 0.58f) * 1.65f;
+                float distG = Mathf.Sqrt(dxG * dxG + dyG * dyG);
+                float goldGlow = Mathf.Pow(Mathf.Clamp01(1f - distG * 1.35f), 2.1f) * 0.42f;
+
+                // Broad Caribbean reef-turquoise elliptical glow across the island span
+                float dxT = (nx - 0.50f) * 1.08f;
+                float dyT = (ny - 0.48f) * 1.60f;
+                float distT = Mathf.Sqrt(dxT * dxT + dyT * dyT);
+                float tealGlow = Mathf.Pow(Mathf.Clamp01(1f - distT * 1.12f), 1.75f) * 0.48f;
+
+                float totalA = Mathf.Clamp01(goldGlow + tealGlow);
+                Color c = totalA > 0.001f
+                    ? Color.Lerp(reefTeal, warmGold, goldGlow / (goldGlow + tealGlow + 0.0001f))
+                    : Color.clear;
+
+                pixels[y * w + x] = new Color(c.r, c.g, c.b, totalA);
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    private static Sprite CreateCoconutPalmSprite(int w, int h)
+    {
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        float[] alphaBuf = new float[w * h];
+
+        // 1. Curved tapering palm trunk (quadratic Bezier from bottom-left-center curving right to crown)
+        Vector2 p0 = new Vector2(w * 0.42f, h * 0.02f);
+        Vector2 p1 = new Vector2(w * 0.40f, h * 0.46f);
+        Vector2 p2 = new Vector2(w * 0.56f, h * 0.72f);
+
+        const int trunkSteps = 90;
+        for (int s = 0; s <= trunkSteps; s++)
+        {
+            float t = s / (float)trunkSteps;
+            float inv = 1f - t;
+            Vector2 pt = inv * inv * p0 + 2f * inv * t * p1 + t * t * p2;
+            float radius = Mathf.Lerp(10.5f, 4.2f, t);
+            StampSoftDisc(alphaBuf, w, h, pt, radius);
+        }
+
+        // 2. Three small coconuts clustered directly under the crown
+        StampSoftDisc(alphaBuf, w, h, p2 + new Vector2(-6f, -6f), 5.8f);
+        StampSoftDisc(alphaBuf, w, h, p2 + new Vector2(5f, -7f), 5.6f);
+        StampSoftDisc(alphaBuf, w, h, p2 + new Vector2(0f, -11f), 5.4f);
+
+        // 3. Seven arched, drooping tropical palm fronds with serrated hanging leaflets
+        float[] frondAnglesDeg = { 165f, 138f, 108f, 75f, 44f, 14f, -16f };
+        float[] frondLengths = { 86f, 94f, 84f, 76f, 88f, 92f, 78f };
+        float[] frondDroop = { 46f, 34f, 22f, 20f, 32f, 44f, 48f };
+
+        for (int f = 0; f < frondAnglesDeg.Length; f++)
+        {
+            float rad = frondAnglesDeg[f] * Mathf.Deg2Rad;
+            Vector2 dir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+            Vector2 end = p2 + dir * frondLengths[f] + new Vector2(0f, -frondDroop[f]);
+            Vector2 ctrl = p2 + dir * (frondLengths[f] * 0.55f) + new Vector2(0f, frondDroop[f] * 0.35f);
+
+            const int steps = 42;
+            for (int s = 0; s <= steps; s++)
+            {
+                float t = s / (float)steps;
+                float inv = 1f - t;
+                Vector2 spine = inv * inv * p2 + 2f * inv * t * ctrl + t * t * end;
+                float spineWidth = Mathf.Lerp(3.6f, 1.4f, t);
+                StampSoftDisc(alphaBuf, w, h, spine, spineWidth);
+
+                // Hanging serrated palm leaflets along frond body
+                if (s > 3 && s < steps - 1 && (s % 2 == 0))
+                {
+                    float leafLen = Mathf.Sin(t * Mathf.PI) * 20f;
+                    Vector2 leafDir = new Vector2(dir.x * 0.25f, -1f).normalized;
+                    for (int k = 1; k <= 5; k++)
+                    {
+                        float lt = k / 5f;
+                        Vector2 lpt = spine + leafDir * (leafLen * lt);
+                        StampSoftDisc(alphaBuf, w, h, lpt, Mathf.Lerp(2.5f, 0.9f, lt));
+                    }
+                }
+            }
+        }
+
+        Color[] pixels = new Color[w * h];
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            pixels[i] = new Color(1f, 1f, 1f, Mathf.Clamp01(alphaBuf[i]));
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    private static void StampSoftDisc(float[] alphaBuf, int w, int h, Vector2 center, float radius)
+    {
+        int minX = Mathf.Max(0, Mathf.FloorToInt(center.x - radius - 1.5f));
+        int maxX = Mathf.Min(w - 1, Mathf.CeilToInt(center.x + radius + 1.5f));
+        int minY = Mathf.Max(0, Mathf.FloorToInt(center.y - radius - 1.5f));
+        int maxY = Mathf.Min(h - 1, Mathf.CeilToInt(center.y + radius + 1.5f));
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            int row = y * w;
+            for (int x = minX; x <= maxX; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), center);
+                float a = Mathf.Clamp01(radius - d + 0.9f);
+                if (a > alphaBuf[row + x])
+                {
+                    alphaBuf[row + x] = a;
+                }
+            }
+        }
     }
 }

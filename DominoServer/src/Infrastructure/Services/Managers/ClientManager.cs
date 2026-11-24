@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
 using Application.Messages.Commands.User;
@@ -112,7 +112,7 @@ public class ClientManager(IServiceScopeFactory serviceScopeFactory, ITokenManag
             }
         }
 
-        await clientDisconnectionManager.ProcessDisconnection(await dispatcher.Dispatch(new LogoutUserCommand(client)));
+        await clientDisconnectionManager.ProcessDisconnection(await dispatcher.Dispatch(new LogoutUserCommand(client, isSocketDrop: true)));
 
         lock (clients)
         {

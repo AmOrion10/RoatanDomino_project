@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+
+using DominoCommon.com.domino.common.Scripts.Enums;
 
 using Newtonsoft.Json;
 
@@ -29,5 +31,14 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "co")]
         public string Code { get; set; } // Can be null
+
+        [JsonProperty(PropertyName = "ts", NullValueHandling = NullValueHandling.Ignore)]
+        public TableStyle? TableStyle { get; set; }
+
+        [JsonProperty(PropertyName = "mf", NullValueHandling = NullValueHandling.Ignore)]
+        public MatchFormat? MatchFormat { get; set; }
+
+        [JsonProperty(PropertyName = "oop", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? OneOnePlayoff { get; set; }
     }
 }

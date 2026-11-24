@@ -1,10 +1,11 @@
-﻿using Domain;
+using Domain;
+using DominoCommon.com.domino.common.Scripts.Enums;
 
 namespace Application.Interfaces.Managers;
 
 public interface ILobbyManager
 {
-    Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null);
+    Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null, bool? oneOnePlayoff = null);
     void AddPlayerToLobby(IClient player, int lobbyId);
     void RemovePlayerFromLobby(IClient player, int lobbyId);
     void ReadyPlayerStateChange(IClient player, int lobbyId);

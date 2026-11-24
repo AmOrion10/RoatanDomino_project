@@ -1,4 +1,4 @@
-﻿using DominoCommon.com.domino.common.Scripts.ExtensionMethods;
+using DominoCommon.com.domino.common.Scripts.ExtensionMethods;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
@@ -153,5 +153,14 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame ResetPasswordFrame(ResetPasswordDto dto)
             => new MessageFrame(FrameCommandType.ResetPassword, dto.ToJson());
+
+        public static MessageFrame CheckActiveMatchFrame(RejoinSessionRequestDto dto)
+            => new MessageFrame(FrameCommandType.CheckActiveMatch, dto.ToJson());
+
+        public static MessageFrame RejoinMatchFrame(RejoinSessionRequestDto dto)
+            => new MessageFrame(FrameCommandType.RejoinMatch, dto.ToJson());
+
+        public static MessageFrame AbandonMatchFrame(RejoinSessionRequestDto dto)
+            => new MessageFrame(FrameCommandType.AbandonMatch, dto.ToJson());
     }
 }

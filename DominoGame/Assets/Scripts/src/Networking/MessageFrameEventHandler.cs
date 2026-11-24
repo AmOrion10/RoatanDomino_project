@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
@@ -38,6 +38,9 @@ public class MessageFrameEventHandler
     public event Action<ResponseDto> SendFriendRequestResponseEvent;
     public event Action<ResponseObjectDto<AllHistoryGamesDto>> GetAllHistoryGamesResponseEvent;
     public event Action<ResponseDto> UpdatePasswordResponseEvent;
+    public event Action<ResponseObjectDto<ActiveMatchCheckResponseDto>> CheckActiveMatchResponseEvent;
+    public event Action<ResponseObjectDto<RejoinMatchSnapshotDto>> RejoinMatchResponseEvent;
+    public event Action<ResponseDto> AbandonMatchResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -119,6 +122,15 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.UpdatePassword:
                 UpdatePasswordResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.CheckActiveMatch:
+                CheckActiveMatchResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ActiveMatchCheckResponseDto>>());
+                break;
+            case FrameCommandType.RejoinMatch:
+                RejoinMatchResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<RejoinMatchSnapshotDto>>());
+                break;
+            case FrameCommandType.AbandonMatch:
+                AbandonMatchResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
                 break;
         }
 

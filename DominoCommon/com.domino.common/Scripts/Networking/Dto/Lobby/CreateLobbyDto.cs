@@ -1,4 +1,6 @@
-﻿using Newtonsoft.Json;
+using DominoCommon.com.domino.common.Scripts.Enums;
+
+using Newtonsoft.Json;
 
 namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 {
@@ -11,6 +13,15 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
         public int MaxNumberOfPlayer { get; set; }
 
         [JsonProperty(PropertyName = "p")]
-        public bool Public { get; set; } 
+        public bool Public { get; set; }
+
+        [JsonProperty(PropertyName = "ts", NullValueHandling = NullValueHandling.Ignore)]
+        public TableStyle? TableStyle { get; set; }
+
+        [JsonProperty(PropertyName = "mf", NullValueHandling = NullValueHandling.Ignore)]
+        public MatchFormat? MatchFormat { get; set; }
+
+        [JsonProperty(PropertyName = "oop", NullValueHandling = NullValueHandling.Ignore)]
+        public bool? OneOnePlayoff { get; set; }
     }
 }
