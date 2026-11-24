@@ -12,6 +12,7 @@ public class GamePlayer(User user) : User(user)
     public bool IsBotControlled { get; set; }
     public bool IsDisconnected { get; set; }
     public bool IsPermanentlyBot { get; set; }
+    public string? BotDifficulty { get; set; }
     public double DisconnectGraceRemainingSeconds { get; set; }
     public string ReconnectToken { get; set; } = string.Empty;
     public DateTime? DisconnectedAtUtc { get; set; }

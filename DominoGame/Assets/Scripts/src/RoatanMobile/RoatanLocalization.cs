@@ -119,12 +119,14 @@ public static class RoatanLocalization
         ["create_account"] = new[] { "Create Account", "Crear Cuenta", "Créer un Compte", "Konto Erstellen" },
         ["sign_out"] = new[] { "Sign Out", "Salir", "Déconnexion", "Abmelden" },
         ["quick_ranked"] = new[] { "Quick Ranked Match", "Partida Clasificatoria", "Partie Classée Rapide", "Schnelles Ranglistenspiel" },
-        ["create_lobby"] = new[] { "Create Lobby", "Crear Sala", "Créer un Salon", "Lobby Erstellen" },
-        ["join_code"] = new[] { "Join Code", "Unirse con Código", "Code Salon", "Mit Code Beitreten" },
-        ["refresh_lobbies"] = new[] { "Refresh Lobbies", "Actualizar Salas", "Actualiser", "Aktualisieren" },
+        ["create_lobby"] = new[] { "Create Table", "Crear Mesa", "Créer une Table", "Tisch Erstellen" },
+        ["join_code"] = new[] { "Join Code", "Unirse con Código", "Code Table", "Mit Code Beitreten" },
+        ["refresh_lobbies"] = new[] { "Refresh Tables", "Actualizar Mesas", "Actualiser Tables", "Tische Aktualisieren" },
         ["ready"] = new[] { "Ready", "Listo", "Prêt", "Bereit" },
         ["not_ready"] = new[] { "Not Ready", "No Listo", "Pas Prêt", "Nicht Bereit" },
-        ["leave_lobby"] = new[] { "Leave Lobby", "Salir de Sala", "Quitter le Salon", "Lobby Verlassen" }
+        ["leave_lobby"] = new[] { "Leave Table", "Salir de Mesa", "Quitter la Table", "Tisch Verlassen" },
+        ["table_full"] = new[] { "Table Full", "Mesa Llena", "Table Pleine", "Tisch Voll" },
+        ["private_table_code"] = new[] { "Private Table Code", "Código de Mesa Privada", "Code de Table Privée", "Privater Tischcode" }
     };
 
     public static void Initialize()

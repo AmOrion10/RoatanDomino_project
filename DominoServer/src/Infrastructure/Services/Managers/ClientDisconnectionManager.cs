@@ -1,4 +1,4 @@
-﻿using Application;
+using Application;
 using Application.Common;
 using Application.Interfaces;
 using Application.Messages.Queries.Lobby;
@@ -8,7 +8,7 @@ using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
 namespace Infrastructure.Services.Managers;
 
-public class ClientDisconnectionManager(IMessageDispatcher dispatcher)
+public class ClientDisconnectionManager(IMessageDispatcher dispatcher, PresenceService presenceService)
 {
     public async Task ProcessDisconnection(DisconnectionResult disconnectionResult)
     {
@@ -21,6 +21,8 @@ public class ClientDisconnectionManager(IMessageDispatcher dispatcher)
         {
             await SendPlayerGameLeftToAllClientsInGame(disconnectionResult);
         }
+
+        await presenceService.BroadcastRosterAsync();
     }
 
     private async Task SendPlayerGameLeftToAllClientsInGame(DisconnectionResult disconnectionResult)

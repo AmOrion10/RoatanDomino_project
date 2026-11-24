@@ -1,27 +1,27 @@
-﻿Feature: Logging
+Feature: Logging
 
 Scenario: Un client se connecte avec les bons identifiants
 	Given Un client d'id 1 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	When Le client 1 demande à se connecter avec les bons identifiants
 	Then Le client 1 est connecté
 	And Le client 1 reçoit son token et son utilisateur
 
 Scenario: Un client se connecte avec un login inconnu
 	Given Un client d'id 1 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	When Le client 1 demande à se connecter avec un login inconnu
 	Then Le client 1 reçoit une erreur de type "UserNotFound"
 
 Scenario: Un client se connecte avec un mauvais mot de passe
 	Given Un client d'id 1 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	When Le client 1 demande à se connecter avec un mauvais mot de passe
 	Then Le client 1 reçoit une erreur de type "WrongLoggingOrPassword"
 
 Scenario: Un client se connecte deux fois
 	Given Un client d'id 1 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	And Le client 1 est logged in
 	When Le client 1 demande à se connecter avec les bons identifiants
 	Then Le client 1 reçoit une erreur de type "UserAlreadyLoggedIn"
@@ -29,14 +29,14 @@ Scenario: Un client se connecte deux fois
 Scenario: Deux clients essaye de se connecter au même compte
 	Given Un client d'id 1 connecté au serveur
 	And Un client d'id 9 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	And Le client 1 est logged in
 	When Le client 9 demande à se connecter avec les bons identifiants
 	Then Le client 9 reçoit une erreur de type "UserAlreadyLoggedIn"
 
 Scenario: Un client se déconnecte
 	Given Un client d'id 1 connecté au serveur
-	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "password8"
+	And Un client inscrit avec l'email "test@test.com", le login "test" et le mdp "Password8"
 	And Le client 1 est logged in
 	When Le client 1 demande à se déconnecter
 	Then Le client 1 est déconnecté

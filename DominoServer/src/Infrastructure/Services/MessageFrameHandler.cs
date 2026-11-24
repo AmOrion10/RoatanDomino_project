@@ -1,4 +1,4 @@
-﻿using Application.Exceptions;
+using Application.Exceptions;
 using Application.Exceptions.Connection;
 using Application.Interfaces;
 
@@ -55,7 +55,8 @@ public class MessageFrameHandler(ILogger<MessageFrameHandler> logger) : IMessage
         ResponseDto dto = new()
         {
             OkResult = false,
-            ErrorType = exception.ToErrorType()
+            ErrorType = exception.ToErrorType(),
+            ErrorMessage = exception.Message
         };
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(dto, sendedCommandType)));
     }

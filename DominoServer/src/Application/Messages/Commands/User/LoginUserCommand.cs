@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Exceptions.Connection;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
@@ -25,17 +25,20 @@ public class LoginUserCommandHandler(IUserRepository userRepository, IClientMana
             throw new ClientAlreadyLoggedInException("Client is already logged in");
         }
 
-        if (!await userRepository.ExistsByLogin(request.Login))
+        bool existsByLogin = await userRepository.ExistsByLogin(request.Login);
+        bool existsByEmail = !existsByLogin && await userRepository.ExistsByEmail(request.Login);
+        if (!existsByLogin && !existsByEmail)
         {
-            throw new UserNotExistingException("No user with this login exists");
+            throw new UserNotExistingException("No account found with that username or email.");
         }
 
-        if (AnotherClientIsLoggedInWithTheSameIdentifiers(request))
-        {
-            throw new ClientAlreadyLoggedInException("Another client is already logged in with the same identifiers");
-        }
+        User user = await userRepository.Login(request.Login, request.Password)
+            ?? throw new WrongPasswordException("Incorrect password. Please try again.");
 
-        User user = await userRepository.Login(request.Login, request.Password) ?? throw new WrongPasswordException("The password for the user is not correct");
+        if (AnotherClientIsLoggedInWithTheSameUser(request.Client.Id, user.Login))
+        {
+            throw new ClientAlreadyLoggedInException("This account is already signed in on another device.");
+        }
 
         Guid guid = tokenManager.GenerateTokenForClient(request.Client);
         request.Client.User = user;
@@ -46,12 +49,12 @@ public class LoginUserCommandHandler(IUserRepository userRepository, IClientMana
         return new Tuple<User, Guid>(user, guid);
     }
 
-    private bool AnotherClientIsLoggedInWithTheSameIdentifiers(LoginUserCommand request)
+    private bool AnotherClientIsLoggedInWithTheSameUser(int currentClientId, string login)
     {
         List<IClient> clients = clientManager.GetAllClients();
         foreach (IClient client in clients)
         {
-            if (client.Id == request.Client.Id || !client.IsLoggedIn || !client.User!.Login.Equals(request.Login))
+            if (client.Id == currentClientId || !client.IsLoggedIn || client.User is null || !client.User.Login.Equals(login, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

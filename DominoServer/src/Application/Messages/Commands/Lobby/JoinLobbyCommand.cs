@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Exceptions.Lobby;
 using Application.Exceptions.Player;
 using Application.Interfaces;
@@ -27,7 +27,7 @@ public class JoinLobbyCommandHandler(ILobbyManager lobbyManager) : ICommandHandl
         
         if (lobbyManager.MaxNumberOfPlayerReached(request.LobbyIdToJoin))
         {
-            throw new MaxNumberOfPlayerReachedException("The limit of player in the lobby has been reached");
+            throw new MaxNumberOfPlayerReachedException($"This table is full ({lobby.PlayersInLobby.Count}/{lobby.MaxNumberOfPlayer} players).");
         }
 
         lobbyManager.AddPlayerToLobby(request.JoiningPlayer, request.LobbyIdToJoin);

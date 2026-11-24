@@ -162,5 +162,35 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame AbandonMatchFrame(RejoinSessionRequestDto dto)
             => new MessageFrame(FrameCommandType.AbandonMatch, dto.ToJson());
+
+        public static MessageFrame SocialAuthFrame(SocialAuthDto dto)
+            => new MessageFrame(FrameCommandType.SocialAuth, dto.ToJson());
+
+        public static MessageFrame GetPlayerRosterFrame()
+            => new MessageFrame(FrameCommandType.GetPlayerRoster, string.Empty);
+
+        public static MessageFrame PlayerRosterUpdatedFrame(PlayerRosterDto dto)
+            => new MessageFrame(FrameCommandType.PlayerRosterUpdated, dto.ToJson());
+
+        public static MessageFrame SendTableInviteFrame(TableInviteDto dto)
+            => new MessageFrame(FrameCommandType.SendTableInvite, dto.ToJson());
+
+        public static MessageFrame TableInviteReceivedFrame(TableInviteDto dto)
+            => new MessageFrame(FrameCommandType.TableInviteReceived, dto.ToJson());
+
+        public static MessageFrame SwitchTableSeatFrame(SwitchTableSeatDto dto)
+            => new MessageFrame(FrameCommandType.SwitchTableSeat, dto.ToJson());
+
+        public static MessageFrame AddTableBotFrame(AddTableBotDto dto)
+            => new MessageFrame(FrameCommandType.AddTableBot, dto.ToJson());
+
+        public static MessageFrame RemoveTableBotFrame(RemoveTableBotDto dto)
+            => new MessageFrame(FrameCommandType.RemoveTableBot, dto.ToJson());
+
+        public static MessageFrame StartTableMatchFrame()
+            => new MessageFrame(FrameCommandType.StartTableMatch, string.Empty);
+
+        public static MessageFrame TableStateUpdatedFrame(LobbyDto dto)
+            => new MessageFrame(FrameCommandType.TableStateUpdated, dto.ToJson());
     }
 }

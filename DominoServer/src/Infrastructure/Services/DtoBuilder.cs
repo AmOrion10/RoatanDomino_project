@@ -17,34 +17,71 @@ namespace Infrastructure.Services;
 
 public static class DtoBuilder
 {
+    public static LobbyDto GetLobbyDtoObject(Lobby lobby)
+    {
+        List<LobbyPlayer> ordered = lobby.GetSeatedPlayersOrdered();
+        List<LobbySeatDto> seats = [];
+        for (int i = 0; i < lobby.MaxNumberOfPlayer; i++)
+        {
+            LobbyPlayer? occupant = lobby.GetPlayerAtSeat(i);
+            seats.Add(new LobbySeatDto
+            {
+                SeatIndex = i,
+                IsOccupied = occupant is not null,
+                IsBot = occupant?.IsBot ?? false,
+                BotDifficulty = occupant?.BotDifficulty,
+                IsReady = occupant?.IsReady ?? false,
+                Player = occupant is null ? null : new PlayerDto
+                {
+                    Id = occupant.Id,
+                    Name = occupant.Login,
+                    Elo = occupant.Score,
+                    IsBot = occupant.IsBot,
+                    BotDifficulty = occupant.BotDifficulty,
+                    SeatIndex = occupant.SeatIndex
+                }
+            });
+        }
+
+        return new LobbyDto
+        {
+            Creator = new PlayerDto
+            {
+                Id = lobby.Creator.Id,
+                Name = lobby.Creator.Login,
+                Elo = lobby.Creator.Score,
+                IsBot = lobby.Creator.IsBot,
+                BotDifficulty = lobby.Creator.BotDifficulty,
+                SeatIndex = lobby.Creator.SeatIndex
+            },
+            Players = ordered.Select(p => new PlayerDto
+            {
+                Id = p.Id,
+                Name = p.Login,
+                Elo = p.Score,
+                IsBot = p.IsBot,
+                BotDifficulty = p.BotDifficulty,
+                SeatIndex = p.SeatIndex
+            }).ToList(),
+            Seats = seats,
+            Id = lobby.Id,
+            Name = lobby.Name,
+            IsPublic = lobby.IsPublic,
+            MaxNumberOfPlayer = lobby.MaxNumberOfPlayer,
+            Ranked = lobby.Ranked,
+            Code = lobby.Code,
+            TableStyle = lobby.TableStyle,
+            MatchFormat = lobby.MatchFormat,
+            OneOnePlayoff = lobby.OneOnePlayoff,
+            IsHouseTable = lobby.IsHouseTable
+        };
+    }
+
     public static ResponseObjectDto<LobbyDto> GetLobbyDto(Lobby lobby)
     {
         return new ResponseObjectDto<LobbyDto>
         {
-            Object = new LobbyDto
-            {
-                Creator = new PlayerDto
-                {
-                    Id = lobby.Creator.Id,
-                    Name = lobby.Creator.Login,
-                    Elo = lobby.Creator.Score
-                },
-                Players = lobby.PlayersInLobby.Select(p => new PlayerDto
-                {
-                    Id = p.Id,
-                    Name = p.Login,
-                    Elo = p.Score
-                }).ToList(),
-                Id = lobby.Id,
-                Name = lobby.Name,
-                IsPublic = lobby.IsPublic,
-                MaxNumberOfPlayer = lobby.MaxNumberOfPlayer,
-                Ranked = lobby.Ranked,
-                Code = lobby.Code,
-                TableStyle = lobby.TableStyle,
-                MatchFormat = lobby.MatchFormat,
-                OneOnePlayoff = lobby.OneOnePlayoff
-            }
+            Object = GetLobbyDtoObject(lobby)
         };
     }
 
@@ -100,7 +137,11 @@ public static class DtoBuilder
                     IsPublic = l.IsPublic,
                     TableStyle = l.TableStyle,
                     MatchFormat = l.MatchFormat,
-                    OneOnePlayoff = l.OneOnePlayoff
+                    OneOnePlayoff = l.OneOnePlayoff,
+                    IsHouseTable = l.IsHouseTable,
+                    SeatedPlayers = l.GetSeatedPlayersOrdered()
+                        .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
+                        .ToList()
                 }).ToList()
             }
         };

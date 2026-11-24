@@ -1,4 +1,4 @@
-﻿using Domain;
+using Domain;
 using Domain.Game;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
@@ -82,6 +82,18 @@ public class DatabaseTests : IDisposable
     [Fact]
     public async Task SuccessSaveGame()
     {
+        if (!await dbContext.Dominos.AnyAsync())
+        {
+            for (short i = 0; i < 7; i++)
+            {
+                for (short j = i; j < 7; j++)
+                {
+                    await dbContext.Dominos.AddAsync(new DominoEntity { Side1 = i, Side2 = j });
+                }
+            }
+            await dbContext.SaveChangesAsync();
+        }
+
         if (!await dbContext.Users.AnyAsync(u => u.Login.Equals(UserLogin1) || u.Login.Equals(UserLogin2)))
         {
             List<UserEntity> userEntities = Users();
@@ -119,6 +131,7 @@ public class DatabaseTests : IDisposable
         Password = password,
         Email = email,
         Birthdate = birthdate,
+        DateSignup = DateTime.UtcNow,
         NationalityId = nationalityId
     };
 

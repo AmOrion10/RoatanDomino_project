@@ -194,6 +194,7 @@ public class Client : IClient
         switch (frame.SubCommandType)
         {
             case FrameCommandType.Connection:
+            case FrameCommandType.SocialAuth:
                 SetUser(frame);
                 break;
             case FrameCommandType.GetAllFriends:

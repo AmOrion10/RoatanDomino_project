@@ -1,4 +1,4 @@
-﻿using Domain;
+using Domain;
 using Domain.Game;
 
 namespace Application.Interfaces.Repositories;
@@ -22,4 +22,6 @@ public interface IUserRepository
     Task<int> GetNumberOfGameLostByUser(long id);
     Task ChangePassword(long id, string newPassword);
     Task<User?> GetByEmail(string email);
+    Task<List<User>> GetAllUsers();
+    Task<User> FindOrCreateSocialUser(string provider, string providerUserId, string? email, string? displayName);
 }

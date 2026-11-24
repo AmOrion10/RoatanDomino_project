@@ -2542,7 +2542,7 @@ public class RoatanMobileApp : MonoBehaviour
                     "<b>SIX-LOV (2v2 PARTNERS)</b>\n\n" +
                     "• <b>Goal:</b> First partnership to win <b>6 consecutive hands (6–0)</b> wins the match.\n\n" +
                     "• <b>Call Your Padna:</b> After winning a hand, choose <b>Pose Myself</b> or <b>Pass Pose to Padna</b> within 8 seconds. The chosen poser opens the next hand with any tile.\n\n" +
-                    "• <b>1-1 Playoff Toggle:</b> Optional lobby rule where a trailing win at 1–0 moves to 1–1; the winner of 1–1 jumps straight to 2–0.\n\n" +
+                    "• <b>1-1 Playoff Toggle:</b> Optional table rule where a trailing win at 1–0 moves to 1–1; the winner of 1–1 jumps straight to 2–0.\n\n" +
                     "• <b>Controls:</b> Tap a glowing tile to place, flick down or tap <b>SLAM</b> for a heavy table impact, and drag/pinch to pan or zoom.";
                 break;
             case "Two-Best":

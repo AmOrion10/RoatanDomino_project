@@ -632,7 +632,7 @@ public class Game
         List<GameMove> possibleMoves = GetPlayerPossibleMoves(actingPlayer);
         if (possibleMoves.Count > 0)
         {
-            GameMove chosen = ChooseBestAutoPlayMove(possibleMoves);
+            GameMove chosen = ChooseBotMoveByDifficulty(actingPlayer, possibleMoves);
             PlaceDomino(chosen, isAutomated: true);
             NextTurn();
             return (true, false, drawn, chosen);
@@ -761,6 +761,37 @@ public class Game
             .OrderByDescending(m => m.Domino.Side1 == m.Domino.Side2 ? 1 : 0)
             .ThenByDescending(m => m.Domino.SumOfSides())
             .First();
+    }
+
+    private static GameMove ChooseBotMoveByDifficulty(GamePlayer bot, List<GameMove> moves)
+    {
+        if (string.Equals(bot.BotDifficulty, "Novice", StringComparison.OrdinalIgnoreCase))
+        {
+            return moves
+                .OrderBy(m => m.Domino.SumOfSides())
+                .First();
+        }
+
+        if (string.Equals(bot.BotDifficulty, "Master", StringComparison.OrdinalIgnoreCase))
+        {
+            Dictionary<int, int> suitCounts = [];
+            foreach (Domino tile in bot.Hand)
+            {
+                suitCounts[tile.Side1] = suitCounts.GetValueOrDefault(tile.Side1) + 1;
+                if (tile.Side2 != tile.Side1)
+                {
+                    suitCounts[tile.Side2] = suitCounts.GetValueOrDefault(tile.Side2) + 1;
+                }
+            }
+
+            return moves
+                .OrderByDescending(m => m.Domino.Side1 == m.Domino.Side2 ? 1 : 0)
+                .ThenByDescending(m => suitCounts.GetValueOrDefault(m.Domino.Side1) + suitCounts.GetValueOrDefault(m.Domino.Side2))
+                .ThenByDescending(m => m.Domino.SumOfSides())
+                .First();
+        }
+
+        return ChooseBestAutoPlayMove(moves);
     }
 
     private (GamePlayer? player, Domino? domino) FindPlayerWithHighestDouble()

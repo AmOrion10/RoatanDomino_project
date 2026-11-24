@@ -2,8 +2,11 @@ using System.Net.WebSockets;
 
 using Application;
 using Application.Common;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
+
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 
 using Infrastructure;
 using Infrastructure.Database;
@@ -81,6 +84,10 @@ public class Program
         IClientManager clientManager = app.Services.GetRequiredService<IClientManager>();
         clientManager.ConfigureMaxClients(maxClients);
 
+        ILobbyManager lobbyManager = app.Services.GetRequiredService<ILobbyManager>();
+        lobbyManager.MaintainHouseTable = true;
+        lobbyManager.EnsureHouseTable();
+
         await SeedReferenceDataIfNeededAsync(app.Services, app.Logger);
 
         app.UseForwardedHeaders();
@@ -89,14 +96,42 @@ public class Program
             KeepAliveInterval = TimeSpan.FromSeconds(20)
         });
 
-        app.MapGet("/health", (IClientManager cm) => Results.Ok(new
+        app.MapGet("/health", (IClientManager cm, ILobbyManager lm) => Results.Ok(new
         {
             status = "ok",
             service = "DominoServer",
             clients = cm.GetAllClients().Count,
             maxClients,
+            openTables = lm.GetAllPublicLobbies().Count,
             utc = DateTime.UtcNow
         }));
+
+        app.MapPost("/auth/social", async (SocialAuthDto request, SocialAuthService socialAuth, CancellationToken ct) =>
+        {
+            try
+            {
+                Domain.User user = await socialAuth.AuthenticateProfileAsync(request, ct);
+                return Results.Ok(new
+                {
+                    ok = true,
+                    user = new
+                    {
+                        id = user.Id,
+                        username = user.Login,
+                        email = user.Email,
+                        elo = user.Score
+                    }
+                });
+            }
+            catch (BaseApplicationException ex)
+            {
+                return Results.BadRequest(new
+                {
+                    ok = false,
+                    error = ex.Message
+                });
+            }
+        });
 
         app.Map("/ws", async (HttpContext context, IClientManager cm, ILogger<WebSocketClient> wsLogger) =>
         {

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 using DominoCommon.com.domino.common.Scripts.Enums;
 
 using Newtonsoft.Json;
@@ -32,5 +34,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "oop", NullValueHandling = NullValueHandling.Ignore)]
         public bool? OneOnePlayoff { get; set; }
+
+        [JsonProperty(PropertyName = "sp", NullValueHandling = NullValueHandling.Ignore)]
+        public List<string> SeatedPlayers { get; set; } = new List<string>();
+
+        [JsonProperty(PropertyName = "ht", NullValueHandling = NullValueHandling.Ignore)]
+        public bool IsHouseTable { get; set; }
     }
 }

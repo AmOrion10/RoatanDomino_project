@@ -1,4 +1,4 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 using Application.Interfaces.Managers;
 using Application.Interfaces.Repositories;
 
@@ -40,6 +40,8 @@ public static class DependencyInjection
         services.AddScoped<GameServerUpdater>();
         services.AddScoped<ClientDisconnectionManager>();
         services.AddScoped<ResetPasswordManager>();
+        services.AddScoped<SocialAuthService>();
+        services.AddScoped<PresenceService>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IFriendRequestRepository, FriendRequestRepository>();

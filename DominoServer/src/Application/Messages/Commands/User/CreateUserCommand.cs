@@ -1,4 +1,6 @@
-﻿using Application.Common;
+using System.Globalization;
+
+using Application.Common;
 using Application.Exceptions.Connection;
 using Application.Interfaces.Repositories;
 
@@ -20,21 +22,30 @@ public class CreateUserCommand : ICommand
 
 public class CreateUserCommandHandler(IUserRepository userRepository) : ICommandHandler<CreateUserCommand, Unit>
 {
+    private static readonly string[] AcceptedDateFormats =
+    [
+        "MM/dd/yyyy",
+        "M/d/yyyy",
+        Constants.ShortFormatDate,
+        "d/M/yyyy",
+        "yyyy-MM-dd"
+    ];
+
     public async Task<Unit> Handle(CreateUserCommand request, CancellationToken cancellationToken)
     {
-        if (!DateOnly.TryParseExact(request.Birthdate, Constants.ShortFormatDate, out DateOnly birthdate))
+        if (!DateOnly.TryParseExact(request.Birthdate?.Trim(), AcceptedDateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly birthdate))
         {
-            throw new InvalidDateFormatException("The birthdate has an invalid format");
+            throw new InvalidDateFormatException("Please enter a valid date of birth (MM/DD/YYYY).");
         }
 
         if (await userRepository.ExistsByEmail(request.Email))
         {
-            throw new UserAlreadyExistException("User with this email already exists");
+            throw new UserAlreadyExistException("An account with this email address already exists.");
         }
 
         if (await userRepository.ExistsByLogin(request.Login))
         {
-            throw new UserAlreadyExistException("User with this login already exists");
+            throw new UserAlreadyExistException("That username is already taken. Please choose another.");
         }
 
         User user = new(request.Email, request.Login);

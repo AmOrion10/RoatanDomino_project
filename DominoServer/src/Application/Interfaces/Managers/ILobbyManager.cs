@@ -5,10 +5,15 @@ namespace Application.Interfaces.Managers;
 
 public interface ILobbyManager
 {
+    bool MaintainHouseTable { get; set; }
+    Lobby EnsureHouseTable();
     Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null, bool? oneOnePlayoff = null);
     void AddPlayerToLobby(IClient player, int lobbyId);
     void RemovePlayerFromLobby(IClient player, int lobbyId);
     void ReadyPlayerStateChange(IClient player, int lobbyId);
+    bool SwitchSeat(IClient player, int lobbyId, int targetSeatIndex);
+    LobbyPlayer? AddBotToLobby(IClient requester, int lobbyId, int seatIndex, string difficulty);
+    bool RemoveBotFromLobby(IClient requester, int lobbyId, int seatIndex);
     Lobby? GetLobbyForClient(IClient client);
     Lobby? GetLobbyById(int lobbyId);
     Lobby? GetARankedLobby();

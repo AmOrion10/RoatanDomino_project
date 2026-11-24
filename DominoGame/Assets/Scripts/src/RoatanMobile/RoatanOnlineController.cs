@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
@@ -31,6 +33,12 @@ public class RoatanOnlineController : MonoBehaviour
     private const string PrefServerUrlKey = "RoatanDomino_ServerUrl";
     private const string PrefServerPresetKey = "RoatanDomino_ServerPreset";
     private const string PrefCustomServerUrlKey = "RoatanDomino_CustomServerUrl";
+    private const string PrefSocialDeviceIdKey = "RoatanDomino_SocialDeviceId";
+
+    private static readonly Regex EmailValidationRegex = new Regex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+    private static readonly Regex UsernameValidationRegex = new Regex(@"^[A-Za-z0-9_]{3,16}$", RegexOptions.Compiled);
+    private static readonly Regex HasCapitalRegex = new Regex(@"[A-Z]", RegexOptions.Compiled);
+    private static readonly Regex HasNumberOrSymbolRegex = new Regex(@"[\d\W_]", RegexOptions.Compiled);
 
     public const string ProductionServerUrl = "https://domino.roatandomino.com";
     public static event Action ServerEndpointChanged;
@@ -60,6 +68,9 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text backBtnLabel;
     private TMP_Text connectionBadgeText;
     private Image connectionBadgeBg;
+    private TMP_Text editServerPillBtnLabel;
+    private GameObject serverSettingsDrawer;
+    private bool serverSettingsExpanded;
     private TMP_Text feedbackToast;
 
     // Auth view
@@ -73,18 +84,27 @@ public class RoatanOnlineController : MonoBehaviour
     private Image registerTabImg;
     private TMP_Text signInTabLabel;
     private TMP_Text registerTabLabel;
+    private GameObject authErrorBannerObj;
+    private TMP_Text authErrorBannerText;
     private GameObject signInPanel;
     private GameObject registerPanel;
     private TMP_InputField loginUserInput;
     private TMP_InputField loginPassInput;
+    private TMP_Text loginShowPassLabel;
+    private bool loginPassVisible;
     private TMP_InputField regEmailInput;
     private TMP_InputField regUserInput;
     private TMP_InputField regPassInput;
+    private TMP_Text regShowPassLabel;
+    private bool regPassVisible;
+    private TMP_Text passRuleLenLabel;
+    private TMP_Text passRuleCapLabel;
+    private TMP_Text passRuleNumSymLabel;
     private TMP_InputField regBirthInput;
     private TMP_Text signInSubmitLabel;
     private TMP_Text registerSubmitLabel;
 
-    // Hub view
+    // Hub view (Tables + Players Roster)
     private TMP_Text hubWelcomeLabel;
     private TMP_Text signOutBtnLabel;
     private TMP_Text quickRankedLabel;
@@ -93,8 +113,18 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text refreshLobbiesBtnLabel;
     private TMP_InputField createLobbyNameInput;
     private TMP_InputField joinCodeInput;
+    private Image hubTablesTabImg;
+    private Image hubPlayersTabImg;
+    private TMP_Text hubTablesTabLabel;
+    private TMP_Text hubPlayersTabLabel;
+    private GameObject hubTablesScrollObj;
+    private GameObject hubPlayersScrollObj;
+    private bool hubShowingPlayersTab;
     private RectTransform lobbiesListContent;
+    private RectTransform playersRosterContent;
     private readonly List<GameObject> spawnedLobbyRows = new List<GameObject>();
+    private readonly List<GameObject> spawnedRosterRows = new List<GameObject>();
+    private readonly List<PlayerPresenceDto> latestRoster = new List<PlayerPresenceDto>();
     private int createLobbyMaxPlayers = 4;
     private TableStyle createTableStyle = TableStyle.BLOCK;
     private MatchFormat createMatchFormat = MatchFormat.SIX_LOV;
@@ -107,17 +137,33 @@ public class RoatanOnlineController : MonoBehaviour
     private Image createOneOnePlayoffImg;
     private TMP_Text createOneOnePlayoffLabel;
 
-    // In-Lobby view
+    // In-Table Waiting Room (Visual 4-Seat / 2-Seat Table Diagram, Host Bot Controls & Invites)
     private TMP_Text lobbyTitleLabel;
     private TMP_Text lobbyInfoLabel;
     private TMP_Text lobbyTimerLabel;
-    private RectTransform lobbyPlayersContent;
-    private readonly List<GameObject> spawnedLobbyPlayerRows = new List<GameObject>();
+    private RectTransform tableDiagramRoot;
+    private TMP_Text tableFeltLabel;
+    private readonly List<GameObject> spawnedSeatCards = new List<GameObject>();
+    private GameObject hostBotDifficultyRow;
+    private readonly Dictionary<string, Image> hostBotDiffBtns = new Dictionary<string, Image>();
+    private string selectedHostBotDifficulty = "Pro";
+    private Button startMatchBtn;
+    private Image startMatchBtnImg;
+    private TMP_Text startMatchBtnLabel;
+    private Button readyBtnObj;
     private TMP_Text readyBtnLabel;
     private Image readyBtnImg;
     private TMP_Text leaveLobbyBtnLabel;
     private bool localReady;
     private LobbyDto currentLobby;
+
+    // Table Invite Modal (Incoming + Send Invite Popover)
+    private GameObject incomingInviteModal;
+    private TMP_Text incomingInviteBodyLabel;
+    private TableInviteDto pendingIncomingInvite;
+    private GameObject invitePlayersModal;
+    private RectTransform invitePlayersListContent;
+    private readonly List<GameObject> spawnedInviteModalRows = new List<GameObject>();
 
     // Online Match View (Roatan Tropical Tabletop!)
     private TMP_Text onlineMatchHeader;
@@ -177,6 +223,8 @@ public class RoatanOnlineController : MonoBehaviour
 
         BuildOnlineScreen(safeRoot);
         BuildRejoinModal(safeRoot);
+        BuildIncomingInviteModal(safeRoot);
+        BuildInvitePlayersModal(safeRoot);
         RoatanLocalization.LanguageChanged += RefreshLocalizedTexts;
         ServerEndpointChanged += SyncServerEndpointFieldsFromPrefs;
         RefreshLocalizedTexts();
@@ -261,10 +309,17 @@ public class RoatanOnlineController : MonoBehaviour
         {
             ShowSubView(hubView);
             RequestLobbiesList();
+            RequestPlayerRoster();
         }
         else
         {
             ShowSubView(authView);
+            ClearAuthError();
+            SetServerSettingsExpanded(false);
+            if (Networking.Instance != null && !Networking.Instance.IsConnected && !isConnecting)
+            {
+                AttemptServerConnect();
+            }
         }
 
         RefreshConnectionBadge();
@@ -338,6 +393,16 @@ public class RoatanOnlineController : MonoBehaviour
         eh.CheckActiveMatchResponseEvent += OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent += OnRejoinMatchResponse;
         eh.AbandonMatchResponseEvent += OnAbandonMatchResponse;
+        eh.SocialAuthResponseEvent += OnSocialAuthResponse;
+        eh.GetPlayerRosterResponseEvent += OnGetPlayerRosterResponse;
+        eh.PlayerRosterUpdatedEvent += OnPlayerRosterUpdated;
+        eh.TableInviteReceivedEvent += OnTableInviteReceived;
+        eh.SendTableInviteResponseEvent += OnSendTableInviteResponse;
+        eh.SwitchTableSeatResponseEvent += OnTableActionLobbyUpdatedResponse;
+        eh.AddTableBotResponseEvent += OnTableActionLobbyUpdatedResponse;
+        eh.RemoveTableBotResponseEvent += OnTableActionLobbyUpdatedResponse;
+        eh.StartTableMatchResponseEvent += OnStartTableMatchResponse;
+        eh.TableStateUpdatedEvent += OnTableStateUpdated;
     }
 
     private void UnsubscribeClient()
@@ -367,6 +432,16 @@ public class RoatanOnlineController : MonoBehaviour
         eh.CheckActiveMatchResponseEvent -= OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent -= OnRejoinMatchResponse;
         eh.AbandonMatchResponseEvent -= OnAbandonMatchResponse;
+        eh.SocialAuthResponseEvent -= OnSocialAuthResponse;
+        eh.GetPlayerRosterResponseEvent -= OnGetPlayerRosterResponse;
+        eh.PlayerRosterUpdatedEvent -= OnPlayerRosterUpdated;
+        eh.TableInviteReceivedEvent -= OnTableInviteReceived;
+        eh.SendTableInviteResponseEvent -= OnSendTableInviteResponse;
+        eh.SwitchTableSeatResponseEvent -= OnTableActionLobbyUpdatedResponse;
+        eh.AddTableBotResponseEvent -= OnTableActionLobbyUpdatedResponse;
+        eh.RemoveTableBotResponseEvent -= OnTableActionLobbyUpdatedResponse;
+        eh.StartTableMatchResponseEvent -= OnStartTableMatchResponse;
+        eh.TableStateUpdatedEvent -= OnTableStateUpdated;
         subscribedClient = null;
     }
 
@@ -428,12 +503,32 @@ public class RoatanOnlineController : MonoBehaviour
     private void SubmitLogin()
     {
         RoatanSoundFX.Instance?.PlayTap();
-        if (!EnsureConnectedForRequest()) return;
+        ClearAuthError();
+
+        string login = loginUserInput != null ? loginUserInput.text.Trim() : string.Empty;
+        string pass = loginPassInput != null ? loginPassInput.text : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(login))
+        {
+            ShowAuthError("Please enter your username or email address.");
+            return;
+        }
+        if (string.IsNullOrEmpty(pass))
+        {
+            ShowAuthError("Please enter your password.");
+            return;
+        }
+
+        if (!EnsureConnectedForRequest())
+        {
+            ShowAuthError("Unable to reach server. Tap [Edit] above to check your Server URL.");
+            return;
+        }
 
         subscribedClient.AddToSendQueue(MessageFrameBuilder.ConnectionFrame(new LoggingDto
         {
-            Login = loginUserInput.text.Trim(),
-            Password = loginPassInput.text
+            Login = login,
+            Password = pass
         }));
         SetFeedback("Signing in...", RoatanVisualAssets.IslandGold);
     }
@@ -441,16 +536,98 @@ public class RoatanOnlineController : MonoBehaviour
     private void SubmitRegister()
     {
         RoatanSoundFX.Instance?.PlayTap();
-        if (!EnsureConnectedForRequest()) return;
+        ClearAuthError();
+
+        string email = regEmailInput != null ? regEmailInput.text.Trim() : string.Empty;
+        string username = regUserInput != null ? regUserInput.text.Trim() : string.Empty;
+        string pass = regPassInput != null ? regPassInput.text : string.Empty;
+        string birth = regBirthInput != null ? regBirthInput.text.Trim() : string.Empty;
+
+        if (!ValidateRegistrationInputs(email, username, pass, birth, out string validationError))
+        {
+            ShowAuthError(validationError);
+            return;
+        }
+
+        if (!EnsureConnectedForRequest())
+        {
+            ShowAuthError("Unable to reach server. Tap [Edit] above to check your Server URL.");
+            return;
+        }
 
         subscribedClient.AddToSendQueue(MessageFrameBuilder.RegistrationFrame(new RegistrationDto
         {
-            Email = regEmailInput.text.Trim(),
-            Login = regUserInput.text.Trim(),
-            Password = regPassInput.text,
-            Birthdate = string.IsNullOrWhiteSpace(regBirthInput.text) ? "01/01/2000" : regBirthInput.text.Trim()
+            Email = email,
+            Login = username,
+            Password = pass,
+            Birthdate = birth
         }));
         SetFeedback("Creating account...", RoatanVisualAssets.IslandGold);
+    }
+
+    private void SubmitSocialAuth(string provider)
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        ClearAuthError();
+
+        if (!EnsureConnectedForRequest())
+        {
+            ShowAuthError("Unable to reach server. Tap [Edit] above to check your Server URL.");
+            return;
+        }
+
+        string deviceId = PlayerPrefs.GetString(PrefSocialDeviceIdKey, string.Empty);
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            deviceId = Guid.NewGuid().ToString("N").Substring(0, 10);
+            PlayerPrefs.SetString(PrefSocialDeviceIdKey, deviceId);
+            PlayerPrefs.Save();
+        }
+
+        string hintedName = loginUserInput != null && !string.IsNullOrWhiteSpace(loginUserInput.text)
+            ? loginUserInput.text.Trim()
+            : (regUserInput != null && !string.IsNullOrWhiteSpace(regUserInput.text)
+                ? regUserInput.text.Trim()
+                : $"{provider}Player");
+
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SocialAuthFrame(new SocialAuthDto
+        {
+            Provider = provider,
+            ProviderUserId = $"{provider.ToLowerInvariant()}_{deviceId}",
+            DisplayName = hintedName
+        }));
+        SetFeedback($"Signing in with {provider}...", RoatanVisualAssets.IslandGold);
+    }
+
+    public static bool ValidateRegistrationInputs(string email, string username, string password, string birthdate, out string error)
+    {
+        if (string.IsNullOrWhiteSpace(email) || !EmailValidationRegex.IsMatch(email))
+        {
+            error = "Please enter a valid email address.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(username) || !UsernameValidationRegex.IsMatch(username))
+        {
+            error = "Username must be 3–16 letters or numbers.";
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(password) || password.Length < 8 || !HasCapitalRegex.IsMatch(password) || !HasNumberOrSymbolRegex.IsMatch(password))
+        {
+            error = "Password must be at least 8 characters and include at least one capital letter (A-Z) and one number or special character (!@#$%).";
+            return false;
+        }
+
+        string[] dateFormats = { "MM/dd/yyyy", "M/d/yyyy", "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" };
+        if (string.IsNullOrWhiteSpace(birthdate) || !DateTime.TryParseExact(birthdate.Trim(), dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        {
+            error = "Please enter a valid date of birth (MM/DD/YYYY).";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
     private void SubmitLogout()
@@ -461,6 +638,7 @@ public class RoatanOnlineController : MonoBehaviour
             subscribedClient.AddToSendQueue(MessageFrameBuilder.DisconnectionFrame());
         }
         isSignedIn = false;
+        currentLobby = null;
         ShowSubView(authView);
     }
 
@@ -468,6 +646,12 @@ public class RoatanOnlineController : MonoBehaviour
     {
         if (!EnsureConnectedForRequest()) return;
         subscribedClient.AddToSendQueue(MessageFrameBuilder.GetAllLobbyFrame());
+    }
+
+    private void RequestPlayerRoster()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetPlayerRosterFrame());
     }
 
     private void RequestQuickRanked()
@@ -483,7 +667,7 @@ public class RoatanOnlineController : MonoBehaviour
         RoatanSoundFX.Instance?.PlayTap();
         if (!EnsureConnectedForRequest()) return;
 
-        string lobbyName = string.IsNullOrWhiteSpace(createLobbyNameInput.text)
+        string tableName = string.IsNullOrWhiteSpace(createLobbyNameInput.text)
             ? "Roatan Table"
             : createLobbyNameInput.text.Trim();
 
@@ -493,7 +677,7 @@ public class RoatanOnlineController : MonoBehaviour
 
         subscribedClient.AddToSendQueue(MessageFrameBuilder.CreateLobbyFrame(new CreateLobbyDto
         {
-            Name = lobbyName,
+            Name = tableName,
             MaxNumberOfPlayer = effectiveMaxPlayers,
             Public = true,
             TableStyle = createTableStyle,
@@ -506,12 +690,72 @@ public class RoatanOnlineController : MonoBehaviour
     {
         RoatanSoundFX.Instance?.PlayTap();
         if (!EnsureConnectedForRequest()) return;
-        if (string.IsNullOrWhiteSpace(joinCodeInput.text)) return;
+        if (string.IsNullOrWhiteSpace(joinCodeInput.text))
+        {
+            SetFeedback("Enter a private table code first.", RoatanVisualAssets.SunsetCoral);
+            return;
+        }
 
         subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyWithCodeFrame(new LobbyCodeDto
         {
             Code = joinCodeInput.text.Trim()
         }));
+    }
+
+    private void RequestSwitchSeat(int targetSeatIndex)
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (!EnsureConnectedForRequest() || currentLobby == null) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SwitchTableSeatFrame(new SwitchTableSeatDto
+        {
+            TargetSeatIndex = targetSeatIndex
+        }));
+    }
+
+    private void RequestAddBot(int seatIndex)
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (!EnsureConnectedForRequest() || currentLobby == null) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.AddTableBotFrame(new AddTableBotDto
+        {
+            SeatIndex = seatIndex,
+            Difficulty = selectedHostBotDifficulty
+        }));
+    }
+
+    private void RequestRemoveBot(int seatIndex)
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (!EnsureConnectedForRequest() || currentLobby == null) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.RemoveTableBotFrame(new RemoveTableBotDto
+        {
+            SeatIndex = seatIndex
+        }));
+    }
+
+    private void RequestStartTableMatch()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (!EnsureConnectedForRequest() || currentLobby == null) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.StartTableMatchFrame());
+        SetFeedback("Starting match...", RoatanVisualAssets.IslandGold);
+    }
+
+    private void RequestInvitePlayer(PlayerPresenceDto target)
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (!EnsureConnectedForRequest() || target == null) return;
+        if (currentLobby == null)
+        {
+            SetFeedback("Join or create a table first to invite players.", RoatanVisualAssets.IslandGold);
+            return;
+        }
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SendTableInviteFrame(new TableInviteDto
+        {
+            TargetUserId = target.UserId,
+            TargetUsername = target.Username
+        }));
+        SetFeedback($"Invite sent to {target.Username}!", RoatanVisualAssets.PalmGreen);
     }
 
     private void ToggleLobbyReady()
@@ -532,8 +776,10 @@ public class RoatanOnlineController : MonoBehaviour
         }
         currentLobby = null;
         localReady = false;
+        if (invitePlayersModal != null) invitePlayersModal.SetActive(false);
         ShowSubView(hubView);
         RequestLobbiesList();
+        RequestPlayerRoster();
     }
 
     private bool EnsureConnectedForRequest()
@@ -552,43 +798,69 @@ public class RoatanOnlineController : MonoBehaviour
     {
         if (dto.OkResult)
         {
-            isSignedIn = true;
-            SetFeedback("Welcome back!", RoatanVisualAssets.PalmGreen);
-            subscribedClient.AddToSendQueue(new List<MessageFrame>
-            {
-                MessageFrameBuilder.ReadyConnectedFrame(),
-                MessageFrameBuilder.GetAllLobbyFrame()
-            });
-            string loginName = subscribedClient.User != null ? subscribedClient.User.Login : loginUserInput.text;
-            int elo = subscribedClient.User != null ? subscribedClient.User.Score : 1000;
-            hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
-            ShowSubView(hubView);
+            CompleteSignInSuccess(loginUserInput != null ? loginUserInput.text : string.Empty);
         }
         else
         {
-            string err = dto.ErrorType.HasValue ? dto.ErrorType.Value.ToString() : "Login failed";
-            SetFeedback($"Sign in failed: {err}", RoatanVisualAssets.SunsetCoral);
+            string err = FormatFriendlyError(dto, "Incorrect username or password.");
+            ShowAuthError(err);
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
         }
+    }
+
+    private void OnSocialAuthResponse(ResponseDto dto)
+    {
+        if (dto.OkResult)
+        {
+            CompleteSignInSuccess("Player");
+        }
+        else
+        {
+            string err = FormatFriendlyError(dto, "Social sign-in failed. Please try again.");
+            ShowAuthError(err);
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+        }
+    }
+
+    private void CompleteSignInSuccess(string fallbackName)
+    {
+        isSignedIn = true;
+        ClearAuthError();
+        SetServerSettingsExpanded(false);
+        SetFeedback("Welcome back!", RoatanVisualAssets.PalmGreen);
+        subscribedClient.AddToSendQueue(new List<MessageFrame>
+        {
+            MessageFrameBuilder.ReadyConnectedFrame(),
+            MessageFrameBuilder.GetAllLobbyFrame(),
+            MessageFrameBuilder.GetPlayerRosterFrame()
+        });
+        string loginName = subscribedClient.User != null ? subscribedClient.User.Login : fallbackName;
+        int elo = subscribedClient.User != null ? subscribedClient.User.Score : 1000;
+        hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
+        ShowSubView(hubView);
     }
 
     private void OnRegisterResponse(ResponseDto dto)
     {
         if (dto.OkResult)
         {
+            ClearAuthError();
             SetFeedback("Account created! You can now Sign In.", RoatanVisualAssets.PalmGreen);
             SelectAuthTab(isSignIn: true);
             loginUserInput.text = regUserInput.text;
         }
         else
         {
-            string err = dto.ErrorType.HasValue ? dto.ErrorType.Value.ToString() : "Registration failed";
-            SetFeedback($"Registration error: {err}", RoatanVisualAssets.SunsetCoral);
+            string err = FormatFriendlyError(dto, "Could not create account. Please check your details.");
+            ShowAuthError(err);
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
         }
     }
 
     private void OnLogoutResponse(ResponseDto dto)
     {
         isSignedIn = false;
+        currentLobby = null;
         ShowSubView(authView);
     }
 
@@ -599,27 +871,48 @@ public class RoatanOnlineController : MonoBehaviour
 
         if (!dto.OkResult || dto.Object == null || dto.Object.Lobbies == null || dto.Object.Lobbies.Count == 0)
         {
-            GameObject emptyRow = CreateCard(lobbiesListContent, "EmptyRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(860f, 84f));
-            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
-            CreateText(emptyRow.transform, "EmptyLbl", "No public lobbies open yet — create one above!", 24, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(820f, 64f));
+            GameObject emptyRow = CreateCard(lobbiesListContent, "EmptyRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(860f, 88f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 88f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No public tables open yet — create one above!", 24, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(820f, 64f));
             spawnedLobbyRows.Add(emptyRow);
             return;
         }
 
-        foreach (LobbyInfoDto lobby in dto.Object.Lobbies)
+        foreach (LobbyInfoDto table in dto.Object.Lobbies)
         {
-            LobbyInfoDto captured = lobby;
-            GameObject row = CreateCard(lobbiesListContent, $"Lobby_{lobby.Id}", new Color(0.08f, 0.23f, 0.29f, 0.95f), Vector2.zero, new Vector2(860f, 106f));
-            row.AddComponent<LayoutElement>().preferredHeight = 106f;
+            LobbyInfoDto captured = table;
+            bool isFull = table.NumberOfPlayer >= table.MaxNumberOfPlayer;
+            Color cardColor = table.IsHouseTable
+                ? new Color(0.09f, 0.27f, 0.30f, 0.97f)
+                : new Color(0.08f, 0.23f, 0.29f, 0.95f);
 
-            string modeBadge = FormatLobbyRulesBadge(lobby.MatchFormat, lobby.TableStyle, lobby.OneOnePlayoff);
-            CreateText(row.transform, "LName", $"{lobby.Name}  ({lobby.NumberOfPlayer}/{lobby.MaxNumberOfPlayer})", 25, FontStyles.Bold, Color.white, new Vector2(-130f, 18f), new Vector2(560f, 38f)).alignment = TextAlignmentOptions.MidlineLeft;
-            CreateText(row.transform, "LMode", modeBadge, 20, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-130f, -20f), new Vector2(560f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
-            CreatePillButton(row.transform, "BtnJoin", "Join", RoatanVisualAssets.PalmGreen, new Vector2(315f, 0f), new Vector2(180f, 68f), 25, () =>
+            GameObject row = CreateCard(lobbiesListContent, $"Table_{table.Id}", cardColor, Vector2.zero, new Vector2(860f, 146f));
+            row.AddComponent<LayoutElement>().preferredHeight = 146f;
+
+            string houseTag = table.IsHouseTable ? "  <color=#F7C948>[HOUSE]</color>" : string.Empty;
+            string hostName = string.IsNullOrWhiteSpace(table.Creator) ? "House" : table.Creator;
+            string modeBadge = FormatLobbyRulesBadge(table.MatchFormat, table.TableStyle, table.OneOnePlayoff);
+            string seatedSummary = (table.SeatedPlayers != null && table.SeatedPlayers.Count > 0)
+                ? string.Join(", ", table.SeatedPlayers)
+                : "Open — tap Join to sit!";
+
+            CreateText(row.transform, "TTitle", $"{table.Name}{houseTag}  ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})", 25, FontStyles.Bold, Color.white, new Vector2(-125f, 42f), new Vector2(580f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TMeta", $"Host: {hostName}  •  {modeBadge}", 19, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-125f, 4f), new Vector2(580f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TSeated", $"Seated: {seatedSummary}", 18, FontStyles.Italic, new Color(0.80f, 0.93f, 0.96f), new Vector2(-125f, -36f), new Vector2(580f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            string joinLabel = isFull ? $"FULL ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})" : "Join";
+            Color joinColor = isFull ? new Color(0.38f, 0.24f, 0.25f, 0.95f) : RoatanVisualAssets.PalmGreen;
+            Button joinBtn = CreatePillButton(row.transform, "BtnJoinTable", joinLabel, joinColor, new Vector2(315f, 0f), new Vector2(190f, 74f), isFull ? 21 : 26, () =>
             {
+                if (captured.NumberOfPlayer >= captured.MaxNumberOfPlayer)
+                {
+                    SetFeedback($"This table is full ({captured.NumberOfPlayer}/{captured.MaxNumberOfPlayer} players).", RoatanVisualAssets.SunsetCoral);
+                    return;
+                }
                 RoatanSoundFX.Instance?.PlayTap();
                 subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = captured.Id }));
             });
+            joinBtn.interactable = !isFull;
 
             spawnedLobbyRows.Add(row);
         }
@@ -629,7 +922,7 @@ public class RoatanOnlineController : MonoBehaviour
     {
         if (!dto.OkResult || dto.Object == null)
         {
-            string err = dto.ErrorType.HasValue ? dto.ErrorType.Value.ToString() : "Unable to enter lobby";
+            string err = FormatFriendlyError(dto, "Unable to enter table.");
             SetFeedback(err, RoatanVisualAssets.SunsetCoral);
             return;
         }
@@ -639,13 +932,103 @@ public class RoatanOnlineController : MonoBehaviour
         InLobby.SetOfflineLobby(currentLobby);
         ShowSubView(lobbyView);
         RefreshLobbyView();
+        RequestPlayerRoster();
+    }
+
+    private void OnTableActionLobbyUpdatedResponse(ResponseObjectDto<LobbyDto> dto)
+    {
+        if (!dto.OkResult || dto.Object == null)
+        {
+            string err = FormatFriendlyError(dto, "Table action failed.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        currentLobby = dto.Object;
+        InLobby.SetOfflineLobby(currentLobby);
+        RefreshLobbyView();
+    }
+
+    private void OnTableStateUpdated(LobbyDto updatedTable)
+    {
+        if (updatedTable == null) return;
+        currentLobby = updatedTable;
+        InLobby.SetOfflineLobby(currentLobby);
+        if (lobbyView != null && lobbyView.activeSelf)
+        {
+            RefreshLobbyView();
+        }
+    }
+
+    private void OnStartTableMatchResponse(ResponseDto dto)
+    {
+        if (!dto.OkResult)
+        {
+            string err = FormatFriendlyError(dto, "Cannot start match yet.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+        }
+    }
+
+    private void OnSendTableInviteResponse(ResponseDto dto)
+    {
+        if (!dto.OkResult)
+        {
+            string err = FormatFriendlyError(dto, "Could not send table invite.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+        }
+    }
+
+    private void OnGetPlayerRosterResponse(ResponseObjectDto<PlayerRosterDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        ApplyRosterUpdate(dto.Object);
+    }
+
+    private void OnPlayerRosterUpdated(PlayerRosterDto roster)
+    {
+        if (roster == null) return;
+        ApplyRosterUpdate(roster);
+    }
+
+    private void ApplyRosterUpdate(PlayerRosterDto roster)
+    {
+        latestRoster.Clear();
+        if (roster.Players != null)
+        {
+            latestRoster.AddRange(roster.Players);
+        }
+
+        int onlineCount = latestRoster.Count(p => p.IsOnline);
+        if (hubPlayersTabLabel != null)
+        {
+            hubPlayersTabLabel.text = $"Players ({onlineCount} Online)";
+        }
+
+        RefreshPlayersRosterUI();
+        if (invitePlayersModal != null && invitePlayersModal.activeSelf)
+        {
+            RefreshInvitePlayersModalUI();
+        }
+    }
+
+    private void OnTableInviteReceived(TableInviteDto invite)
+    {
+        if (invite == null) return;
+        pendingIncomingInvite = invite;
+        if (incomingInviteModal != null && incomingInviteBodyLabel != null)
+        {
+            incomingInviteBodyLabel.text = $"<b>{invite.FromUsername}</b> invited you to join:\n\n<color=#F7C948><b>{invite.TableName}</b></color>\nCode: {invite.TableCode}";
+            incomingInviteModal.transform.SetAsLastSibling();
+            incomingInviteModal.SetActive(true);
+            RoatanSoundFX.Instance?.PlayWin();
+        }
     }
 
     private void OnJoinCodeResponse(ResponseDto dto)
     {
         if (!dto.OkResult)
         {
-            string err = dto.ErrorType.HasValue ? dto.ErrorType.Value.ToString() : "Invalid lobby code";
+            string err = FormatFriendlyError(dto, "Invalid table code.");
             SetFeedback(err, RoatanVisualAssets.SunsetCoral);
         }
     }
@@ -680,7 +1063,7 @@ public class RoatanOnlineController : MonoBehaviour
     {
         if (lobbyTimerLabel != null)
         {
-            lobbyTimerLabel.text = dto.HasStarted ? $"Match starting in {dto.Duration}s..." : "Waiting for all players to be Ready...";
+            lobbyTimerLabel.text = dto.HasStarted ? $"Match starting in {dto.Duration}s..." : "Tap an open seat to switch, add bots, or Ready up!";
         }
     }
 
@@ -1635,7 +2018,7 @@ public class RoatanOnlineController : MonoBehaviour
         GameObject titleCard = CreateCard(topBar.transform, "OnlineTitleCard", new Color(0.06f, 0.17f, 0.22f, 0.94f), new Vector2(90f, 0f), new Vector2(720f, 76f));
         titleLabel = CreateText(titleCard.transform, "OnlineTitle", "ONLINE MULTIPLAYER", 30, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(680f, 56f));
 
-        // Connection Status Banner
+        // Compact Server Status Pill (with [Edit] toggle for collapsed Server URL & Presets)
         GameObject badgeCard = CreateCard(onlineRoot.transform, "ConnBadge", new Color(0.08f, 0.21f, 0.27f, 0.94f), Vector2.zero, new Vector2(940f, 64f));
         RectTransform badgeRect = badgeCard.GetComponent<RectTransform>();
         badgeRect.anchorMin = new Vector2(0.5f, 1f);
@@ -1643,7 +2026,14 @@ public class RoatanOnlineController : MonoBehaviour
         badgeRect.pivot = new Vector2(0.5f, 1f);
         badgeRect.anchoredPosition = new Vector2(0f, -124f);
         connectionBadgeBg = badgeCard.GetComponent<Image>();
-        connectionBadgeText = CreateText(badgeCard.transform, "ConnText", "", 23, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(900f, 52f));
+        connectionBadgeText = CreateText(badgeCard.transform, "ConnText", "", 22, FontStyles.Bold, Color.white, new Vector2(-78f, 0f), new Vector2(730f, 52f));
+        connectionBadgeText.alignment = TextAlignmentOptions.MidlineLeft;
+        Button editServerBtn = CreatePillButton(badgeCard.transform, "BtnEditServer", "Edit", new Color(0.10f, 0.24f, 0.30f, 0.96f), new Vector2(382f, 0f), new Vector2(138f, 46f), 21, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SetServerSettingsExpanded(!serverSettingsExpanded);
+        });
+        editServerPillBtnLabel = editServerBtn.GetComponentInChildren<TMP_Text>();
 
         // Feedback Toast at bottom
         GameObject toastCard = CreateCard(onlineRoot.transform, "OnlineToast", new Color(0.05f, 0.15f, 0.20f, 0.92f), Vector2.zero, new Vector2(940f, 72f));
@@ -1652,21 +2042,25 @@ public class RoatanOnlineController : MonoBehaviour
         toastRect.anchorMax = new Vector2(0.5f, 0f);
         toastRect.pivot = new Vector2(0.5f, 0f);
         toastRect.anchoredPosition = new Vector2(0f, 22f);
-        feedbackToast = CreateText(toastCard.transform, "ToastText", "Paste your Cloudflare Tunnel / Production URL or return Home to play Offline.", 22, FontStyles.Normal, new Color(0.88f, 0.96f, 0.98f), Vector2.zero, new Vector2(900f, 60f));
+        feedbackToast = CreateText(toastCard.transform, "ToastText", "Sign in to join Roatan House Table or create your own table.", 22, FontStyles.Normal, new Color(0.88f, 0.96f, 0.98f), Vector2.zero, new Vector2(900f, 60f));
 
         BuildAuthView(onlineRoot.transform);
         BuildHubView(onlineRoot.transform);
         BuildLobbyView(onlineRoot.transform);
         BuildOnlineGameView(onlineRoot.transform);
+        BuildCollapsibleServerDrawer(onlineRoot.transform);
     }
 
-    private void BuildAuthView(Transform parent)
+    private void BuildCollapsibleServerDrawer(Transform parent)
     {
-        authView = CreateStretchPanel(parent, "AuthView", Color.clear);
+        serverSettingsDrawer = CreateCard(parent, "ServerCardDrawer", new Color(0.05f, 0.15f, 0.21f, 0.99f), Vector2.zero, new Vector2(940f, 326f));
+        RectTransform dRect = serverSettingsDrawer.GetComponent<RectTransform>();
+        dRect.anchorMin = new Vector2(0.5f, 1f);
+        dRect.anchorMax = new Vector2(0.5f, 1f);
+        dRect.pivot = new Vector2(0.5f, 1f);
+        dRect.anchoredPosition = new Vector2(0f, -196f);
 
-        // Server Connection Card (Presets + Single Normalized https/wss Server URL)
-        GameObject serverCard = CreateCard(authView.transform, "ServerCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 520f), new Vector2(940f, 308f));
-        CreateText(serverCard.transform, "ServerHdr", "SERVER URL & PRESETS", 23, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 122f), new Vector2(880f, 34f));
+        CreateText(serverSettingsDrawer.transform, "ServerHdr", "SERVER URL & PRESETS", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 130f), new Vector2(880f, 34f));
 
         RoatanServerPreset[] presets = { RoatanServerPreset.Production, RoatanServerPreset.CustomTunnel, RoatanServerPreset.Localhost };
         string[] presetLabels = { "Production", "Custom / Tunnel", "Localhost" };
@@ -1674,7 +2068,7 @@ public class RoatanOnlineController : MonoBehaviour
         for (int i = 0; i < presets.Length; i++)
         {
             RoatanServerPreset capturedPreset = presets[i];
-            Button pBtn = CreatePillButton(serverCard.transform, $"Preset_{capturedPreset}", presetLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(presetXs[i], 64f), new Vector2(276f, 54f), 22, () =>
+            Button pBtn = CreatePillButton(serverSettingsDrawer.transform, $"Preset_{capturedPreset}", presetLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(presetXs[i], 70f), new Vector2(276f, 52f), 22, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 SelectServerPresetInAuthView(capturedPreset);
@@ -1685,43 +2079,116 @@ public class RoatanOnlineController : MonoBehaviour
         string savedUrl = GetSavedServerUrl();
         activeServerPreset = GetSavedPreset();
 
-        serverUrlInput = CreateInputField(serverCard.transform, "ServerUrlInput", "https://your-tunnel.trycloudflare.com", savedUrl, new Vector2(0f, -4f), new Vector2(876f, 64f));
+        serverUrlInput = CreateInputField(serverSettingsDrawer.transform, "ServerUrlInput", "https://your-tunnel.trycloudflare.com", savedUrl, new Vector2(0f, 2f), new Vector2(876f, 62f));
         serverUrlInput.onValueChanged.AddListener(OnAuthServerUrlChanged);
 
-        serverEndpointPreviewLabel = CreateText(serverCard.transform, "EndpointPreview", "", 18, FontStyles.Italic, new Color(0.75f, 0.92f, 0.96f), new Vector2(0f, -54f), new Vector2(870f, 28f));
+        serverEndpointPreviewLabel = CreateText(serverSettingsDrawer.transform, "EndpointPreview", "", 18, FontStyles.Italic, new Color(0.75f, 0.92f, 0.96f), new Vector2(0f, -48f), new Vector2(870f, 28f));
 
-        Button connBtn = CreatePillButton(serverCard.transform, "BtnConnect", "Connect / Retry", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -108f), new Vector2(460f, 62f), 25, AttemptServerConnect);
+        Button connBtn = CreatePillButton(serverSettingsDrawer.transform, "BtnConnect", "Connect / Retry", RoatanVisualAssets.BrightLagoon, new Vector2(-120f, -108f), new Vector2(440f, 60f), 24, AttemptServerConnect);
         connectBtnLabel = connBtn.GetComponentInChildren<TMP_Text>();
 
+        CreatePillButton(serverSettingsDrawer.transform, "BtnCloseServerDrawer", "Done", new Color(0.20f, 0.24f, 0.28f, 1f), new Vector2(250f, -108f), new Vector2(200f, 60f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SetServerSettingsExpanded(false);
+        });
+
         SyncServerEndpointFieldsFromPrefs();
+        SetServerSettingsExpanded(false);
+    }
 
-        // Sign In / Create Account Card
-        GameObject formCard = CreateCard(authView.transform, "AuthFormCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -110f), new Vector2(940f, 840f));
+    private void SetServerSettingsExpanded(bool expanded)
+    {
+        serverSettingsExpanded = expanded;
+        if (serverSettingsDrawer != null)
+        {
+            serverSettingsDrawer.SetActive(expanded);
+            if (expanded) serverSettingsDrawer.transform.SetAsLastSibling();
+        }
+        if (editServerPillBtnLabel != null)
+        {
+            editServerPillBtnLabel.text = expanded ? "Close" : "Edit";
+        }
+    }
 
-        Button tabIn = CreatePillButton(formCard.transform, "TabSignIn", "Sign In", RoatanVisualAssets.BrightLagoon, new Vector2(-215f, 355f), new Vector2(410f, 72f), 28, () => SelectAuthTab(true));
+    private void BuildAuthView(Transform parent)
+    {
+        authView = CreateStretchPanel(parent, "AuthView", Color.clear);
+
+        // Front-and-center Sign In / Create Account Card (Server panel collapsed by default!)
+        GameObject formCard = CreateCard(authView.transform, "AuthFormCard", new Color(0.06f, 0.18f, 0.24f, 0.96f), new Vector2(0f, -25f), new Vector2(940f, 1260f));
+
+        Button tabIn = CreatePillButton(formCard.transform, "TabSignIn", "Sign In", RoatanVisualAssets.BrightLagoon, new Vector2(-215f, 566f), new Vector2(410f, 70f), 28, () => SelectAuthTab(true));
         signInTabImg = tabIn.GetComponent<Image>();
         signInTabLabel = tabIn.GetComponentInChildren<TMP_Text>();
 
-        Button tabReg = CreatePillButton(formCard.transform, "TabRegister", "Create Account", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(215f, 355f), new Vector2(410f, 72f), 28, () => SelectAuthTab(false));
+        Button tabReg = CreatePillButton(formCard.transform, "TabRegister", "Create Account", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(215f, 566f), new Vector2(410f, 70f), 28, () => SelectAuthTab(false));
         registerTabImg = tabReg.GetComponent<Image>();
         registerTabLabel = tabReg.GetComponentInChildren<TMP_Text>();
 
+        // Dedicated Inline Error Banner (replaces cryptic server errors)
+        authErrorBannerObj = CreateCard(formCard.transform, "AuthErrorBanner", new Color(0.62f, 0.16f, 0.16f, 0.96f), new Vector2(0f, 476f), new Vector2(840f, 84f));
+        authErrorBannerText = CreateText(authErrorBannerObj.transform, "ErrText", "", 20, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(800f, 74f));
+        authErrorBannerObj.SetActive(false);
+
         // Sign In Panel
         signInPanel = CreateStretchPanel(formCard.transform, "SignInPanel", Color.clear);
-        loginUserInput = CreateInputField(signInPanel.transform, "LoginUser", "Username", "", new Vector2(0f, 165f), new Vector2(820f, 82f));
-        loginPassInput = CreateInputField(signInPanel.transform, "LoginPass", "Password", "", new Vector2(0f, 52f), new Vector2(820f, 82f), isPassword: true);
-        Button loginSubmit = CreatePillButton(signInPanel.transform, "BtnSubmitLogin", "Sign In", RoatanVisualAssets.PalmGreen, new Vector2(0f, -98f), new Vector2(620f, 98f), 34, SubmitLogin);
+        CreateFieldTitle(signInPanel.transform, "SignInUserTitle", "Username or Email", new Vector2(0f, 396f));
+        loginUserInput = CreateInputField(signInPanel.transform, "LoginUser", "Enter username or email", "", new Vector2(0f, 336f), new Vector2(820f, 78f));
+        loginUserInput.onValueChanged.AddListener(_ => ClearAuthError());
+
+        CreateFieldTitle(signInPanel.transform, "SignInPassTitle", "Password", new Vector2(0f, 256f));
+        loginPassInput = CreateInputField(signInPanel.transform, "LoginPass", "Enter password", "", new Vector2(-74f, 196f), new Vector2(672f, 78f), isPassword: true);
+        loginPassInput.onValueChanged.AddListener(_ => ClearAuthError());
+        Button loginShowBtn = CreatePillButton(signInPanel.transform, "BtnLoginShowPass", "Show", new Color(0.12f, 0.28f, 0.35f, 1f), new Vector2(342f, 196f), new Vector2(136f, 78f), 22, ToggleLoginPasswordVisibility);
+        loginShowPassLabel = loginShowBtn.GetComponentInChildren<TMP_Text>();
+
+        Button loginSubmit = CreatePillButton(signInPanel.transform, "BtnSubmitLogin", "Sign In", RoatanVisualAssets.PalmGreen, new Vector2(0f, 66f), new Vector2(680f, 92f), 34, SubmitLogin);
         signInSubmitLabel = loginSubmit.GetComponentInChildren<TMP_Text>();
 
-        // Register Panel
+        // Register Panel (with clear field titles, Show/Hide toggle, and live password checklist)
         registerPanel = CreateStretchPanel(formCard.transform, "RegisterPanel", Color.clear);
-        regEmailInput = CreateInputField(registerPanel.transform, "RegEmail", "Email Address", "", new Vector2(0f, 215f), new Vector2(820f, 76f));
-        regUserInput = CreateInputField(registerPanel.transform, "RegUser", "Username", "", new Vector2(0f, 120f), new Vector2(820f, 76f));
-        regPassInput = CreateInputField(registerPanel.transform, "RegPass", "Password", "", new Vector2(0f, 25f), new Vector2(820f, 76f), isPassword: true);
-        regBirthInput = CreateInputField(registerPanel.transform, "RegBirth", "Birthdate (DD/MM/YYYY)", "01/01/2000", new Vector2(0f, -70f), new Vector2(820f, 76f));
-        Button regSubmit = CreatePillButton(registerPanel.transform, "BtnSubmitReg", "Create Account", RoatanVisualAssets.PalmGreen, new Vector2(0f, -200f), new Vector2(620f, 92f), 32, SubmitRegister);
+        CreateFieldTitle(registerPanel.transform, "RegEmailTitle", "Email Address", new Vector2(0f, 404f));
+        regEmailInput = CreateInputField(registerPanel.transform, "RegEmail", "you@example.com", "", new Vector2(0f, 354f), new Vector2(820f, 64f));
+        regEmailInput.onValueChanged.AddListener(_ => ClearAuthError());
+
+        CreateFieldTitle(registerPanel.transform, "RegUserTitle", "Username", new Vector2(0f, 294f));
+        regUserInput = CreateInputField(registerPanel.transform, "RegUser", "3–16 letters or numbers", "", new Vector2(0f, 244f), new Vector2(820f, 64f));
+        regUserInput.onValueChanged.AddListener(_ => ClearAuthError());
+
+        CreateFieldTitle(registerPanel.transform, "RegPassTitle", "Password", new Vector2(0f, 184f));
+        regPassInput = CreateInputField(registerPanel.transform, "RegPass", "Create a strong password", "", new Vector2(-74f, 134f), new Vector2(672f, 64f), isPassword: true);
+        regPassInput.onValueChanged.AddListener(val =>
+        {
+            ClearAuthError();
+            UpdatePasswordChecklist(val);
+        });
+        Button regShowBtn = CreatePillButton(registerPanel.transform, "BtnRegShowPass", "Show", new Color(0.12f, 0.28f, 0.35f, 1f), new Vector2(342f, 134f), new Vector2(136f, 64f), 21, ToggleRegisterPasswordVisibility);
+        regShowPassLabel = regShowBtn.GetComponentInChildren<TMP_Text>();
+
+        // Compact Live Password Requirement Checklist (turns green as each rule is satisfied)
+        GameObject checkCard = CreateCard(registerPanel.transform, "PasswordChecklist", new Color(0.04f, 0.13f, 0.18f, 0.92f), new Vector2(0f, 58f), new Vector2(820f, 66f));
+        passRuleLenLabel = CreateText(checkCard.transform, "RuleLen", "○ 8+ chars", 18, FontStyles.Bold, new Color(0.70f, 0.80f, 0.84f), new Vector2(-275f, 0f), new Vector2(230f, 44f));
+        passRuleCapLabel = CreateText(checkCard.transform, "RuleCap", "○ 1 Capital (A-Z)", 18, FontStyles.Bold, new Color(0.70f, 0.80f, 0.84f), new Vector2(-30f, 0f), new Vector2(240f, 44f));
+        passRuleNumSymLabel = CreateText(checkCard.transform, "RuleNumSym", "○ 1 Number / !@#$%", 18, FontStyles.Bold, new Color(0.70f, 0.80f, 0.84f), new Vector2(250f, 0f), new Vector2(280f, 44f));
+
+        CreateFieldTitle(registerPanel.transform, "RegBirthTitle", "Date of Birth (MM/DD/YYYY)", new Vector2(0f, -6f));
+        regBirthInput = CreateInputField(registerPanel.transform, "RegBirth", "MM/DD/YYYY", "", new Vector2(0f, -56f), new Vector2(820f, 64f));
+        regBirthInput.onValueChanged.AddListener(_ => ClearAuthError());
+
+        Button regSubmit = CreatePillButton(registerPanel.transform, "BtnSubmitReg", "Create Account", RoatanVisualAssets.PalmGreen, new Vector2(0f, -148f), new Vector2(680f, 84f), 32, SubmitRegister);
         registerSubmitLabel = regSubmit.GetComponentInChildren<TMP_Text>();
 
+        // Social Sign-In Buttons (Continue with Google & Continue with Facebook)
+        CreateText(formCard.transform, "SocialDivider", "────────   OR CONTINUE WITH   ────────", 20, FontStyles.Bold, new Color(0.72f, 0.85f, 0.90f), new Vector2(0f, -270f), new Vector2(820f, 34f));
+
+        Button googleBtn = CreatePillButton(formCard.transform, "BtnGoogleAuth", "G   Continue with Google", new Color(0.96f, 0.97f, 0.99f, 1f), new Vector2(0f, -365f), new Vector2(760f, 84f), 27, () => SubmitSocialAuth("Google"));
+        TMP_Text googleLbl = googleBtn.GetComponentInChildren<TMP_Text>();
+        googleLbl.color = new Color(0.11f, 0.14f, 0.18f, 1f);
+
+        CreatePillButton(formCard.transform, "BtnFacebookAuth", "f   Continue with Facebook", new Color(0.094f, 0.467f, 0.949f, 1f), new Vector2(0f, -472f), new Vector2(760f, 84f), 27, () => SubmitSocialAuth("Facebook"));
+
+        UpdatePasswordChecklist(string.Empty);
         SelectAuthTab(isSignIn: true);
     }
 
@@ -1729,19 +2196,19 @@ public class RoatanOnlineController : MonoBehaviour
     {
         hubView = CreateStretchPanel(parent, "HubView", Color.clear);
 
-        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 605f), new Vector2(940f, 96f));
-        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 26, FontStyles.Bold, Color.white, new Vector2(-140f, 0f), new Vector2(580f, 58f));
+        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 640f), new Vector2(940f, 84f));
+        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 25, FontStyles.Bold, Color.white, new Vector2(-140f, 0f), new Vector2(580f, 54f));
         hubWelcomeLabel.alignment = TextAlignmentOptions.MidlineLeft;
-        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(335f, 0f), new Vector2(210f, 64f), 24, SubmitLogout);
+        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(335f, 0f), new Vector2(210f, 58f), 23, SubmitLogout);
         signOutBtnLabel = outBtn.GetComponentInChildren<TMP_Text>();
 
-        Button rankedBtn = CreatePillButton(hubView.transform, "BtnQuickRanked", "Quick Ranked Match", RoatanVisualAssets.IslandGold, new Vector2(0f, 495f), new Vector2(940f, 84f), 30, RequestQuickRanked);
+        Button rankedBtn = CreatePillButton(hubView.transform, "BtnQuickRanked", "Quick Ranked Match", RoatanVisualAssets.IslandGold, new Vector2(0f, 548f), new Vector2(940f, 72f), 28, RequestQuickRanked);
         quickRankedLabel = rankedBtn.GetComponentInChildren<TMP_Text>();
         quickRankedLabel.color = new Color(0.10f, 0.10f, 0.12f, 1f);
 
-        // Create Lobby Card (with Table Style, Match Format, 1-1 Playoff & Player Count)
-        GameObject createCard = CreateCard(hubView.transform, "CreateLobbyCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 205f), new Vector2(940f, 455f));
-        createLobbyNameInput = CreateInputField(createCard.transform, "LobbyNameInput", "New Lobby Name", "Roatan Table", new Vector2(0f, 174f), new Vector2(860f, 64f));
+        // Create Table Card (with Table Style, Match Format, 1-1 Playoff & Player Count)
+        GameObject createCard = CreateCard(hubView.transform, "CreateTableCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 282f), new Vector2(940f, 430f));
+        createLobbyNameInput = CreateInputField(createCard.transform, "TableNameInput", "New Table Name", "Roatan Table", new Vector2(0f, 162f), new Vector2(860f, 60f));
 
         // Table Style Row (Block | Draw)
         TableStyle[] styles = { TableStyle.BLOCK, TableStyle.DRAW };
@@ -1750,7 +2217,7 @@ public class RoatanOnlineController : MonoBehaviour
         for (int i = 0; i < styles.Length; i++)
         {
             TableStyle st = styles[i];
-            Button sb = CreatePillButton(createCard.transform, $"Style_{st}", styleLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(styleXs[i], 96f), new Vector2(416f, 62f), 24, () =>
+            Button sb = CreatePillButton(createCard.transform, $"Style_{st}", styleLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(styleXs[i], 88f), new Vector2(416f, 58f), 23, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 createTableStyle = st;
@@ -1766,7 +2233,7 @@ public class RoatanOnlineController : MonoBehaviour
         for (int i = 0; i < formats.Length; i++)
         {
             MatchFormat mf = formats[i];
-            Button fb = CreatePillButton(createCard.transform, $"Fmt_{mf}", formatLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(fmtXs[i], 18f), new Vector2(272f, 66f), 23, () =>
+            Button fb = CreatePillButton(createCard.transform, $"Fmt_{mf}", formatLabels[i], new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(fmtXs[i], 14f), new Vector2(272f, 60f), 22, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 createMatchFormat = mf;
@@ -1781,7 +2248,7 @@ public class RoatanOnlineController : MonoBehaviour
         for (int i = 0; i < maxChoices.Length; i++)
         {
             int count = maxChoices[i];
-            Button b = CreatePillButton(createCard.transform, $"MaxP_{count}", $"{count} Players", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(xs[i], -62f), new Vector2(272f, 62f), 23, () =>
+            Button b = CreatePillButton(createCard.transform, $"MaxP_{count}", $"{count} Players", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(xs[i], -60f), new Vector2(272f, 58f), 22, () =>
             {
                 RoatanSoundFX.Instance?.PlayTap();
                 createLobbyMaxPlayers = count;
@@ -1791,7 +2258,7 @@ public class RoatanOnlineController : MonoBehaviour
             createMaxPlayerObjs[count] = b.gameObject;
         }
 
-        createOneOnePlayoffBtn = CreatePillButton(createCard.transform, "BtnOnlineOneOne", "4P (2v2)  •  1-1 Playoff: OFF", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(0f, -62f), new Vector2(856f, 62f), 24, () =>
+        createOneOnePlayoffBtn = CreatePillButton(createCard.transform, "BtnOnlineOneOne", "4P (2v2)  •  1-1 Playoff: OFF", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(0f, -60f), new Vector2(856f, 58f), 23, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             createOneOnePlayoff = !createOneOnePlayoff;
@@ -1800,74 +2267,113 @@ public class RoatanOnlineController : MonoBehaviour
         createOneOnePlayoffImg = createOneOnePlayoffBtn.GetComponent<Image>();
         createOneOnePlayoffLabel = createOneOnePlayoffBtn.GetComponentInChildren<TMP_Text>();
 
-        Button createBtn = CreatePillButton(createCard.transform, "BtnCreateLobby", "Create Lobby", RoatanVisualAssets.PalmGreen, new Vector2(0f, -156f), new Vector2(640f, 76f), 28, RequestCreateLobby);
+        Button createBtn = CreatePillButton(createCard.transform, "BtnCreateTable", "Create Table", RoatanVisualAssets.PalmGreen, new Vector2(0f, -148f), new Vector2(640f, 70f), 27, RequestCreateLobby);
         createLobbyBtnLabel = createBtn.GetComponentInChildren<TMP_Text>();
 
         RefreshCreateLobbySelections();
 
-        // Join by Code Row
-        GameObject codeCard = CreateCard(hubView.transform, "CodeCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -88f), new Vector2(940f, 92f));
-        joinCodeInput = CreateInputField(codeCard.transform, "JoinCodeInput", "Private Lobby Code", "", new Vector2(-150f, 0f), new Vector2(560f, 64f));
-        Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 64f), 24, RequestJoinByCode);
+        // Join by Private Table Code Row
+        GameObject codeCard = CreateCard(hubView.transform, "CodeCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 12f), new Vector2(940f, 84f));
+        joinCodeInput = CreateInputField(codeCard.transform, "JoinCodeInput", "Private Table Code", "", new Vector2(-150f, 0f), new Vector2(560f, 60f));
+        Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 60f), 24, RequestJoinByCode);
         joinCodeBtnLabel = codeBtn.GetComponentInChildren<TMP_Text>();
 
-        // Public Lobbies Scroll List
-        GameObject listCard = CreateCard(hubView.transform, "LobbiesCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -455f), new Vector2(940f, 600f));
-        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshLobbies", "Refresh Lobbies", RoatanVisualAssets.BrightLagoon, new Vector2(0f, 245f), new Vector2(380f, 60f), 24, RequestLobbiesList);
+        // Public Tables + Online/Offline Players Browser Card
+        GameObject listCard = CreateCard(hubView.transform, "TablesBrowserCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -412f), new Vector2(940f, 730f));
+
+        Button tablesTabBtn = CreatePillButton(listCard.transform, "TabPublicTables", "Tables", RoatanVisualAssets.BrightLagoon, new Vector2(-285f, 314f), new Vector2(280f, 58f), 23, () => SelectHubBrowserTab(showPlayers: false));
+        hubTablesTabImg = tablesTabBtn.GetComponent<Image>();
+        hubTablesTabLabel = tablesTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button playersTabBtn = CreatePillButton(listCard.transform, "TabPlayersRoster", "Players (0 Online)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(25f, 314f), new Vector2(310f, 58f), 22, () => SelectHubBrowserTab(showPlayers: true));
+        hubPlayersTabImg = playersTabBtn.GetComponent<Image>();
+        hubPlayersTabLabel = playersTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshTables", "Refresh Tables", new Color(0.10f, 0.34f, 0.42f, 1f), new Vector2(325f, 314f), new Vector2(246f, 58f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RequestLobbiesList();
+            RequestPlayerRoster();
+        });
         refreshLobbiesBtnLabel = refreshBtn.GetComponentInChildren<TMP_Text>();
 
-        GameObject scrollObj = new GameObject("LobbiesScroll");
-        scrollObj.transform.SetParent(listCard.transform, false);
-        RectTransform srRect = scrollObj.AddComponent<RectTransform>();
-        srRect.anchorMin = Vector2.zero;
-        srRect.anchorMax = Vector2.one;
-        srRect.offsetMin = new Vector2(24f, 24f);
-        srRect.offsetMax = new Vector2(-24f, -106f);
-        scrollObj.AddComponent<RectMask2D>();
-        ScrollRect sr = scrollObj.AddComponent<ScrollRect>();
-        sr.horizontal = false;
-        sr.vertical = true;
-
-        GameObject contentObj = new GameObject("Content");
-        contentObj.transform.SetParent(scrollObj.transform, false);
-        lobbiesListContent = contentObj.AddComponent<RectTransform>();
-        lobbiesListContent.anchorMin = new Vector2(0f, 1f);
-        lobbiesListContent.anchorMax = new Vector2(1f, 1f);
-        lobbiesListContent.pivot = new Vector2(0.5f, 1f);
-        VerticalLayoutGroup vlg = contentObj.AddComponent<VerticalLayoutGroup>();
-        vlg.spacing = 14f;
-        vlg.childControlWidth = true;
-        vlg.childControlHeight = false;
-        ContentSizeFitter csf = contentObj.AddComponent<ContentSizeFitter>();
-        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        sr.content = lobbiesListContent;
-        sr.viewport = srRect;
+        hubTablesScrollObj = CreateVerticalScrollList(listCard.transform, "TablesScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out lobbiesListContent);
+        hubPlayersScrollObj = CreateVerticalScrollList(listCard.transform, "PlayersScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out playersRosterContent);
+        SelectHubBrowserTab(showPlayers: false);
     }
 
     private void BuildLobbyView(Transform parent)
     {
-        lobbyView = CreateStretchPanel(parent, "LobbyView", Color.clear);
+        lobbyView = CreateStretchPanel(parent, "TableWaitingRoomView", Color.clear);
 
-        GameObject card = CreateCard(lobbyView.transform, "InLobbyCard", new Color(0.06f, 0.18f, 0.24f, 0.95f), new Vector2(0f, 20f), new Vector2(940f, 1180f));
-        lobbyTitleLabel = CreateText(card.transform, "LTitle", "Lobby", 40, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 505f), new Vector2(860f, 62f));
-        lobbyInfoLabel = CreateText(card.transform, "LInfo", "", 23, FontStyles.Normal, new Color(0.84f, 0.95f, 0.98f), new Vector2(0f, 438f), new Vector2(860f, 76f));
-        lobbyTimerLabel = CreateText(card.transform, "LTimer", "Waiting for players...", 25, FontStyles.Italic, Color.white, new Vector2(0f, 366f), new Vector2(860f, 44f));
+        GameObject card = CreateCard(lobbyView.transform, "InTableCard", new Color(0.06f, 0.18f, 0.24f, 0.96f), new Vector2(0f, -10f), new Vector2(940f, 1340f));
+        lobbyTitleLabel = CreateText(card.transform, "TTitle", "Table", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 608f), new Vector2(860f, 56f));
+        lobbyInfoLabel = CreateText(card.transform, "TInfo", "", 22, FontStyles.Normal, new Color(0.84f, 0.95f, 0.98f), new Vector2(0f, 542f), new Vector2(860f, 66f));
+        lobbyTimerLabel = CreateText(card.transform, "TTimer", "Tap an open seat to switch, or add bots to start!", 22, FontStyles.Italic, Color.white, new Vector2(0f, 480f), new Vector2(860f, 38f));
 
-        GameObject playersBox = new GameObject("PlayersBox");
-        playersBox.transform.SetParent(card.transform, false);
-        lobbyPlayersContent = playersBox.AddComponent<RectTransform>();
-        lobbyPlayersContent.anchoredPosition = new Vector2(0f, 40f);
-        lobbyPlayersContent.sizeDelta = new Vector2(860f, 560f);
-        VerticalLayoutGroup vlg = playersBox.AddComponent<VerticalLayoutGroup>();
-        vlg.spacing = 16f;
-        vlg.childControlWidth = true;
-        vlg.childControlHeight = false;
+        // Visual 4-Seat / 2-Seat Domino Table Diagram
+        GameObject diagramObj = new GameObject("DominoTableDiagram");
+        diagramObj.transform.SetParent(card.transform, false);
+        tableDiagramRoot = diagramObj.AddComponent<RectTransform>();
+        tableDiagramRoot.anchoredPosition = new Vector2(0f, 150f);
+        tableDiagramRoot.sizeDelta = new Vector2(890f, 580f);
 
-        Button readyBtn = CreatePillButton(card.transform, "BtnLobbyReady", "Ready", RoatanVisualAssets.PalmGreen, new Vector2(0f, -385f), new Vector2(600f, 102f), 34, ToggleLobbyReady);
-        readyBtnImg = readyBtn.GetComponent<Image>();
-        readyBtnLabel = readyBtn.GetComponentInChildren<TMP_Text>();
+        GameObject felt = CreateCard(tableDiagramRoot, "TableFelt", new Color(0.055f, 0.32f, 0.24f, 0.96f), Vector2.zero, new Vector2(360f, 210f));
+        GameObject feltOutline = new GameObject("FeltBorder");
+        feltOutline.transform.SetParent(felt.transform, false);
+        RectTransform foRect = feltOutline.AddComponent<RectTransform>();
+        foRect.anchorMin = Vector2.zero;
+        foRect.anchorMax = Vector2.one;
+        foRect.offsetMin = Vector2.zero;
+        foRect.offsetMax = Vector2.zero;
+        Image foImg = feltOutline.AddComponent<Image>();
+        foImg.sprite = RoatanVisualAssets.RoundedOutlineSprite;
+        foImg.type = Image.Type.Sliced;
+        foImg.color = new Color(0.95f, 0.74f, 0.24f, 0.80f);
+        foImg.raycastTarget = false;
+        tableFeltLabel = CreateText(felt.transform, "FeltLabel", "ROATAN TABLE\n2v2 Partners", 22, FontStyles.Bold, new Color(0.96f, 0.92f, 0.76f), Vector2.zero, new Vector2(320f, 140f));
 
-        Button leaveBtn = CreatePillButton(card.transform, "BtnLobbyLeave", "Leave Lobby", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -505f), new Vector2(420f, 82f), 28, LeaveCurrentLobby);
+        // Host Bot Difficulty Selector Row (Novice | Pro | Master)
+        hostBotDifficultyRow = CreateCard(card.transform, "HostBotDiffRow", new Color(0.04f, 0.13f, 0.18f, 0.92f), new Vector2(0f, -195f), new Vector2(860f, 78f));
+        CreateText(hostBotDifficultyRow.transform, "BotDiffTitle", "Bot Level:", 21, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-315f, 0f), new Vector2(180f, 44f)).alignment = TextAlignmentOptions.MidlineLeft;
+        string[] botDiffs = { "Novice", "Pro", "Master" };
+        float[] diffXs = { -115f, 95f, 305f };
+        for (int i = 0; i < botDiffs.Length; i++)
+        {
+            string diffName = botDiffs[i];
+            Button db = CreatePillButton(hostBotDifficultyRow.transform, $"HostBotDiff_{diffName}", diffName, new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(diffXs[i], 0f), new Vector2(190f, 54f), 22, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                selectedHostBotDifficulty = diffName;
+                RefreshHostBotDifficultyButtons();
+            });
+            hostBotDiffBtns[diffName] = db.GetComponent<Image>();
+        }
+        RefreshHostBotDifficultyButtons();
+
+        // Quick Invite Online Players Button
+        CreatePillButton(card.transform, "BtnInviteOnlinePlayers", "Invite Online Players", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -290f), new Vector2(560f, 68f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RequestPlayerRoster();
+            if (invitePlayersModal != null)
+            {
+                RefreshInvitePlayersModalUI();
+                invitePlayersModal.transform.SetAsLastSibling();
+                invitePlayersModal.SetActive(true);
+            }
+        });
+
+        // Primary Action Row: Host Start Match + Ready Toggle
+        startMatchBtn = CreatePillButton(card.transform, "BtnStartMatch", "Start Match", RoatanVisualAssets.PalmGreen, new Vector2(-145f, -402f), new Vector2(470f, 94f), 30, RequestStartTableMatch);
+        startMatchBtnImg = startMatchBtn.GetComponent<Image>();
+        startMatchBtnLabel = startMatchBtn.GetComponentInChildren<TMP_Text>();
+
+        readyBtnObj = CreatePillButton(card.transform, "BtnTableReady", "Ready", RoatanVisualAssets.PalmGreen, new Vector2(265f, -402f), new Vector2(310f, 94f), 28, ToggleLobbyReady);
+        readyBtnImg = readyBtnObj.GetComponent<Image>();
+        readyBtnLabel = readyBtnObj.GetComponentInChildren<TMP_Text>();
+
+        Button leaveBtn = CreatePillButton(card.transform, "BtnTableLeave", "Leave Table", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -525f), new Vector2(440f, 78f), 27, LeaveCurrentLobby);
         leaveLobbyBtnLabel = leaveBtn.GetComponentInChildren<TMP_Text>();
     }
 
@@ -2054,6 +2560,61 @@ public class RoatanOnlineController : MonoBehaviour
         rejoinModal.SetActive(false);
     }
 
+    private void BuildIncomingInviteModal(Transform safeRoot)
+    {
+        incomingInviteModal = CreateStretchPanel(safeRoot, "IncomingInviteModal", new Color(0f, 0f, 0f, 0.76f));
+        GameObject card = CreateCard(incomingInviteModal.transform, "InviteCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 540f));
+        CreateText(card.transform, "InvTitle", "TABLE INVITE", 38, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 195f), new Vector2(760f, 58f));
+        incomingInviteBodyLabel = CreateText(card.transform, "InvBody", "", 27, FontStyles.Normal, Color.white, new Vector2(0f, 45f), new Vector2(760f, 180f));
+
+        CreatePillButton(card.transform, "BtnAcceptInvite", "Join Table", RoatanVisualAssets.PalmGreen, new Vector2(0f, -105f), new Vector2(520f, 88f), 32, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            incomingInviteModal.SetActive(false);
+            if (pendingIncomingInvite != null && EnsureConnectedForRequest())
+            {
+                if (currentLobby != null)
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveLobbyFrame());
+                    currentLobby = null;
+                }
+                if (!string.IsNullOrWhiteSpace(pendingIncomingInvite.TableCode))
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyWithCodeFrame(new LobbyCodeDto { Code = pendingIncomingInvite.TableCode }));
+                }
+                else
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = pendingIncomingInvite.TableId }));
+                }
+            }
+            pendingIncomingInvite = null;
+        });
+
+        CreatePillButton(card.transform, "BtnDeclineInvite", "Dismiss", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(0f, -205f), new Vector2(360f, 70f), 26, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            pendingIncomingInvite = null;
+            incomingInviteModal.SetActive(false);
+        });
+
+        incomingInviteModal.SetActive(false);
+    }
+
+    private void BuildInvitePlayersModal(Transform safeRoot)
+    {
+        invitePlayersModal = CreateStretchPanel(safeRoot, "InvitePlayersModal", new Color(0f, 0f, 0f, 0.76f));
+        GameObject card = CreateCard(invitePlayersModal.transform, "InviteRosterCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 960f));
+        CreateText(card.transform, "Title", "INVITE ONLINE PLAYERS", 34, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-40f, 422f), new Vector2(680f, 54f));
+        CreatePillButton(card.transform, "BtnCloseInviteModal", "X", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(375f, 422f), new Vector2(68f, 60f), 28, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            invitePlayersModal.SetActive(false);
+        });
+
+        CreateVerticalScrollList(card.transform, "InviteRosterScroll", new Vector2(28f, 28f), new Vector2(-28f, -110f), out invitePlayersListContent);
+        invitePlayersModal.SetActive(false);
+    }
+
     // ==================== HELPERS ====================
 
     private void ShowSubView(GameObject target)
@@ -2062,14 +2623,222 @@ public class RoatanOnlineController : MonoBehaviour
         hubView.SetActive(target == hubView);
         lobbyView.SetActive(target == lobbyView);
         onlineGameView.SetActive(target == onlineGameView);
+        if (target != authView)
+        {
+            SetServerSettingsExpanded(false);
+        }
     }
 
     private void SelectAuthTab(bool isSignIn)
     {
+        ClearAuthError();
         signInPanel.SetActive(isSignIn);
         registerPanel.SetActive(!isSignIn);
         signInTabImg.color = isSignIn ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
         registerTabImg.color = !isSignIn ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
+    }
+
+    private void ToggleLoginPasswordVisibility()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        loginPassVisible = !loginPassVisible;
+        ApplyPasswordFieldVisibility(loginPassInput, loginShowPassLabel, loginPassVisible);
+    }
+
+    private void ToggleRegisterPasswordVisibility()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        regPassVisible = !regPassVisible;
+        ApplyPasswordFieldVisibility(regPassInput, regShowPassLabel, regPassVisible);
+    }
+
+    private static void ApplyPasswordFieldVisibility(TMP_InputField field, TMP_Text toggleLabel, bool visible)
+    {
+        if (field != null)
+        {
+            field.contentType = visible ? TMP_InputField.ContentType.Standard : TMP_InputField.ContentType.Password;
+            field.ForceLabelUpdate();
+        }
+        if (toggleLabel != null)
+        {
+            toggleLabel.text = visible ? "Hide" : "Show";
+        }
+    }
+
+    private void UpdatePasswordChecklist(string password)
+    {
+        string value = password ?? string.Empty;
+        bool hasLen = value.Length >= 8;
+        bool hasCap = HasCapitalRegex.IsMatch(value);
+        bool hasNumSym = HasNumberOrSymbolRegex.IsMatch(value);
+
+        Color okColor = new Color(0.32f, 0.90f, 0.56f, 1f);
+        Color pendingColor = new Color(0.70f, 0.80f, 0.84f, 1f);
+
+        if (passRuleLenLabel != null)
+        {
+            passRuleLenLabel.text = hasLen ? "✓ 8+ chars" : "○ 8+ chars";
+            passRuleLenLabel.color = hasLen ? okColor : pendingColor;
+        }
+        if (passRuleCapLabel != null)
+        {
+            passRuleCapLabel.text = hasCap ? "✓ 1 Capital (A-Z)" : "○ 1 Capital (A-Z)";
+            passRuleCapLabel.color = hasCap ? okColor : pendingColor;
+        }
+        if (passRuleNumSymLabel != null)
+        {
+            passRuleNumSymLabel.text = hasNumSym ? "✓ 1 Number / !@#$%" : "○ 1 Number / !@#$%";
+            passRuleNumSymLabel.color = hasNumSym ? okColor : pendingColor;
+        }
+    }
+
+    private void ShowAuthError(string message)
+    {
+        if (authErrorBannerObj == null || authErrorBannerText == null) return;
+        authErrorBannerText.text = message;
+        authErrorBannerObj.SetActive(!string.IsNullOrWhiteSpace(message));
+    }
+
+    private void ClearAuthError()
+    {
+        if (authErrorBannerObj != null) authErrorBannerObj.SetActive(false);
+    }
+
+    private static string FormatFriendlyError(ResponseDto dto, string fallback)
+    {
+        if (dto != null && !string.IsNullOrWhiteSpace(dto.ErrorMessage))
+        {
+            return dto.ErrorMessage;
+        }
+        if (dto == null || !dto.ErrorType.HasValue)
+        {
+            return fallback;
+        }
+
+        switch (dto.ErrorType.Value)
+        {
+            case ErrorTypes.InvalidPasswordFormat:
+                return "Password must be at least 8 characters and include at least one capital letter (A-Z) and one number or special character (!@#$%).";
+            case ErrorTypes.InvalidEmailFormat:
+                return "Please enter a valid email address.";
+            case ErrorTypes.LoginTooLong:
+                return "Username must be 3–16 letters or numbers.";
+            case ErrorTypes.InvalidDateFormat:
+                return "Please enter a valid date of birth (MM/DD/YYYY).";
+            case ErrorTypes.UserAlreadyExist:
+                return "An account with that email or username already exists.";
+            case ErrorTypes.UserNotFound:
+                return "No account found with that username or email.";
+            case ErrorTypes.WrongLoggingOrPassword:
+                return "Incorrect username or password. Please try again.";
+            case ErrorTypes.UserAlreadyLoggedIn:
+                return "This account is already signed in on another device.";
+            case ErrorTypes.LobbyFull:
+                return "This table is full.";
+            case ErrorTypes.LobbyNotFound:
+                return "Table not found. Check the code and try again.";
+            case ErrorTypes.AlreadyInALobby:
+                return "You are already seated at a table.";
+            case ErrorTypes.CreationLobbyFailed:
+                return "You already host an active table.";
+            default:
+                return fallback;
+        }
+    }
+
+    private void SelectHubBrowserTab(bool showPlayers)
+    {
+        hubShowingPlayersTab = showPlayers;
+        if (hubTablesScrollObj != null) hubTablesScrollObj.SetActive(!showPlayers);
+        if (hubPlayersScrollObj != null) hubPlayersScrollObj.SetActive(showPlayers);
+        if (hubTablesTabImg != null) hubTablesTabImg.color = !showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (hubPlayersTabImg != null) hubPlayersTabImg.color = showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (showPlayers)
+        {
+            RefreshPlayersRosterUI();
+        }
+    }
+
+    private void RefreshPlayersRosterUI()
+    {
+        if (playersRosterContent == null) return;
+        foreach (GameObject row in spawnedRosterRows) Destroy(row);
+        spawnedRosterRows.Clear();
+
+        if (latestRoster.Count == 0)
+        {
+            GameObject emptyRow = CreateCard(playersRosterContent, "EmptyPlayersRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(860f, 84f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No registered players found yet.", 23, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(820f, 60f));
+            spawnedRosterRows.Add(emptyRow);
+            return;
+        }
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        foreach (PlayerPresenceDto player in latestRoster)
+        {
+            SpawnRosterRow(playersRosterContent, spawnedRosterRows, player, selfId);
+        }
+    }
+
+    private void RefreshInvitePlayersModalUI()
+    {
+        if (invitePlayersListContent == null) return;
+        foreach (GameObject row in spawnedInviteModalRows) Destroy(row);
+        spawnedInviteModalRows.Clear();
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        List<PlayerPresenceDto> invitable = latestRoster.Where(p => p.UserId != selfId).ToList();
+        if (invitable.Count == 0)
+        {
+            GameObject emptyRow = CreateCard(invitePlayersListContent, "NoInvitableRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(800f, 84f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No other players registered yet.", 23, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(760f, 60f));
+            spawnedInviteModalRows.Add(emptyRow);
+            return;
+        }
+
+        foreach (PlayerPresenceDto player in invitable)
+        {
+            SpawnRosterRow(invitePlayersListContent, spawnedInviteModalRows, player, selfId);
+        }
+    }
+
+    private void SpawnRosterRow(RectTransform parent, List<GameObject> bucket, PlayerPresenceDto player, long selfId)
+    {
+        PlayerPresenceDto captured = player;
+        Color bg = player.IsOnline
+            ? new Color(0.08f, 0.24f, 0.30f, 0.96f)
+            : new Color(0.07f, 0.14f, 0.18f, 0.80f);
+
+        GameObject row = CreateCard(parent, $"Roster_{player.UserId}", bg, Vector2.zero, new Vector2(840f, 92f));
+        row.AddComponent<LayoutElement>().preferredHeight = 92f;
+
+        Color dotColor = player.IsOnline ? new Color(0.22f, 0.88f, 0.48f, 1f) : new Color(0.50f, 0.56f, 0.60f, 1f);
+        CreateText(row.transform, "Dot", "●", 26, FontStyles.Bold, dotColor, new Vector2(-380f, 0f), new Vector2(36f, 44f));
+
+        string youSuffix = player.UserId == selfId ? " (You)" : string.Empty;
+        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  •  Elo {player.Elo}", 23, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-120f, 14f), new Vector2(470f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+        string statusText = player.IsOnline
+            ? (string.IsNullOrWhiteSpace(player.TableName) ? player.Status : $"{player.Status} • {player.TableName}")
+            : "Offline";
+        Color statusColor = !player.IsOnline
+            ? new Color(0.55f, 0.62f, 0.66f)
+            : (player.Status == "Available" ? new Color(0.32f, 0.90f, 0.56f) : RoatanVisualAssets.IslandGold);
+        CreateText(row.transform, "PStatus", statusText, 19, FontStyles.Normal, statusColor, new Vector2(-120f, -18f), new Vector2(470f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+        if (player.IsOnline && player.UserId != selfId)
+        {
+            bool canInviteNow = currentLobby != null && currentLobby.Players.Count < currentLobby.MaxNumberOfPlayer;
+            Button invBtn = CreatePillButton(row.transform, "BtnInvite", "Invite", canInviteNow ? RoatanVisualAssets.PalmGreen : new Color(0.18f, 0.28f, 0.34f, 0.85f), new Vector2(290f, 0f), new Vector2(168f, 56f), 21, () =>
+            {
+                RequestInvitePlayer(captured);
+            });
+            invBtn.interactable = canInviteNow;
+        }
+
+        bucket.Add(row);
     }
 
     private void RefreshConnectionBadge()
@@ -2078,17 +2847,17 @@ public class RoatanOnlineController : MonoBehaviour
         bool connected = Networking.Instance != null && Networking.Instance.IsConnected && !Networking.Instance.IsOfflineMode;
         if (isConnecting)
         {
-            connectionBadgeText.text = RoatanLocalization.T("connecting");
+            connectionBadgeText.text = $"● {RoatanLocalization.T("connecting")}";
             connectionBadgeBg.color = new Color(0.55f, 0.42f, 0.10f, 0.95f);
         }
         else if (connected)
         {
-            connectionBadgeText.text = $"{RoatanLocalization.T("server_connected")} ({Networking.Instance.CurrentServerUrl})";
+            connectionBadgeText.text = $"● {RoatanLocalization.T("server_connected")}";
             connectionBadgeBg.color = new Color(0.11f, 0.45f, 0.28f, 0.95f);
         }
         else
         {
-            connectionBadgeText.text = RoatanLocalization.T("server_offline");
+            connectionBadgeText.text = "● Server Disconnected — Tap Edit to Configure";
             connectionBadgeBg.color = new Color(0.58f, 0.19f, 0.16f, 0.95f);
         }
     }
@@ -2161,26 +2930,261 @@ public class RoatanOnlineController : MonoBehaviour
         return $"{fmtStr}  •  {styleStr}{playoffStr}";
     }
 
+    private bool IsLocalPlayerTableHost()
+    {
+        if (currentLobby == null || subscribedClient?.User == null) return false;
+        long myId = subscribedClient.User.Id;
+        if (currentLobby.Creator != null && currentLobby.Creator.Id == myId) return true;
+        if (currentLobby.IsHouseTable && (currentLobby.Creator == null || currentLobby.Creator.Id == 0))
+        {
+            PlayerDto firstHuman = currentLobby.Players?.FirstOrDefault(p => !p.IsBot);
+            return firstHuman != null && firstHuman.Id == myId;
+        }
+        return false;
+    }
+
+    private void RefreshHostBotDifficultyButtons()
+    {
+        foreach (KeyValuePair<string, Image> kv in hostBotDiffBtns)
+        {
+            if (kv.Value == null) continue;
+            bool selected = string.Equals(kv.Key, selectedHostBotDifficulty, StringComparison.OrdinalIgnoreCase);
+            kv.Value.color = selected ? RoatanVisualAssets.IslandGold : new Color(0.14f, 0.22f, 0.28f, 1f);
+            TMP_Text lbl = kv.Value.GetComponentInChildren<TMP_Text>();
+            if (lbl != null)
+            {
+                lbl.color = selected ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+            }
+        }
+    }
+
     private void RefreshLobbyView()
     {
         if (currentLobby == null) return;
         lobbyTitleLabel.text = currentLobby.Name;
         string codePart = !string.IsNullOrEmpty(currentLobby.Code) ? $"  •  Code: {currentLobby.Code}" : "";
         string rulesBadge = FormatLobbyRulesBadge(currentLobby.MatchFormat, currentLobby.TableStyle, currentLobby.OneOnePlayoff);
-        lobbyInfoLabel.text = $"{rulesBadge}\nPlayers: {currentLobby.Players.Count}/{currentLobby.MaxNumberOfPlayer}{codePart}";
+        int seatedCount = currentLobby.Players != null ? currentLobby.Players.Count : 0;
+        lobbyInfoLabel.text = $"{rulesBadge}\nSeated: {seatedCount}/{currentLobby.MaxNumberOfPlayer}{codePart}";
 
-        foreach (GameObject go in spawnedLobbyPlayerRows) Destroy(go);
-        spawnedLobbyPlayerRows.Clear();
+        bool isHost = IsLocalPlayerTableHost();
+        bool isTeam2v2 = currentLobby.MaxNumberOfPlayer == 4 &&
+                         (currentLobby.MatchFormat == MatchFormat.SIX_LOV || currentLobby.MatchFormat == MatchFormat.TWO_BEST);
 
-        foreach (PlayerDto p in currentLobby.Players)
+        if (tableFeltLabel != null)
         {
-            GameObject row = CreateCard(lobbyPlayersContent, $"P_{p.Id}", new Color(0.10f, 0.26f, 0.32f, 0.95f), Vector2.zero, new Vector2(840f, 90f));
-            row.AddComponent<LayoutElement>().preferredHeight = 90f;
-            CreateText(row.transform, "PName", $"{p.Name}   •   Elo {p.Elo}", 28, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(780f, 64f));
-            spawnedLobbyPlayerRows.Add(row);
+            string layoutHint = currentLobby.MaxNumberOfPlayer == 2
+                ? "1v1 Head-to-Head"
+                : (isTeam2v2 ? "2v2 Partners\n(Across = Padna)" : $"{currentLobby.MaxNumberOfPlayer}P Free-For-All");
+            tableFeltLabel.text = $"ROATAN TABLE\n<size=19><color=#F7C948>{layoutHint}</color></size>";
+        }
+
+        if (hostBotDifficultyRow != null)
+        {
+            hostBotDifficultyRow.SetActive(isHost);
+            RefreshHostBotDifficultyButtons();
+        }
+
+        // Build seat list from server Seats or fall back to Players list
+        List<LobbySeatDto> seats = new List<LobbySeatDto>();
+        if (currentLobby.Seats != null && currentLobby.Seats.Count == currentLobby.MaxNumberOfPlayer)
+        {
+            seats.AddRange(currentLobby.Seats.OrderBy(s => s.SeatIndex));
+        }
+        else
+        {
+            for (int i = 0; i < currentLobby.MaxNumberOfPlayer; i++)
+            {
+                PlayerDto occupant = currentLobby.Players != null && i < currentLobby.Players.Count ? currentLobby.Players[i] : null;
+                seats.Add(new LobbySeatDto
+                {
+                    SeatIndex = i,
+                    IsOccupied = occupant != null,
+                    IsBot = occupant != null && occupant.IsBot,
+                    BotDifficulty = occupant?.BotDifficulty,
+                    Player = occupant
+                });
+            }
+        }
+
+        long localUserId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        int localSeatIndex = -1;
+        foreach (LobbySeatDto s in seats)
+        {
+            if (s.IsOccupied && !s.IsBot && s.Player != null && s.Player.Id == localUserId)
+            {
+                localSeatIndex = s.SeatIndex;
+                break;
+            }
+        }
+
+        foreach (GameObject go in spawnedSeatCards) Destroy(go);
+        spawnedSeatCards.Clear();
+
+        // Seat positions around the visual domino table diagram
+        Vector2[] positions2P = { new Vector2(0f, -195f), new Vector2(0f, 195f) };
+        Vector2[] positions4P = { new Vector2(0f, -205f), new Vector2(305f, 0f), new Vector2(0f, 205f), new Vector2(-305f, 0f) };
+        Vector2[] seatPositions = currentLobby.MaxNumberOfPlayer == 2 ? positions2P : positions4P;
+
+        for (int i = 0; i < seats.Count && i < seatPositions.Length; i++)
+        {
+            LobbySeatDto seat = seats[i];
+            int capturedSeatIdx = seat.SeatIndex;
+            bool isTopOrBottom = currentLobby.MaxNumberOfPlayer == 2 || i == 0 || i == 2;
+            Vector2 cardSize = isTopOrBottom ? new Vector2(330f, 152f) : new Vector2(246f, 176f);
+
+            string roleLabel;
+            if (seat.SeatIndex == localSeatIndex)
+            {
+                roleLabel = $"Seat {seat.SeatIndex + 1}: You";
+            }
+            else if (isTeam2v2 && localSeatIndex >= 0 && ((seat.SeatIndex % 2) == (localSeatIndex % 2)))
+            {
+                roleLabel = $"Seat {seat.SeatIndex + 1}: Padna";
+            }
+            else if (isTeam2v2 && localSeatIndex < 0 && seat.SeatIndex == 2)
+            {
+                roleLabel = $"Seat {seat.SeatIndex + 1}: Padna";
+            }
+            else
+            {
+                roleLabel = $"Seat {seat.SeatIndex + 1}: Opponent";
+            }
+
+            Color seatBg;
+            if (seat.SeatIndex == localSeatIndex)
+            {
+                seatBg = new Color(0.10f, 0.36f, 0.30f, 0.98f);
+            }
+            else if (seat.IsOccupied && seat.IsBot)
+            {
+                seatBg = new Color(0.16f, 0.25f, 0.34f, 0.96f);
+            }
+            else if (seat.IsOccupied)
+            {
+                seatBg = new Color(0.10f, 0.26f, 0.34f, 0.96f);
+            }
+            else
+            {
+                seatBg = new Color(0.05f, 0.14f, 0.20f, 0.92f);
+            }
+
+            GameObject seatCard = CreateCard(tableDiagramRoot, $"SeatCard_{seat.SeatIndex}", seatBg, seatPositions[i], cardSize);
+            CreateText(seatCard.transform, "Role", roleLabel, 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, cardSize.y * 0.5f - 24f), new Vector2(cardSize.x - 16f, 28f));
+
+            if (seat.IsOccupied && seat.Player != null)
+            {
+                string occupantTitle = seat.IsBot
+                    ? $"{seat.Player.Name}"
+                    : (seat.Player.Id == localUserId ? $"{seat.Player.Name} (You)" : seat.Player.Name);
+                string subLine = seat.IsBot
+                    ? $"Bot • {seat.BotDifficulty ?? "Pro"}"
+                    : (seat.IsReady ? $"Elo {seat.Player.Elo} • READY" : $"Elo {seat.Player.Elo}");
+
+                CreateText(seatCard.transform, "OccName", occupantTitle, 21, FontStyles.Bold, Color.white, new Vector2(0f, 6f), new Vector2(cardSize.x - 18f, 34f));
+                CreateText(seatCard.transform, "OccSub", subLine, 17, FontStyles.Normal, seat.IsReady ? new Color(0.45f, 0.95f, 0.65f) : new Color(0.80f, 0.92f, 0.96f), new Vector2(0f, -24f), new Vector2(cardSize.x - 18f, 26f));
+
+                if (seat.IsBot && isHost)
+                {
+                    CreatePillButton(seatCard.transform, "BtnRemoveBot", "Remove Bot", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -cardSize.y * 0.5f + 26f), new Vector2(cardSize.x - 36f, 40f), 17, () =>
+                    {
+                        RequestRemoveBot(capturedSeatIdx);
+                    });
+                }
+            }
+            else
+            {
+                CreateText(seatCard.transform, "EmptyLbl", "Open Seat", 19, FontStyles.Italic, new Color(0.68f, 0.80f, 0.85f), new Vector2(0f, 12f), new Vector2(cardSize.x - 20f, 28f));
+
+                if (isHost)
+                {
+                    float btnW = isTopOrBottom ? 142f : 108f;
+                    float offsetX = isTopOrBottom ? 76f : 56f;
+                    CreatePillButton(seatCard.transform, "BtnSwitchSeat", "Switch", RoatanVisualAssets.BrightLagoon, new Vector2(-offsetX, -cardSize.y * 0.5f + 32f), new Vector2(btnW, 46f), 17, () =>
+                    {
+                        RequestSwitchSeat(capturedSeatIdx);
+                    });
+                    CreatePillButton(seatCard.transform, "BtnAddBot", "+ Add Bot", RoatanVisualAssets.PalmGreen, new Vector2(offsetX, -cardSize.y * 0.5f + 32f), new Vector2(btnW, 46f), 17, () =>
+                    {
+                        RequestAddBot(capturedSeatIdx);
+                    });
+                }
+                else
+                {
+                    CreatePillButton(seatCard.transform, "BtnSwitchSeat", "Switch Seat", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -cardSize.y * 0.5f + 32f), new Vector2(cardSize.x - 36f, 46f), 18, () =>
+                    {
+                        RequestSwitchSeat(capturedSeatIdx);
+                    });
+                }
+            }
+
+            spawnedSeatCards.Add(seatCard);
+        }
+
+        // Host Start Match Button vs Ready Button layout
+        if (startMatchBtn != null)
+        {
+            startMatchBtn.gameObject.SetActive(isHost);
+            bool allFilled = seatedCount >= currentLobby.MaxNumberOfPlayer;
+            startMatchBtn.interactable = allFilled;
+            if (startMatchBtnImg != null)
+            {
+                startMatchBtnImg.color = allFilled ? RoatanVisualAssets.PalmGreen : new Color(0.22f, 0.30f, 0.34f, 0.90f);
+            }
+            if (startMatchBtnLabel != null)
+            {
+                startMatchBtnLabel.text = allFilled
+                    ? "Start Match"
+                    : $"Fill Seats ({seatedCount}/{currentLobby.MaxNumberOfPlayer})";
+            }
+        }
+
+        if (readyBtnObj != null)
+        {
+            RectTransform rr = readyBtnObj.GetComponent<RectTransform>();
+            rr.anchoredPosition = isHost ? new Vector2(265f, -402f) : new Vector2(0f, -402f);
+            rr.sizeDelta = isHost ? new Vector2(310f, 94f) : new Vector2(560f, 94f);
         }
 
         RefreshLobbyReadyButton();
+    }
+
+    private TMP_Text CreateFieldTitle(Transform parent, string name, string title, Vector2 pos)
+    {
+        TMP_Text lbl = CreateText(parent, name, title, 21, FontStyles.Bold, RoatanVisualAssets.IslandGold, pos, new Vector2(820f, 30f));
+        lbl.alignment = TextAlignmentOptions.MidlineLeft;
+        return lbl;
+    }
+
+    private GameObject CreateVerticalScrollList(Transform parent, string name, Vector2 offsetMin, Vector2 offsetMax, out RectTransform contentRect)
+    {
+        GameObject scrollObj = new GameObject(name);
+        scrollObj.transform.SetParent(parent, false);
+        RectTransform srRect = scrollObj.AddComponent<RectTransform>();
+        srRect.anchorMin = Vector2.zero;
+        srRect.anchorMax = Vector2.one;
+        srRect.offsetMin = offsetMin;
+        srRect.offsetMax = offsetMax;
+        scrollObj.AddComponent<RectMask2D>();
+        ScrollRect sr = scrollObj.AddComponent<ScrollRect>();
+        sr.horizontal = false;
+        sr.vertical = true;
+
+        GameObject contentObj = new GameObject("Content");
+        contentObj.transform.SetParent(scrollObj.transform, false);
+        contentRect = contentObj.AddComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        VerticalLayoutGroup vlg = contentObj.AddComponent<VerticalLayoutGroup>();
+        vlg.spacing = 14f;
+        vlg.childControlWidth = true;
+        vlg.childControlHeight = false;
+        ContentSizeFitter csf = contentObj.AddComponent<ContentSizeFitter>();
+        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        sr.content = contentRect;
+        sr.viewport = srRect;
+        return scrollObj;
     }
 
     private void RefreshLobbyReadyButton()

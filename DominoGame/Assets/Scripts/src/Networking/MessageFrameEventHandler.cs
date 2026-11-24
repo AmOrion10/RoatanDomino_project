@@ -41,6 +41,13 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<ActiveMatchCheckResponseDto>> CheckActiveMatchResponseEvent;
     public event Action<ResponseObjectDto<RejoinMatchSnapshotDto>> RejoinMatchResponseEvent;
     public event Action<ResponseDto> AbandonMatchResponseEvent;
+    public event Action<ResponseDto> SocialAuthResponseEvent;
+    public event Action<ResponseObjectDto<PlayerRosterDto>> GetPlayerRosterResponseEvent;
+    public event Action<ResponseObjectDto<LobbyDto>> SwitchTableSeatResponseEvent;
+    public event Action<ResponseObjectDto<LobbyDto>> AddTableBotResponseEvent;
+    public event Action<ResponseObjectDto<LobbyDto>> RemoveTableBotResponseEvent;
+    public event Action<ResponseDto> StartTableMatchResponseEvent;
+    public event Action<ResponseDto> SendTableInviteResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -48,6 +55,9 @@ public class MessageFrameEventHandler
     public event Action<TimerDto> LobbyTimerUpdatedEvent;
     public event Action<PlayerReadyDto> LobbyPlayerReadyStateChangedEvent;
     public event Action LobbyTimerExpiredEvent;
+    public event Action<PlayerRosterDto> PlayerRosterUpdatedEvent;
+    public event Action<TableInviteDto> TableInviteReceivedEvent;
+    public event Action<LobbyDto> TableStateUpdatedEvent;
     public event Action<TimerDto> GameStartingTimerEvent;
     public event Action<TimerDto> GameGeneralTimerEvent;
     public event Action<HandDto> DominoDistrubitionEvent;
@@ -132,10 +142,40 @@ public class MessageFrameEventHandler
             case FrameCommandType.AbandonMatch:
                 AbandonMatchResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
                 break;
+            case FrameCommandType.SocialAuth:
+                SocialAuthResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.GetPlayerRoster:
+                GetPlayerRosterResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<PlayerRosterDto>>());
+                break;
+            case FrameCommandType.SwitchTableSeat:
+                SwitchTableSeatResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LobbyDto>>());
+                break;
+            case FrameCommandType.AddTableBot:
+                AddTableBotResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LobbyDto>>());
+                break;
+            case FrameCommandType.RemoveTableBot:
+                RemoveTableBotResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LobbyDto>>());
+                break;
+            case FrameCommandType.StartTableMatch:
+                StartTableMatchResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.SendTableInvite:
+                SendTableInviteResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
         }
 
         switch (frame.CommandType)
         {
+            case FrameCommandType.PlayerRosterUpdated:
+                PlayerRosterUpdatedEvent?.Invoke(frame.GetObjectFromMessage<PlayerRosterDto>());
+                break;
+            case FrameCommandType.TableInviteReceived:
+                TableInviteReceivedEvent?.Invoke(frame.GetObjectFromMessage<TableInviteDto>());
+                break;
+            case FrameCommandType.TableStateUpdated:
+                TableStateUpdatedEvent?.Invoke(frame.GetObjectFromMessage<LobbyDto>());
+                break;
             case FrameCommandType.PlayerJoinedLobby:
                 PlayerJoinedLobbyEvent?.Invoke(frame.GetObjectFromMessage<PlayerDto>());
                 break;

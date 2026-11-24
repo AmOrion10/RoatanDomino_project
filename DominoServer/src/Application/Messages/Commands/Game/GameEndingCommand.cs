@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
 using Application.Messages.Queries.Game;
@@ -30,6 +30,7 @@ public class GameEndingCommandHandler(IGameManager gameManager, IChatManager cha
             game.DistributeScore();
             foreach (GamePlayer player in game.Players)
             {
+                if (player.Id <= 0) continue;
                 int newPlayerScore = player.Score + player.Gain;
                 await userRepository.UpdateScore(player, newPlayerScore);
                 player.Score = newPlayerScore;

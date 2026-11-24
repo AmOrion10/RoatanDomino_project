@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces.Managers;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
@@ -26,6 +26,7 @@ public class GameStartingCommandHandler(IGameManager gameManager, IUserRepositor
             game.CalculateTotalBet();
             foreach (GamePlayer player in game.Players)
             {
+                if (player.Id <= 0) continue;
                 int newPlayerScore = player.Score - player.Bet;
                 if (newPlayerScore >= 100)
                 {

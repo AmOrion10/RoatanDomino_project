@@ -1,4 +1,4 @@
-﻿using Application;
+using Application;
 using Application.Common;
 using Application.Interfaces;
 using Application.Messages.Commands.User;
@@ -16,12 +16,19 @@ using Infrastructure.Services.Managers;
 
 namespace Infrastructure.Services.FrameHandlers;
 
-public class LoggingFrameHandlers(IMessageDispatcher dispatcher, ClientDisconnectionManager disconnectionManager, ResetPasswordManager resetPasswordManager) : BaseFrameHandlers
+public class LoggingFrameHandlers(
+    IMessageDispatcher dispatcher,
+    ClientDisconnectionManager disconnectionManager,
+    ResetPasswordManager resetPasswordManager,
+    SocialAuthService socialAuthService,
+    PresenceService presenceService) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
         handler.RegisterHandler(FrameCommandType.Registration, RegistrationCallback, needToBeLoggedIn: false);
         handler.RegisterHandler(FrameCommandType.Connection, ConnexionCallback, needToBeLoggedIn: false);
+        handler.RegisterHandler(FrameCommandType.SocialAuth, SocialAuthCallback, needToBeLoggedIn: false);
+        handler.RegisterHandler(FrameCommandType.GetPlayerRoster, GetPlayerRosterCallback);
         handler.RegisterHandler(FrameCommandType.Disconnection, DeconnexionCallback);
         handler.RegisterHandler(FrameCommandType.ReadyConnected, ReadyConnectedCallback);
         handler.RegisterHandler(FrameCommandType.AskResetPassword, AskResetPasswordCallback, needToBeLoggedIn: false);
@@ -39,6 +46,7 @@ public class LoggingFrameHandlers(IMessageDispatcher dispatcher, ClientDisconnec
             Birthdate = dto.Birthdate
         });
         await SendOkToClient(client, frame.CommandType);
+        await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
     }
 
     private async Task ConnexionCallback(MessageFrame frame, IClient client)
@@ -51,6 +59,27 @@ public class LoggingFrameHandlers(IMessageDispatcher dispatcher, ClientDisconnec
             Client = client
         });
         ResponseObjectDto<ConnectionResponseDto> response = DtoBuilder.GetConnectionResponseDto(userAndGuid);
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
+        await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
+    }
+
+    private async Task SocialAuthCallback(MessageFrame frame, IClient client)
+    {
+        SocialAuthDto dto = frame.GetObjectFromMessage<SocialAuthDto>();
+        Tuple<User, Guid> userAndGuid = await socialAuthService.SignInClientAsync(dto, client);
+        ResponseObjectDto<ConnectionResponseDto> response = DtoBuilder.GetConnectionResponseDto(userAndGuid);
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
+        await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
+    }
+
+    private async Task GetPlayerRosterCallback(MessageFrame frame, IClient client)
+    {
+        PlayerRosterDto roster = await presenceService.BuildRosterAsync();
+        ResponseObjectDto<PlayerRosterDto> response = new()
+        {
+            OkResult = true,
+            Object = roster
+        };
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 

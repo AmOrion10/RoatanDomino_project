@@ -68,5 +68,17 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         CheckActiveMatch,
         RejoinMatch,
         AbandonMatch,
+
+        // Social Auth, Player Presence & Table Waiting Room
+        SocialAuth,
+        GetPlayerRoster,
+        PlayerRosterUpdated,
+        SendTableInvite,
+        TableInviteReceived,
+        SwitchTableSeat,
+        AddTableBot,
+        RemoveTableBot,
+        StartTableMatch,
+        TableStateUpdated,
     }
 }

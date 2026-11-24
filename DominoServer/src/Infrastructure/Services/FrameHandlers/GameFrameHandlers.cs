@@ -145,6 +145,10 @@ public class GameFrameHandlers(
         {
             await SendEndGame(game.Id, clientsInGame);
         }
+        else if (game.PlayerPlaying.IsBotControlled)
+        {
+            // Bot turns execute automatically via GameServerUpdater on the short bot pacing timer
+        }
         else if (gameAction.Type == GameActionType.NextPlayerBlocked)
         {
             while (gameAction.Type != GameActionType.EndGame && gameAction.Type != GameActionType.NextPlayerCanPlay)
@@ -283,9 +287,12 @@ public class GameFrameHandlers(
 
     private async Task SendPlayerPossibleMoves(List<IClient> clientsInGame)
     {
+        if (clientsInGame.Count == 0) return;
         Game game = await dispatcher.Dispatch(new GetGameForPlayerQuery(clientsInGame[0]));
+        IClient? activeClient = clientsInGame.FirstOrDefault(c => c.User!.Id == game.PlayerPlaying.Id);
+        if (activeClient is null) return;
         PossibleMovesDto possibleMovesdto = DtoBuilder.GetPlayerPossibleMovesDto(game);
-        await clientsInGame.First(c => c.User!.Id == game.PlayerPlaying.Id).SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(possibleMovesdto)));
+        await activeClient.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(possibleMovesdto)));
     }
 
     private async Task SendEndGame(int gameId, List<IClient> clientsInGame)

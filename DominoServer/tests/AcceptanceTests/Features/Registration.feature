@@ -1,8 +1,8 @@
-﻿Feature: Registration
+Feature: Registration
 
 Scenario: Un client veut s'inscrire avec les bons champs
 	Given Un client d'id 1 connecté au serveur
-	When Le client 1 demande à s inscrire avec l email "user0@user.fr", le login "login1" et le mdp "password8"
+	When Le client 1 demande à s inscrire avec l email "user0@user.fr", le login "login1" et le mdp "Password8"
 	Then Le client est inscrit
 	And Le client 1 reçoit une confirmation
 

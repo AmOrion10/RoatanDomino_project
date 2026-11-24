@@ -24,10 +24,24 @@ public class GameManager(IChatManager chatManager) : IGameManager
 
     public void CreateGameFromLobby(Lobby lobby, int seed)
     {
-        List<GamePlayer> players = lobby.PlayersInLobby.Select(lobbyPlayer => new GamePlayer(lobbyPlayer)).ToList();
+        List<LobbyPlayer> orderedSeats = lobby.GetSeatedPlayersOrdered();
+        bool hasBots = orderedSeats.Any(p => p.IsBot);
+        List<GamePlayer> players = orderedSeats.Select(lobbyPlayer =>
+        {
+            GamePlayer gp = new(lobbyPlayer);
+            if (lobbyPlayer.IsBot)
+            {
+                gp.IsReady = true;
+                gp.IsBotControlled = true;
+                gp.IsPermanentlyBot = true;
+                gp.BotDifficulty = lobbyPlayer.BotDifficulty ?? "Pro";
+            }
+            return gp;
+        }).ToList();
+
         GameMode mode = lobby.Ranked ? GameMode.Ranked : GameMode.UnRanked;
         Game game;
-        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue || lobby.OneOnePlayoff.HasValue)
+        if (lobby.TableStyle.HasValue || lobby.MatchFormat.HasValue || lobby.OneOnePlayoff.HasValue || hasBots)
         {
             TableStyle tableStyle = lobby.TableStyle ?? TableStyle.DRAW;
             MatchFormat matchFormat = lobby.MatchFormat ?? MatchFormat.CUT_THROAT;

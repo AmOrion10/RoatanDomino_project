@@ -83,8 +83,11 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
                 await clientInGame.SendAsync(new NetworkFrame(framesToBeSendedToAllClients));
             }
 
-            IClient clientPlaying = clientsInGame.First(c => c.User!.Id == game.PlayerPlaying.Id);
-            await clientPlaying.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(DtoBuilder.GetPlayerPossibleMovesDto(game))));
+            IClient? clientPlaying = clientsInGame.FirstOrDefault(c => c.User!.Id == game.PlayerPlaying.Id);
+            if (clientPlaying is not null)
+            {
+                await clientPlaying.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(DtoBuilder.GetPlayerPossibleMovesDto(game))));
+            }
         }
     }
 

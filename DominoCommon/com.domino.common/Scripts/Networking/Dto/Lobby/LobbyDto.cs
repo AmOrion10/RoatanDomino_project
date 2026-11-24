@@ -40,5 +40,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "oop", NullValueHandling = NullValueHandling.Ignore)]
         public bool? OneOnePlayoff { get; set; }
+
+        [JsonProperty(PropertyName = "s", NullValueHandling = NullValueHandling.Ignore)]
+        public List<LobbySeatDto> Seats { get; set; } = new List<LobbySeatDto>();
+
+        [JsonProperty(PropertyName = "ht", NullValueHandling = NullValueHandling.Ignore)]
+        public bool IsHouseTable { get; set; }
     }
 }
