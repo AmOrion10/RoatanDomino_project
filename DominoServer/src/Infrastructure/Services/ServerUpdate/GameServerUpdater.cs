@@ -177,7 +177,8 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
 
             if (!game.IsLegacyDrawAdvance)
             {
-                await HandleRoatanTurnTimerExpired(dispatcher, game, clientsInGame, previousPlayerId);
+                IClientManager? cm = scope.ServiceProvider.GetService<IClientManager>();
+                await HandleRoatanTurnTimerExpired(dispatcher, game, clientsInGame, previousPlayerId, cm);
                 continue;
             }
 
@@ -241,7 +242,8 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         IMessageDispatcher dispatcher,
         Game game,
         List<IClient> clientsInGame,
-        long previousPlayerId)
+        long previousPlayerId,
+        IClientManager? clientManager = null)
     {
         List<Domino> drawnDominoes;
         GameMove? placedMove = null;
@@ -262,7 +264,19 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             (playedTile, passed, drawnDominoes, placedMove, _) = game.ExecuteTimeoutAutoPlay(previousPlayerId);
         }
 
-        // Send any auto-drawn dominoes first
+        List<IClient> spectators = [];
+        if (clientManager is not null)
+        {
+            HashSet<long> specIds = game.GetSpectatorUserIds().ToHashSet();
+            if (specIds.Count > 0)
+            {
+                spectators = clientManager.GetAllLoggedInClients()
+                    .Where(c => c.User is not null && specIds.Contains(c.User.Id))
+                    .ToList();
+            }
+        }
+
+        // Send any auto-drawn dominoes first (spectators only receive concealed publicDraw!)
         foreach (Domino drawn in drawnDominoes)
         {
             PlayerPlayDto publicDraw = new()
@@ -281,6 +295,10 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             {
                 PlayerPlayDto payload = clientInGame.User!.Id == previousPlayerId ? privateDraw : publicDraw;
                 await clientInGame.SendAsync(new NetworkFrame(MessageFrameBuilder.PlayerPlaysFrame(payload)));
+            }
+            foreach (IClient spectator in spectators)
+            {
+                try { await spectator.SendAsync(new NetworkFrame(MessageFrameBuilder.PlayerPlaysFrame(publicDraw))); } catch { }
             }
         }
 
@@ -315,21 +333,28 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             };
         }
 
+        List<MessageFrame> publicTurnFrames = [];
+        if (actionDto is not null)
+        {
+            publicTurnFrames.Add(MessageFrameBuilder.PlayerPlaysFrame(actionDto));
+        }
+        publicTurnFrames.Add(MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))));
+        publicTurnFrames.Add(MessageFrameBuilder.NumberOfDominoPerPlayerFrame(DtoBuilder.GetNumberOfDominoPerPlayerDto(numberOfDomino)));
+        NetworkFrame publicTurnNetworkFrame = new(publicTurnFrames);
+
         foreach (IClient clientInGame in clientsInGame)
         {
-            List<MessageFrame> frames = [];
-            if (actionDto is not null)
-            {
-                frames.Add(MessageFrameBuilder.PlayerPlaysFrame(actionDto));
-            }
-            frames.Add(MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))));
-            frames.Add(MessageFrameBuilder.NumberOfDominoPerPlayerFrame(DtoBuilder.GetNumberOfDominoPerPlayerDto(numberOfDomino)));
-            await clientInGame.SendAsync(new NetworkFrame(frames));
+            await clientInGame.SendAsync(publicTurnNetworkFrame);
 
             if (!handEnded && clientInGame.User!.Id == game.PlayerPlaying.Id)
             {
                 await clientInGame.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(DtoBuilder.GetPlayerPossibleMovesDto(game))));
             }
+        }
+
+        foreach (IClient spectator in spectators)
+        {
+            try { await spectator.SendAsync(publicTurnNetworkFrame); } catch { }
         }
 
         if (handEnded)
@@ -349,6 +374,11 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             foreach (IClient clientInGame in clientsInGame)
             {
                 await clientInGame.SendAsync(endFrame);
+            }
+            NetworkFrame specEndFrame = new(MessageFrameBuilder.EndGameFrame(DtoBuilder.GetEndGameDto(true, endedGame)));
+            foreach (IClient spectator in spectators)
+            {
+                try { await spectator.SendAsync(specEndFrame); } catch { }
             }
             await dispatcher.Dispatch(new SaveGameCommand(endedGame.Id));
         }

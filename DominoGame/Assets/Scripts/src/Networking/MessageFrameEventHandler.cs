@@ -66,6 +66,12 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<TeamLeaderboardDto>> GetTeamLeaderboardResponseEvent;
     public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> SendTeamChallengeResponseEvent;
     public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> RespondTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<SpectatorMatchSnapshotDto>> JoinAsSpectatorResponseEvent;
+    public event Action<ResponseDto> LeaveSpectatorResponseEvent;
+    public event Action<ResponseObjectDto<DirectChallengeActionResponseDto>> SendDirectChallengeResponseEvent;
+    public event Action<ResponseObjectDto<DirectChallengeActionResponseDto>> RespondDirectChallengeResponseEvent;
+    public event Action<ResponseObjectDto<ChatMessageDto>> SendSocialChatMessageResponseEvent;
+    public event Action<ResponseObjectDto<ChatHistoryDto>> GetChatHistoryResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -86,6 +92,9 @@ public class MessageFrameEventHandler
     public event Action<EndGameDto> EndGameEvent;
     public event Action<MatchEloBreakdownDto> MatchEloBreakdownEvent;
     public event Action<TeamChallengeDto> TeamChallengeNotificationEvent;
+    public event Action<SpectatorCountUpdateDto> SpectatorCountUpdatedEvent;
+    public event Action<DirectChallengeDto> DirectChallengeNotificationEvent;
+    public event Action<ChatMessageDto> ChatMessageReceivedEvent;
     public event Action<ReceiveChatMessageDto> ReceiveChatMessageEvent;
     public event Action<ChatDto> JoinChatEvent;
     public event Action<ChatDto> LeaveChatEvent;
@@ -234,6 +243,24 @@ public class MessageFrameEventHandler
             case FrameCommandType.RespondTeamChallenge:
                 RespondTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
                 break;
+            case FrameCommandType.JoinAsSpectator:
+                JoinAsSpectatorResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<SpectatorMatchSnapshotDto>>());
+                break;
+            case FrameCommandType.LeaveSpectator:
+                LeaveSpectatorResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.SendDirectChallenge:
+                SendDirectChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<DirectChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.RespondDirectChallenge:
+                RespondDirectChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<DirectChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.SendChatMessage:
+                SendSocialChatMessageResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ChatMessageDto>>());
+                break;
+            case FrameCommandType.GetChatHistory:
+                GetChatHistoryResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ChatHistoryDto>>());
+                break;
         }
 
         switch (frame.CommandType)
@@ -291,6 +318,15 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.TeamChallengeNotification:
                 TeamChallengeNotificationEvent?.Invoke(frame.GetObjectFromMessage<TeamChallengeDto>());
+                break;
+            case FrameCommandType.SpectatorCountUpdated:
+                SpectatorCountUpdatedEvent?.Invoke(frame.GetObjectFromMessage<SpectatorCountUpdateDto>());
+                break;
+            case FrameCommandType.DirectChallengeNotification:
+                DirectChallengeNotificationEvent?.Invoke(frame.GetObjectFromMessage<DirectChallengeDto>());
+                break;
+            case FrameCommandType.ChatMessageReceived:
+                ChatMessageReceivedEvent?.Invoke(frame.GetObjectFromMessage<ChatMessageDto>());
                 break;
             case FrameCommandType.GameGeneralTimer:
                 GameGeneralTimerEvent?.Invoke(frame.GetObjectFromMessage<TimerDto>());

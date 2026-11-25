@@ -516,6 +516,25 @@ public class Program
                         )");
                 }
                 catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync("UPDATE Teams SET max_members = 6 WHERE max_members > 6");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS SocialChatMessages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            channel_type INT NOT NULL DEFAULT 0,
+                            team_id BIGINT NULL,
+                            sender_user_id BIGINT NOT NULL,
+                            recipient_user_id BIGINT NULL,
+                            body VARCHAR(1000) NOT NULL,
+                            sent_utc DATETIME NOT NULL
+                        )");
+                }
+                catch { }
             }
 
             if (!await db.Dominos.AnyAsync())

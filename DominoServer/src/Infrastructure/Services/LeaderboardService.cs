@@ -5,14 +5,43 @@ using Domain;
 using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 
+using Infrastructure.Database;
+using Microsoft.EntityFrameworkCore;
+
 namespace Infrastructure.Services;
 
-public class LeaderboardService(IUserRepository userRepository)
+public class LeaderboardService(IUserRepository userRepository, ApplicationDbContext? dbContext = null)
 {
     public async Task<LeaderboardDto> BuildLeaderboardAsync(long? requestingUserId = null, int limit = 100)
     {
         List<User> allUsers = await userRepository.GetAllUsers();
-        return BuildFromUsers(allUsers, requestingUserId, limit);
+        LeaderboardDto dto = BuildFromUsers(allUsers, requestingUserId, limit);
+        if (dbContext is not null)
+        {
+            Dictionary<long, (long TeamId, string TeamTag)> teamByUser = [];
+            var memberships = await dbContext.TeamMembers
+                .Include(m => m.Team)
+                .Select(m => new { m.UserId, m.TeamId, Tag = m.Team.Tag })
+                .ToListAsync();
+            foreach (var m in memberships)
+            {
+                teamByUser[m.UserId] = (m.TeamId, m.Tag);
+            }
+            foreach (LeaderboardEntryDto entry in dto.Entries)
+            {
+                if (teamByUser.TryGetValue(entry.UserId, out (long TeamId, string TeamTag) tm))
+                {
+                    entry.TeamId = tm.TeamId;
+                    entry.TeamTag = tm.TeamTag;
+                }
+            }
+            if (dto.LocalPlayerEntry is not null && teamByUser.TryGetValue(dto.LocalPlayerEntry.UserId, out (long TeamId, string TeamTag) localTm))
+            {
+                dto.LocalPlayerEntry.TeamId = localTm.TeamId;
+                dto.LocalPlayerEntry.TeamTag = localTm.TeamTag;
+            }
+        }
+        return dto;
     }
 
     public static LeaderboardDto BuildFromUsers(IEnumerable<User> users, long? requestingUserId = null, int limit = 100)

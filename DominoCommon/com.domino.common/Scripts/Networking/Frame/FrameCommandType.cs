@@ -107,5 +107,15 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         SendTeamChallenge,
         RespondTeamChallenge,
         TeamChallengeNotification,
+
+        // Live Match Spectating, Direct Player Challenges & Team/DM Chat
+        JoinAsSpectator,
+        LeaveSpectator,
+        SpectatorCountUpdated,
+        SendDirectChallenge,
+        RespondDirectChallenge,
+        DirectChallengeNotification,
+        GetChatHistory,
+        ChatMessageReceived,
     }
 }

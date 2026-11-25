@@ -6,7 +6,7 @@ namespace Infrastructure.Services;
 
 public class MessageFrameHandlers(IMessageFrameHandler handler, LoggingFrameHandlers loggingFrameHandlers, LobbyFrameHandlers lobbyFrameHandlers, 
     ChatFrameHandlers chatFrameHandlers, ProfileFrameHandlers profileFrameHandlers, GameFrameHandlers gameFrameHandlers, FriendFrameHandlers friendFrameHandlers,
-    TeamFrameHandlers teamFrameHandlers)
+    TeamFrameHandlers teamFrameHandlers, DirectChallengeFrameHandlers directChallengeFrameHandlers)
 {
     public void RegisterHandlers()
     {
@@ -17,5 +17,6 @@ public class MessageFrameHandlers(IMessageFrameHandler handler, LoggingFrameHand
         gameFrameHandlers.RegisterHandlers(handler);
         friendFrameHandlers.RegisterHandlers(handler);
         teamFrameHandlers.RegisterHandlers(handler);
+        directChallengeFrameHandlers.RegisterHandlers(handler);
     }
 }

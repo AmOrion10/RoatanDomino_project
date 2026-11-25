@@ -59,6 +59,12 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
         [JsonProperty(PropertyName = "ab", NullValueHandling = NullValueHandling.Ignore)]
         public string AvatarBase64 { get; set; }
 
+        [JsonProperty(PropertyName = "tmi", NullValueHandling = NullValueHandling.Ignore)]
+        public long? TeamId { get; set; }
+
+        [JsonProperty(PropertyName = "tmt", NullValueHandling = NullValueHandling.Ignore)]
+        public string TeamTag { get; set; }
+
         [JsonIgnore]
         public double AccuracyPercent => RoatanRankTierHelper.CalculateAccuracyPercent(OptimalMoves, TotalMoves);
     }

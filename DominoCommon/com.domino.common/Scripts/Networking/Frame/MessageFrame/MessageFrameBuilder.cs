@@ -250,5 +250,32 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame TeamChallengeNotificationFrame(TeamChallengeDto dto)
             => new MessageFrame(FrameCommandType.TeamChallengeNotification, dto.ToJson());
+
+        public static MessageFrame JoinAsSpectatorFrame(JoinSpectatorDto dto)
+            => new MessageFrame(FrameCommandType.JoinAsSpectator, dto.ToJson());
+
+        public static MessageFrame LeaveSpectatorFrame(LeaveSpectatorDto dto = null)
+            => new MessageFrame(FrameCommandType.LeaveSpectator, (dto ?? new LeaveSpectatorDto()).ToJson());
+
+        public static MessageFrame SpectatorCountUpdatedFrame(SpectatorCountUpdateDto dto)
+            => new MessageFrame(FrameCommandType.SpectatorCountUpdated, dto.ToJson());
+
+        public static MessageFrame SendDirectChallengeFrame(SendDirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.SendDirectChallenge, dto.ToJson());
+
+        public static MessageFrame RespondDirectChallengeFrame(RespondDirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RespondDirectChallenge, dto.ToJson());
+
+        public static MessageFrame DirectChallengeNotificationFrame(DirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.DirectChallengeNotification, dto.ToJson());
+
+        public static MessageFrame SendSocialChatMessageFrame(ChatMessageDto dto)
+            => new MessageFrame(FrameCommandType.SendChatMessage, dto.ToJson());
+
+        public static MessageFrame GetChatHistoryFrame(GetChatHistoryDto dto)
+            => new MessageFrame(FrameCommandType.GetChatHistory, dto.ToJson());
+
+        public static MessageFrame ChatMessageReceivedFrame(ChatMessageDto dto)
+            => new MessageFrame(FrameCommandType.ChatMessageReceived, dto.ToJson());
     }
 }

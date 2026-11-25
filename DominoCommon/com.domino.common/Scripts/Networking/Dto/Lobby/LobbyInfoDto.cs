@@ -55,5 +55,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "tbn", NullValueHandling = NullValueHandling.Ignore)]
         public string TeamBName { get; set; }
+
+        [JsonProperty(PropertyName = "inpg", NullValueHandling = NullValueHandling.Ignore)]
+        public bool IsInProgress { get; set; }
+
+        [JsonProperty(PropertyName = "sc", NullValueHandling = NullValueHandling.Ignore)]
+        public int SpectatorCount { get; set; }
     }
 }

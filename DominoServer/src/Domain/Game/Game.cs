@@ -82,6 +82,53 @@ public class Game
     public bool EloAppliedForCurrentMatch { get; set; }
     public MatchEloBreakdownDto? LastMatchEloBreakdown { get; set; }
 
+    private readonly HashSet<long> spectatorUserIds = [];
+
+    public int SpectatorCount
+    {
+        get
+        {
+            lock (spectatorUserIds)
+            {
+                return spectatorUserIds.Count;
+            }
+        }
+    }
+
+    public bool AddSpectator(long userId)
+    {
+        if (userId <= 0) return false;
+        if (Players.Any(p => p.Id == userId)) return false;
+        lock (spectatorUserIds)
+        {
+            return spectatorUserIds.Add(userId);
+        }
+    }
+
+    public bool RemoveSpectator(long userId)
+    {
+        lock (spectatorUserIds)
+        {
+            return spectatorUserIds.Remove(userId);
+        }
+    }
+
+    public bool HasSpectator(long userId)
+    {
+        lock (spectatorUserIds)
+        {
+            return spectatorUserIds.Contains(userId);
+        }
+    }
+
+    public List<long> GetSpectatorUserIds()
+    {
+        lock (spectatorUserIds)
+        {
+            return spectatorUserIds.ToList();
+        }
+    }
+
     private GameGridDto gridDto = new(NumberOfRows, NumberOfCols);
     private DominoPlacer placer;
     private int currentPlayerIndex;

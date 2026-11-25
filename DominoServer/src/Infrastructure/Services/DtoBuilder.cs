@@ -139,34 +139,105 @@ public static class DtoBuilder
         };
     }
 
-    public static ResponseObjectDto<LobbiesInfoDto> GetLobbiesInfoDto(List<Lobby> lobbies)
+    public static ResponseObjectDto<LobbiesInfoDto> GetLobbiesInfoDto(List<Lobby> lobbies, List<Game>? activeGames = null)
     {
+        List<LobbyInfoDto> items = lobbies.Select(l => new LobbyInfoDto
+        {
+            Creator = l.Creator.Login,
+            Id = l.Id,
+            MaxNumberOfPlayer = l.MaxNumberOfPlayer,
+            NumberOfPlayer = l.PlayersInLobby.Count,
+            Name = l.Name,
+            IsPublic = l.IsPublic,
+            TableStyle = l.TableStyle,
+            MatchFormat = l.MatchFormat,
+            OneOnePlayoff = l.OneOnePlayoff,
+            IsHouseTable = l.IsHouseTable,
+            IsTeamChallenge = l.IsTeamChallenge,
+            TeamAId = l.TeamAId,
+            TeamAName = l.TeamAName,
+            TeamBId = l.TeamBId,
+            TeamBName = l.TeamBName,
+            IsInProgress = false,
+            SpectatorCount = 0,
+            SeatedPlayers = l.GetSeatedPlayersOrdered()
+                .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
+                .ToList()
+        }).ToList();
+
+        if (activeGames is not null)
+        {
+            HashSet<int> existingIds = items.Select(x => x.Id).ToHashSet();
+            foreach (Game game in activeGames)
+            {
+                if (game.IsMatchOver || existingIds.Contains(game.Id)) continue;
+                items.Add(new LobbyInfoDto
+                {
+                    Id = game.Id,
+                    Creator = game.Players.FirstOrDefault()?.Login ?? "Table",
+                    MaxNumberOfPlayer = game.Players.Count,
+                    NumberOfPlayer = game.Players.Count,
+                    Name = string.IsNullOrWhiteSpace(game.MatchTitle) ? $"Live Match #{game.Id}" : game.MatchTitle,
+                    IsPublic = true,
+                    TableStyle = game.TableStyle,
+                    MatchFormat = game.MatchFormat,
+                    OneOnePlayoff = game.OneOnePlayoff,
+                    IsTeamChallenge = game.IsTeamChallenge,
+                    TeamAId = game.TeamAId,
+                    TeamAName = game.TeamAName,
+                    TeamBId = game.TeamBId,
+                    TeamBName = game.TeamBName,
+                    IsInProgress = true,
+                    SpectatorCount = game.SpectatorCount,
+                    SeatedPlayers = game.Players
+                        .Select(p => p.IsPermanentlyBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
+                        .ToList()
+                });
+            }
+        }
+
         return new ResponseObjectDto<LobbiesInfoDto>
         {
             Object = new LobbiesInfoDto
             {
-                Lobbies = lobbies.Select(l => new LobbyInfoDto
-                {
-                    Creator = l.Creator.Login,
-                    Id = l.Id,
-                    MaxNumberOfPlayer = l.MaxNumberOfPlayer,
-                    NumberOfPlayer = l.PlayersInLobby.Count,
-                    Name = l.Name,
-                    IsPublic = l.IsPublic,
-                    TableStyle = l.TableStyle,
-                    MatchFormat = l.MatchFormat,
-                    OneOnePlayoff = l.OneOnePlayoff,
-                    IsHouseTable = l.IsHouseTable,
-                    IsTeamChallenge = l.IsTeamChallenge,
-                    TeamAId = l.TeamAId,
-                    TeamAName = l.TeamAName,
-                    TeamBId = l.TeamBId,
-                    TeamBName = l.TeamBName,
-                    SeatedPlayers = l.GetSeatedPlayersOrdered()
-                        .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
-                        .ToList()
-                }).ToList()
+                Lobbies = items
             }
+        };
+    }
+
+    public static SpectatorMatchSnapshotDto GetSpectatorMatchSnapshotDto(Game game)
+    {
+        List<MoveDto> boardMoves = game.MoveHistory.MoveHistory.Select(m => new MoveDto
+        {
+            Row = m.Row,
+            Col = m.Col,
+            Orientation = m.Orientation,
+            PlayerId = m.PlayerId,
+            Domino = new DominoDto
+            {
+                Side1 = m.Domino.Side1,
+                Side2 = m.Domino.Side2
+            }
+        }).ToList();
+
+        return new SpectatorMatchSnapshotDto
+        {
+            GameId = game.Id,
+            MatchTitle = string.IsNullOrWhiteSpace(game.MatchTitle) ? $"Live Match #{game.Id}" : game.MatchTitle,
+            MatchFormat = game.MatchFormat,
+            TableStyle = game.TableStyle,
+            HandNumber = game.HandNumber,
+            CurrentTurnPlayerId = game.Players.Count > 0 ? game.PlayerPlaying.Id : 0,
+            TurnTimer = GetTimerDto(game.PlayerTurnTimer),
+            BoardMoves = boardMoves,
+            NumberOfDominoPerPlayer = game.GetNumberOfDominoAllPlayer(),
+            TeamScores = new Dictionary<int, int>(game.TeamScores),
+            PlayerScores = new Dictionary<long, int>(game.PlayerScores),
+            Players = game.Players.Select((p, idx) => BuildPlayerDto(p, p.IsPermanentlyBot, p.BotDifficulty, idx)).ToList(),
+            SpectatorCount = game.SpectatorCount,
+            IsTeamChallenge = game.IsTeamChallenge,
+            TeamAName = game.TeamAName,
+            TeamBName = game.TeamBName
         };
     }
 

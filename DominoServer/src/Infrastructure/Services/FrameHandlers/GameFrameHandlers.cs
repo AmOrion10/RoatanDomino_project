@@ -26,7 +26,8 @@ public class GameFrameHandlers(
     IGameManager gameManager,
     ITokenManager tokenManager,
     IChatManager chatManager,
-    GameServerUpdater gameServerUpdater) : BaseFrameHandlers
+    GameServerUpdater gameServerUpdater,
+    IClientManager? clientManager = null) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -36,6 +37,116 @@ public class GameFrameHandlers(
         handler.RegisterHandler(FrameCommandType.CheckActiveMatch, CheckActiveMatchCallback, needToBeLoggedIn: false);
         handler.RegisterHandler(FrameCommandType.RejoinMatch, RejoinMatchCallback, needToBeLoggedIn: false);
         handler.RegisterHandler(FrameCommandType.AbandonMatch, AbandonMatchCallback, needToBeLoggedIn: false);
+        handler.RegisterHandler(FrameCommandType.JoinAsSpectator, JoinAsSpectatorCallback);
+        handler.RegisterHandler(FrameCommandType.LeaveSpectator, LeaveSpectatorCallback);
+    }
+
+    private async Task JoinAsSpectatorCallback(MessageFrame frame, IClient client)
+    {
+        JoinSpectatorDto req = frame.GetObjectFromMessage<JoinSpectatorDto>();
+        Game? game = gameManager.GetById(req.GameId);
+        if (game is null || game.IsMatchOver)
+        {
+            ResponseObjectDto<SpectatorMatchSnapshotDto> fail = new()
+            {
+                OkResult = false,
+                ErrorType = ErrorTypes.Unknown,
+                ErrorMessage = "That match is no longer live."
+            };
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(fail, FrameCommandType.JoinAsSpectator)));
+            return;
+        }
+
+        long userId = client.User?.Id ?? 0;
+        if (game.Players.Any(p => p.Id == userId))
+        {
+            ResponseObjectDto<SpectatorMatchSnapshotDto> fail = new()
+            {
+                OkResult = false,
+                ErrorType = ErrorTypes.Unknown,
+                ErrorMessage = "You are already playing in this match."
+            };
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(fail, FrameCommandType.JoinAsSpectator)));
+            return;
+        }
+
+        // If previously spectating another game, notify that game's viewers/players too
+        Game? previousGame = gameManager.GetSpectatedGameForUser(userId);
+        gameManager.AddSpectator(game.Id, userId);
+
+        SpectatorMatchSnapshotDto snapshot = DtoBuilder.GetSpectatorMatchSnapshotDto(game);
+        ResponseObjectDto<SpectatorMatchSnapshotDto> response = new()
+        {
+            OkResult = true,
+            Object = snapshot
+        };
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, FrameCommandType.JoinAsSpectator)));
+
+        if (previousGame is not null && previousGame.Id != game.Id)
+        {
+            await BroadcastSpectatorCountAsync(previousGame);
+        }
+        await BroadcastSpectatorCountAsync(game);
+    }
+
+    private async Task LeaveSpectatorCallback(MessageFrame frame, IClient client)
+    {
+        LeaveSpectatorDto? req = string.IsNullOrWhiteSpace(frame.Message)
+            ? null
+            : frame.GetObjectFromMessage<LeaveSpectatorDto>();
+
+        long userId = client.User?.Id ?? 0;
+        List<Game> affected = [];
+        if (req is not null && req.GameId > 0)
+        {
+            if (gameManager.RemoveSpectator(req.GameId, userId))
+            {
+                Game? g = gameManager.GetById(req.GameId);
+                if (g is not null) affected.Add(g);
+            }
+        }
+        else
+        {
+            affected = gameManager.RemoveSpectatorFromAllGames(userId);
+        }
+
+        await SendOkToClient(client, FrameCommandType.LeaveSpectator);
+
+        foreach (Game g in affected)
+        {
+            await BroadcastSpectatorCountAsync(g);
+        }
+    }
+
+    private List<IClient> GetSpectatorClients(Game game)
+    {
+        if (clientManager is null) return [];
+        HashSet<long> specIds = game.GetSpectatorUserIds().ToHashSet();
+        if (specIds.Count == 0) return [];
+        return clientManager.GetAllLoggedInClients()
+            .Where(c => c.User is not null && specIds.Contains(c.User.Id))
+            .ToList();
+    }
+
+    private async Task BroadcastSpectatorCountAsync(Game game)
+    {
+        if (clientManager is null) return;
+        HashSet<long> recipientIds = game.Players.Select(p => p.Id).Concat(game.GetSpectatorUserIds()).ToHashSet();
+        if (recipientIds.Count == 0) return;
+
+        NetworkFrame countFrame = new(MessageFrameBuilder.SpectatorCountUpdatedFrame(new SpectatorCountUpdateDto
+        {
+            GameId = game.Id,
+            SpectatorCount = game.SpectatorCount
+        }));
+
+        foreach (IClient target in clientManager.GetAllLoggedInClients())
+        {
+            if (target.User is not null && recipientIds.Contains(target.User.Id))
+            {
+                try { await target.SendAsync(countFrame); } catch { }
+            }
+        }
     }
 
     private async Task CheckActiveMatchCallback(MessageFrame frame, IClient client)
@@ -231,13 +342,20 @@ public class GameFrameHandlers(
         Dictionary<long, int> numberOfDomino = await dispatcher.Dispatch(new GameGetNumberOfDominoQuery(game.Id));
         NumberOfDominoPerPlayerDto dtoNumberDomino = DtoBuilder.GetNumberOfDominoPerPlayerDto(numberOfDomino);
 
+        NetworkFrame publicPlaceFrame = new([
+            MessageFrameBuilder.PlayerPlaysFrame(dto),
+            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
+            MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
+        ]);
+
         foreach (IClient clientInGame in clientsInGame)
         {
-            await clientInGame.SendAsync(new NetworkFrame([
-                MessageFrameBuilder.PlayerPlaysFrame(dto),
-                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
-                    MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
-            ]));
+            await clientInGame.SendAsync(publicPlaceFrame);
+        }
+
+        foreach (IClient spectator in GetSpectatorClients(game))
+        {
+            try { await spectator.SendAsync(publicPlaceFrame); } catch { }
         }
     }
 
@@ -261,6 +379,12 @@ public class GameFrameHandlers(
             Dictionary<long, int> numberOfDomino = await dispatcher.Dispatch(new GameGetNumberOfDominoQuery(game.Id));
             NumberOfDominoPerPlayerDto dtoNumberDomino = DtoBuilder.GetNumberOfDominoPerPlayerDto(numberOfDomino);
 
+            NetworkFrame publicDrawFrame = new([
+                MessageFrameBuilder.PlayerPlaysFrame(dto),
+                MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
+                MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
+            ]);
+
             foreach (IClient clientInGame in clientsInGame)
             {
                 if (clientInGame.User!.Id == dto.IdUserPlayed)
@@ -273,12 +397,14 @@ public class GameFrameHandlers(
                 }
                 else
                 {
-                    await clientInGame.SendAsync(new NetworkFrame([
-                        MessageFrameBuilder.PlayerPlaysFrame(dto),
-                            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
-                            MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
-                    ]));
+                    await clientInGame.SendAsync(publicDrawFrame);
                 }
+            }
+
+            // Spectators ONLY receive the concealed draw frame (no drawn domino face!)
+            foreach (IClient spectator in GetSpectatorClients(game))
+            {
+                try { await spectator.SendAsync(publicDrawFrame); } catch { }
             }
         }
         else
@@ -286,12 +412,19 @@ public class GameFrameHandlers(
             Dictionary<long, int> numberOfDomino = await dispatcher.Dispatch(new GameGetNumberOfDominoQuery(game.Id));
             NumberOfDominoPerPlayerDto dtoNumberDomino = DtoBuilder.GetNumberOfDominoPerPlayerDto(numberOfDomino);
 
+            NetworkFrame passFrame = new([
+                MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
+                MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
+            ]);
+
             foreach (IClient clientInGame in clientsInGame)
             {
-                await clientInGame.SendAsync(new NetworkFrame([
-                    MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
-                        MessageFrameBuilder.NumberOfDominoPerPlayerFrame(dtoNumberDomino)
-                ]));
+                await clientInGame.SendAsync(passFrame);
+            }
+
+            foreach (IClient spectator in GetSpectatorClients(game))
+            {
+                try { await spectator.SendAsync(passFrame); } catch { }
             }
         }
     }
@@ -324,6 +457,12 @@ public class GameFrameHandlers(
         foreach (IClient clientInGame in clientsInGame)
         {
             await clientInGame.SendAsync(networkFrame);
+        }
+
+        NetworkFrame spectatorEndFrame = new(MessageFrameBuilder.EndGameFrame(DtoBuilder.GetEndGameDto(true, game)));
+        foreach (IClient spectator in GetSpectatorClients(game))
+        {
+            try { await spectator.SendAsync(spectatorEndFrame); } catch { }
         }
         await dispatcher.Dispatch(new SaveGameCommand(gameId));
     }

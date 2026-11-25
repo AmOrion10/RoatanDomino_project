@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<ProfileFrameHandlers>();
         services.AddScoped<LoggingFrameHandlers>();
         services.AddScoped<TeamFrameHandlers>();
+        services.AddScoped<DirectChallengeFrameHandlers>();
 
         services.AddScoped<IMailSender, MailSender>();
 
@@ -40,12 +41,14 @@ public static class DependencyInjection
         services.AddSingleton<LobbyServerUpdater>();
         services.AddSingleton<GameServerUpdater>();
         services.AddSingleton<OAuthStateStore>();
+        services.AddSingleton<DirectChallengeService>();
         services.AddScoped<ClientDisconnectionManager>();
         services.AddScoped<ResetPasswordManager>();
         services.AddScoped<SocialAuthService>();
         services.AddScoped<PresenceService>();
         services.AddScoped<LeaderboardService>();
         services.AddScoped<TeamService>();
+        services.AddScoped<ChatService>();
         services.AddScoped<ITeamChallengeEloUpdater>(sp => sp.GetRequiredService<TeamService>());
 
         services.AddScoped<IUserRepository, UserRepository>();

@@ -56,6 +56,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<TeamChallengeEntity> TeamChallenges { get; set; }
 
+    public DbSet<SocialChatMessageEntity> SocialChatMessages { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AvatarEntity>(entity =>
@@ -461,7 +463,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.TeamElo).HasDefaultValue(1000).HasColumnName("team_elo");
             entity.Property(e => e.TeamWins).HasDefaultValue(0).HasColumnName("team_wins");
             entity.Property(e => e.TeamLosses).HasDefaultValue(0).HasColumnName("team_losses");
-            entity.Property(e => e.MaxMembers).HasDefaultValue(12).HasColumnName("max_members");
+            entity.Property(e => e.MaxMembers).HasDefaultValue(6).HasColumnName("max_members");
             entity.Property(e => e.JoinPolicy).HasColumnName("join_policy");
             entity.Property(e => e.MinElo).HasDefaultValue(100).HasColumnName("min_elo");
             entity.Property(e => e.ActivityRequirement).HasColumnName("activity_requirement");
@@ -570,6 +572,31 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(e => e.TargetTeam)
                 .WithMany()
                 .HasForeignKey(e => e.TargetTeamId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
+        });
+
+        modelBuilder.Entity<SocialChatMessageEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("SocialChatMessages");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ChannelType).HasColumnName("channel_type");
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.SenderUserId).HasColumnName("sender_user_id");
+            entity.Property(e => e.RecipientUserId).HasColumnName("recipient_user_id");
+            entity.Property(e => e.Body).HasMaxLength(1000).HasColumnName("body");
+            entity.Property(e => e.SentUtc).HasColumnName("sent_utc");
+
+            entity.HasOne(e => e.SenderUser)
+                .WithMany()
+                .HasForeignKey(e => e.SenderUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.RecipientUser)
+                .WithMany()
+                .HasForeignKey(e => e.RecipientUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
         });
     }

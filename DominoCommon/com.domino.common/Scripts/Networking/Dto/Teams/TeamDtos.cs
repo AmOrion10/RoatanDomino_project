@@ -9,7 +9,7 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
 {
     public class TeamInfoDto
     {
-        public const int DefaultMaxMembers = 12;
+        public const int DefaultMaxMembers = 6;
 
         [JsonProperty(PropertyName = "i")]
         public long Id { get; set; }
@@ -85,6 +85,27 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
 
         [JsonProperty(PropertyName = "j")]
         public DateTime JoinedAtUtc { get; set; }
+
+        [JsonProperty(PropertyName = "w")]
+        public int Wins { get; set; }
+
+        [JsonProperty(PropertyName = "lo")]
+        public int Losses { get; set; }
+
+        [JsonProperty(PropertyName = "wa")]
+        public int WinAssists { get; set; }
+
+        [JsonProperty(PropertyName = "tm")]
+        public int TotalMoves { get; set; }
+
+        [JsonProperty(PropertyName = "om")]
+        public int OptimalMoves { get; set; }
+
+        [JsonProperty(PropertyName = "ats")]
+        public double AverageTurnSeconds { get; set; }
+
+        [JsonIgnore]
+        public double AccuracyPercent => RoatanRankTierHelper.CalculateAccuracyPercent(OptimalMoves, TotalMoves);
     }
 
     public class TeamJoinRequestDto

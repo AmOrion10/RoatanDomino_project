@@ -10,17 +10,34 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
+using Infrastructure.Database;
+using Microsoft.EntityFrameworkCore;
+
 namespace Infrastructure.Services;
 
 public class PresenceService(
     IUserRepository userRepository,
     IClientManager clientManager,
     ILobbyManager lobbyManager,
-    IGameManager gameManager)
+    IGameManager gameManager,
+    ApplicationDbContext? dbContext = null)
 {
     public async Task<PlayerRosterDto> BuildRosterAsync()
     {
         List<User> registeredUsers = await userRepository.GetAllUsers();
+        Dictionary<long, (long TeamId, string TeamTag)> teamByUser = [];
+        if (dbContext is not null)
+        {
+            var memberships = await dbContext.TeamMembers
+                .Include(m => m.Team)
+                .Select(m => new { m.UserId, m.TeamId, Tag = m.Team.Tag })
+                .ToListAsync();
+            foreach (var m in memberships)
+            {
+                teamByUser[m.UserId] = (m.TeamId, m.Tag);
+            }
+        }
+
         List<IClient> onlineClients = clientManager.GetAllLoggedInClients();
         Dictionary<long, IClient> onlineById = [];
         foreach (IClient c in onlineClients)
@@ -35,7 +52,13 @@ public class PresenceService(
         foreach (User user in registeredUsers)
         {
             if (user.Id <= 0) continue;
-            entries[user.Id] = CreatePresenceEntry(user, onlineById.GetValueOrDefault(user.Id));
+            PlayerPresenceDto entry = CreatePresenceEntry(user, onlineById.GetValueOrDefault(user.Id));
+            if (teamByUser.TryGetValue(user.Id, out (long TeamId, string TeamTag) tm))
+            {
+                entry.TeamId = tm.TeamId;
+                entry.TeamTag = tm.TeamTag;
+            }
+            entries[user.Id] = entry;
         }
 
         // Include any logged-in users that may exist in test/mock setups without DB rows
@@ -43,7 +66,13 @@ public class PresenceService(
         {
             if (!entries.ContainsKey(kv.Key) && kv.Value.User is not null)
             {
-                entries[kv.Key] = CreatePresenceEntry(kv.Value.User, kv.Value);
+                PlayerPresenceDto entry = CreatePresenceEntry(kv.Value.User, kv.Value);
+                if (teamByUser.TryGetValue(kv.Key, out (long TeamId, string TeamTag) tm))
+                {
+                    entry.TeamId = tm.TeamId;
+                    entry.TeamTag = tm.TeamTag;
+                }
+                entries[kv.Key] = entry;
             }
         }
 

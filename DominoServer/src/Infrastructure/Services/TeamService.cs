@@ -34,7 +34,14 @@ public class TeamService(
     IClientManager clientManager,
     ILobbyManager? lobbyManager = null) : ITeamChallengeEloUpdater
 {
+    public const int MaxTeamMembers = TeamInfoDto.DefaultMaxMembers;
+
     private static readonly Regex TagPattern = new(@"^[A-Za-z0-9]{3,4}$", RegexOptions.Compiled);
+
+    private static int ResolveMaxMembers(TeamEntity team)
+    {
+        return team.MaxMembers > 0 ? Math.Min(team.MaxMembers, MaxTeamMembers) : MaxTeamMembers;
+    }
 
     public static (bool MeetsRequirements, string? DisqualifyReason) EvaluateEligibility(
         UserEntity user,
@@ -43,10 +50,11 @@ public class TeamService(
         DateTime? nowUtc = null)
     {
         DateTime utcNow = nowUtc ?? DateTime.UtcNow;
+        int maxMembers = ResolveMaxMembers(team);
 
-        if (currentMemberCount >= team.MaxMembers)
+        if (currentMemberCount >= maxMembers)
         {
-            return (false, $"This team is full ({currentMemberCount}/{team.MaxMembers} members).");
+            return (false, $"This team is full ({currentMemberCount}/{maxMembers} members).");
         }
 
         int userElo = user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
@@ -191,7 +199,13 @@ public class TeamService(
                     RankTier = RoatanRankTierHelper.FromElo(memberElo),
                     Role = m.Role,
                     IsOnline = onlineUserIds.Contains(m.UserId),
-                    JoinedAtUtc = m.JoinedAtUtc
+                    JoinedAtUtc = m.JoinedAtUtc,
+                    Wins = m.User.Wins,
+                    Losses = m.User.Losses,
+                    WinAssists = m.User.WinAssists,
+                    TotalMoves = m.User.TotalMoves,
+                    OptimalMoves = m.User.OptimalMoves,
+                    AverageTurnSeconds = m.User.AverageTurnSeconds
                 };
             })
             .ToList();
@@ -275,7 +289,7 @@ public class TeamService(
             TeamElo = RoatanRankTierHelper.DefaultElo,
             TeamWins = 0,
             TeamLosses = 0,
-            MaxMembers = TeamInfoDto.DefaultMaxMembers,
+            MaxMembers = MaxTeamMembers,
             JoinPolicy = request.JoinPolicy,
             MinElo = Math.Clamp(request.MinElo, RoatanRankTierHelper.MinElo, 3000),
             ActivityRequirement = request.ActivityRequirement,
@@ -449,9 +463,10 @@ public class TeamService(
             return TeamActionResult<MyTeamDetailsDto>.Fail("Team not found.");
         }
 
-        if (team.Members.Count >= team.MaxMembers)
+        int maxMembers = ResolveMaxMembers(team);
+        if (team.Members.Count >= maxMembers)
         {
-            return TeamActionResult<MyTeamDetailsDto>.Fail($"This team is full ({team.Members.Count}/{team.MaxMembers} members).");
+            return TeamActionResult<MyTeamDetailsDto>.Fail($"This team is full ({team.Members.Count}/{maxMembers} members).");
         }
 
         bool applicantAlreadyInTeam = await dbContext.TeamMembers.AnyAsync(m => m.UserId == joinReq.UserId);
@@ -496,9 +511,10 @@ public class TeamService(
             return TeamActionResult<MyTeamDetailsDto>.Fail("Team not found.");
         }
 
-        if (team.Members.Count >= team.MaxMembers)
+        int maxMembers = ResolveMaxMembers(team);
+        if (team.Members.Count >= maxMembers)
         {
-            return TeamActionResult<MyTeamDetailsDto>.Fail($"Your team is full ({team.Members.Count}/{team.MaxMembers} members).");
+            return TeamActionResult<MyTeamDetailsDto>.Fail($"This team is full ({team.Members.Count}/{maxMembers} members).");
         }
 
         UserEntity? target = null;
@@ -579,9 +595,10 @@ public class TeamService(
             return TeamActionResult<MyTeamDetailsDto>.Fail("That team no longer exists.");
         }
 
-        if (invite.Team.Members.Count >= invite.Team.MaxMembers)
+        int inviteTeamMax = ResolveMaxMembers(invite.Team);
+        if (invite.Team.Members.Count >= inviteTeamMax)
         {
-            return TeamActionResult<MyTeamDetailsDto>.Fail($"That team is full ({invite.Team.Members.Count}/{invite.Team.MaxMembers} members).");
+            return TeamActionResult<MyTeamDetailsDto>.Fail($"This team is full ({invite.Team.Members.Count}/{inviteTeamMax} members).");
         }
 
         string joinedLabel = $"[{invite.Team.Tag}] {invite.Team.Name}";
@@ -790,7 +807,7 @@ public class TeamService(
                 TeamLosses = t.TeamLosses,
                 CaptainUsername = captainName,
                 MemberCount = t.Members.Count,
-                MaxMembers = t.MaxMembers
+                MaxMembers = ResolveMaxMembers(t)
             };
 
             if (i < cappedLimit)
@@ -1211,7 +1228,7 @@ public class TeamService(
             TeamLosses = team.TeamLosses,
             CaptainUsername = captainUsername,
             MemberCount = team.Members.Count,
-            MaxMembers = team.MaxMembers,
+            MaxMembers = ResolveMaxMembers(team),
             JoinPolicy = team.JoinPolicy,
             MinElo = RoatanRankTierHelper.ClampElo(team.MinElo),
             ActivityRequirement = team.ActivityRequirement,

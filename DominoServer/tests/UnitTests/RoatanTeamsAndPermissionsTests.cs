@@ -76,7 +76,7 @@ public class RoatanTeamsAndPermissionsTests
         Assert.Equal("WES", created.Data.TeamInfo.Tag);
         Assert.Equal(1000, created.Data.TeamInfo.TeamElo);
         Assert.Equal(RoatanRankTier.Sailor, created.Data.TeamInfo.TeamRankTier);
-        Assert.Equal(12, created.Data.TeamInfo.MaxMembers);
+        Assert.Equal(6, created.Data.TeamInfo.MaxMembers);
         Assert.Equal(TeamRole.Captain, created.Data.MyRole);
         Assert.Single(created.Data.Members);
         Assert.Equal(TeamRole.Captain, created.Data.Members[0].Role);

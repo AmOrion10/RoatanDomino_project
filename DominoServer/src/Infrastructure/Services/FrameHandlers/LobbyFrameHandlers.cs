@@ -23,7 +23,8 @@ public class LobbyFrameHandlers(
     IClientManager clientManager,
     ISeedGenerator seedGenerator,
     PresenceService presenceService,
-    TeamService teamService) : BaseFrameHandlers
+    TeamService teamService,
+    IGameManager? gameManager = null) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -136,7 +137,8 @@ public class LobbyFrameHandlers(
     private async Task GetAllLobbiesCallback(MessageFrame frame, IClient client)
     {
         List<Lobby> lobbies = await dispatcher.Dispatch(new GetAllLobbiesQuery());
-        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies);
+        List<Domain.Game.Game>? activeGames = gameManager?.GetAllActiveGames();
+        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies, activeGames);
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 
@@ -144,7 +146,10 @@ public class LobbyFrameHandlers(
     {
         LobbyNameDto dto = frame.GetObjectFromMessage<LobbyNameDto>();
         List<Lobby> lobbies = await dispatcher.Dispatch(new GetLobbiesWithNameQuery(dto.Name));
-        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies);
+        List<Domain.Game.Game>? activeGames = gameManager?.GetAllActiveGames()
+            .Where(g => (g.MatchTitle ?? string.Empty).Contains(dto.Name ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies, activeGames);
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 

@@ -62,6 +62,12 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
 
         [JsonProperty(PropertyName = "lom", NullValueHandling = NullValueHandling.Ignore)]
         public DateTime? LastOnlineMatchUtc { get; set; }
+
+        [JsonProperty(PropertyName = "tmi", NullValueHandling = NullValueHandling.Ignore)]
+        public long? TeamId { get; set; }
+
+        [JsonProperty(PropertyName = "tmt", NullValueHandling = NullValueHandling.Ignore)]
+        public string TeamTag { get; set; }
     }
 
     public class LeaderboardDto
