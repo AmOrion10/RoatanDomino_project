@@ -510,11 +510,13 @@ public class RoatanMultiplayerTableAndAuthTests
         string? prevGoogleSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
         string? prevFbId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID");
         string? prevFbSecret = Environment.GetEnvironmentVariable("FACEBOOK_APP_SECRET");
+        string? prevFbScopes = Environment.GetEnvironmentVariable("FACEBOOK_SCOPES");
 
         Environment.SetEnvironmentVariable("GOOGLE_CLIENT_ID", "test-google-client.apps.googleusercontent.com");
         Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", "test-google-secret");
         Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", "1234567890");
         Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", "fb-secret-xyz");
+        Environment.SetEnvironmentVariable("FACEBOOK_SCOPES", null);
 
         try
         {
@@ -575,7 +577,6 @@ public class RoatanMultiplayerTableAndAuthTests
                         {
                           "id": "fb-uid-99",
                           "name": "Roatan Captain",
-                          "email": "captain@facebook.com",
                           "picture": { "data": { "url": "https://platform-lookaside.fbsbx.com/fb-large.jpg" } }
                         }
                         """, System.Text.Encoding.UTF8, "application/json")
@@ -614,20 +615,28 @@ public class RoatanMultiplayerTableAndAuthTests
             Assert.NotEqual(Guid.Empty, gTok);
             Assert.Equal(googleUser.Id, signedInGoogle.Id);
 
-            // 3. Facebook Start URL includes display=popup and auth_type=reauthenticate
+            // 3. Facebook Start URL defaults to scope=public_profile (avoids Invalid Scopes: email) and honors optional FACEBOOK_SCOPES override
             OAuthStartResult fbStart = socialAuth.StartOAuthFlow("Facebook", "https://domino.roatandomino.com");
             Assert.True(fbStart.Configured);
+            Assert.Contains("scope=public_profile", fbStart.AuthorizeUrl);
+            Assert.DoesNotContain("email", fbStart.AuthorizeUrl);
             Assert.Contains("display=popup", fbStart.AuthorizeUrl);
             Assert.Contains("auth_type=reauthenticate", fbStart.AuthorizeUrl);
 
-            // 4. Facebook Callback exchanges code, loads picture.type(large), imports AvatarBase64, and completes login
+            Environment.SetEnvironmentVariable("FACEBOOK_SCOPES", "public_profile,email");
+            OAuthStartResult fbStartOverride = socialAuth.StartOAuthFlow("Facebook", "https://domino.roatandomino.com");
+            Assert.True(fbStartOverride.Configured);
+            Assert.Contains("scope=public_profile%2Cemail", fbStartOverride.AuthorizeUrl);
+            Environment.SetEnvironmentVariable("FACEBOOK_SCOPES", null);
+
+            // 4. Facebook Callback exchanges code, synthesizes fb_{id}@facebook.local when email is absent, imports picture.type(large) into AvatarBase64, and completes login
             var (fbOk, fbCode, fbProvider, fbErr) = await socialAuth.CompleteOAuthCallbackAsync("Facebook", "fb-auth-code", fbStart.State, "https://domino.roatandomino.com");
             Assert.True(fbOk, fbErr);
             Assert.Equal("Facebook", fbProvider);
             Assert.False(string.IsNullOrWhiteSpace(fbCode));
 
             User fbUser = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto { Provider = "Facebook", OneTimeCode = fbCode });
-            Assert.Equal("captain@facebook.com", fbUser.Email);
+            Assert.Equal("fb_fb-uid-99@facebook.local", fbUser.Email);
             Assert.Equal("RoatanCaptain", fbUser.Login);
             Assert.Equal("Facebook", fbUser.AuthProvider);
             Assert.Equal(Convert.ToBase64String(smallFbPng), fbUser.AvatarBase64);
@@ -638,6 +647,7 @@ public class RoatanMultiplayerTableAndAuthTests
             Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", prevGoogleSecret);
             Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", prevFbId);
             Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", prevFbSecret);
+            Environment.SetEnvironmentVariable("FACEBOOK_SCOPES", prevFbScopes);
         }
     }
 

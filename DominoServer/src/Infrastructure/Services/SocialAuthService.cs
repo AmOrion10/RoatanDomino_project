@@ -134,6 +134,12 @@ public class SocialAuthService
         return ids;
     }
 
+    public static string GetFacebookScopes()
+    {
+        string? configured = Environment.GetEnvironmentVariable("FACEBOOK_SCOPES");
+        return string.IsNullOrWhiteSpace(configured) ? "public_profile" : configured.Trim();
+    }
+
     public static string GetMissingConfigurationMessage(string provider)
     {
         string normalized = NormalizeProvider(provider);
@@ -209,11 +215,12 @@ public class SocialAuthService
         else
         {
             string appId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID")!;
+            string facebookScopes = GetFacebookScopes();
             authorizeUrl =
                 "https://www.facebook.com/v19.0/dialog/oauth" +
                 $"?client_id={Uri.EscapeDataString(appId)}" +
                 $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
-                "&scope=" + Uri.EscapeDataString("email,public_profile") +
+                "&scope=" + Uri.EscapeDataString(facebookScopes) +
                 $"&state={Uri.EscapeDataString(pending.State)}" +
                 "&response_type=code" +
                 "&display=popup";
@@ -334,10 +341,18 @@ public class SocialAuthService
                 throw new WrongPasswordException("Your sign-in link has expired. Please sign in again.");
             }
 
+            string? resolvedEmail = verified.Email;
+            if (string.Equals(verified.Provider, "Facebook", StringComparison.OrdinalIgnoreCase) &&
+                string.IsNullOrWhiteSpace(resolvedEmail) &&
+                !string.IsNullOrWhiteSpace(verified.ProviderUserId))
+            {
+                resolvedEmail = $"fb_{verified.ProviderUserId}@facebook.local";
+            }
+
             return await userRepository.FindOrCreateSocialUser(
                 verified.Provider,
                 verified.ProviderUserId ?? string.Empty,
-                verified.Email,
+                resolvedEmail,
                 verified.DisplayName,
                 verified.AvatarUrl,
                 verified.AvatarBase64);
@@ -608,7 +623,7 @@ public class SocialAuthService
 
             if (string.IsNullOrWhiteSpace(email))
             {
-                email = $"fb_{id}@facebook.roatandomino.local";
+                email = $"fb_{id}@facebook.local";
             }
 
             return (id, email, name, picture);
