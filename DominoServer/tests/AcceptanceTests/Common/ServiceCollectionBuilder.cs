@@ -1,4 +1,4 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
 using CommonTests.Fixtures;
@@ -32,13 +32,18 @@ public static class ServiceCollectionBuilder
 
     private static IServiceCollection ConfigureInMemoryDatabase(this IServiceCollection services)
     {
+        services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
+        services.RemoveAll<DbContextOptions>();
+        services.RemoveAll<ApplicationDbContext>();
+
         ServiceProvider serviceProvider = new ServiceCollection()
             .AddEntityFrameworkInMemoryDatabase()
             .BuildServiceProvider();
 
+        string dbName = $"test-db-{Guid.NewGuid():N}";
         services.AddDbContext<ApplicationDbContext>((_, options) =>
         {
-            options.UseInMemoryDatabase("test-db");
+            options.UseInMemoryDatabase(dbName);
             options.UseInternalServiceProvider(serviceProvider);
         });
 

@@ -80,5 +80,9 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         RemoveTableBot,
         StartTableMatch,
         TableStateUpdated,
+
+        // Profile Avatars & Account Deletion
+        UpdateProfileAvatar,
+        DeleteAccount,
     }
 }

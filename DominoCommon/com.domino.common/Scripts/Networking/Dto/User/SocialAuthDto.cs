@@ -18,5 +18,14 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
 
         [JsonProperty(PropertyName = "pid", NullValueHandling = NullValueHandling.Ignore)]
         public string ProviderUserId { get; set; }
+
+        [JsonProperty(PropertyName = "oc", NullValueHandling = NullValueHandling.Ignore)]
+        public string OneTimeCode { get; set; }
+
+        [JsonProperty(PropertyName = "au", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarUrl { get; set; }
+
+        [JsonProperty(PropertyName = "ab", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarBase64 { get; set; }
     }
 }

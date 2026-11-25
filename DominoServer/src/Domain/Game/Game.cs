@@ -67,6 +67,7 @@ public class Game
 
     public int TotalBet { get; set; }
     public int ChatId { get; set; }
+    public bool HasDealtOpeningHand { get; set; }
 
     private GameGridDto gridDto = new(NumberOfRows, NumberOfCols);
     private DominoPlacer placer;

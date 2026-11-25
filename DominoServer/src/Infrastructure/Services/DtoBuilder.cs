@@ -38,7 +38,9 @@ public static class DtoBuilder
                     Elo = occupant.Score,
                     IsBot = occupant.IsBot,
                     BotDifficulty = occupant.BotDifficulty,
-                    SeatIndex = occupant.SeatIndex
+                    SeatIndex = occupant.SeatIndex,
+                    AvatarUrl = occupant.AvatarUrl,
+                    AvatarBase64 = occupant.AvatarBase64
                 }
             });
         }
@@ -52,7 +54,9 @@ public static class DtoBuilder
                 Elo = lobby.Creator.Score,
                 IsBot = lobby.Creator.IsBot,
                 BotDifficulty = lobby.Creator.BotDifficulty,
-                SeatIndex = lobby.Creator.SeatIndex
+                SeatIndex = lobby.Creator.SeatIndex,
+                AvatarUrl = lobby.Creator.AvatarUrl,
+                AvatarBase64 = lobby.Creator.AvatarBase64
             },
             Players = ordered.Select(p => new PlayerDto
             {
@@ -61,7 +65,9 @@ public static class DtoBuilder
                 Elo = p.Score,
                 IsBot = p.IsBot,
                 BotDifficulty = p.BotDifficulty,
-                SeatIndex = p.SeatIndex
+                SeatIndex = p.SeatIndex,
+                AvatarUrl = p.AvatarUrl,
+                AvatarBase64 = p.AvatarBase64
             }).ToList(),
             Seats = seats,
             Id = lobby.Id,
@@ -91,7 +97,26 @@ public static class DtoBuilder
         {
             Id = user.Id,
             Name = user.Login,
-            Elo = user.Score
+            Elo = user.Score,
+            AvatarUrl = user.AvatarUrl,
+            AvatarBase64 = user.AvatarBase64
+        };
+    }
+
+    public static UserDto GetUserDto(User user)
+    {
+        return new UserDto
+        {
+            Id = user.Id,
+            Login = user.Login,
+            Email = user.Email,
+            Score = user.Score,
+            BirthDate = user.Birthdate.ToString(Constants.ShortFormatDate),
+            DateSignup = user.DateSignup.ToString(Constants.LongFormatDate),
+            Nationality = user.Nationality,
+            AvatarUrl = user.AvatarUrl,
+            AvatarBase64 = user.AvatarBase64,
+            AuthProvider = user.AuthProvider
         };
     }
 
@@ -101,16 +126,7 @@ public static class DtoBuilder
         {
             Object = new InfoProfileDto
             {
-                User = new UserDto
-                {
-                    Id = user.Id,
-                    Login = user.Login,
-                    Email = user.Email,
-                    Score = user.Score,
-                    BirthDate = user.Birthdate.ToString(Constants.ShortFormatDate),
-                    DateSignup = user.DateSignup.ToString(Constants.LongFormatDate),
-                    Nationality = user.Nationality
-                },
+                User = GetUserDto(user),
                 Statistic = new StatisticDto
                 {
                     NumberOfGamePlayed = user.Statistics!.NumberOfGamePlayed,
@@ -162,16 +178,7 @@ public static class DtoBuilder
         {
             Object = new ConnectionResponseDto
             {
-                User = new UserDto
-                {
-                    Email = userAndGuid.Item1.Email,
-                    Id = userAndGuid.Item1.Id,
-                    Login = userAndGuid.Item1.Login,
-                    DateSignup = userAndGuid.Item1.DateSignup.ToString(Constants.LongFormatDate),
-                    Score = userAndGuid.Item1.Score,
-                    Nationality = userAndGuid.Item1.Nationality,
-                    BirthDate = userAndGuid.Item1.Birthdate.ToString(Constants.ShortFormatDate)
-                },
+                User = GetUserDto(userAndGuid.Item1),
                 Token = userAndGuid.Item2.ToString()
             }
         };

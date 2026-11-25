@@ -192,5 +192,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame TableStateUpdatedFrame(LobbyDto dto)
             => new MessageFrame(FrameCommandType.TableStateUpdated, dto.ToJson());
+
+        public static MessageFrame UpdateProfileAvatarFrame(UpdateProfileAvatarDto dto)
+            => new MessageFrame(FrameCommandType.UpdateProfileAvatar, dto.ToJson());
+
+        public static MessageFrame DeleteAccountFrame()
+            => new MessageFrame(FrameCommandType.DeleteAccount, string.Empty);
     }
 }

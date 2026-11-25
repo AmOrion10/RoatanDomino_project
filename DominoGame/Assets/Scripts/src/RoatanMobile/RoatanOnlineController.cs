@@ -14,9 +14,12 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 
+using Newtonsoft.Json.Linq;
+
 using TMPro;
 
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 
 public enum RoatanServerPreset
@@ -105,9 +108,47 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text registerSubmitLabel;
 
     // Hub view (Tables + Players Roster)
+    private Image hubAvatarImg;
+    private TMP_Text hubAvatarInitialsLabel;
     private TMP_Text hubWelcomeLabel;
     private TMP_Text signOutBtnLabel;
     private TMP_Text quickRankedLabel;
+
+    // OAuth Browser Wait + Local Social Profile Completion Modal
+    private Coroutine oauthFlowCoroutine;
+    private string pendingOAuthProvider;
+    private string pendingOAuthState;
+    private bool oauthCodeSubmitted;
+    private GameObject oauthWaitingModal;
+    private TMP_Text oauthWaitingLabel;
+
+    private GameObject socialProfileModal;
+    private TMP_Text socialProfileTitleLabel;
+    private TMP_Text socialProfileSubLabel;
+    private Image socialProfileAvatarImg;
+    private TMP_Text socialProfileAvatarInitials;
+    private TMP_InputField socialProfileEmailInput;
+    private TMP_InputField socialProfileUserInput;
+    private TMP_Text socialProfileErrorLabel;
+    private string socialProfileProvider;
+    private string socialProfileAvatarBase64;
+
+    // Player Profile & Delete Account Modals
+    private GameObject profileModal;
+    private Image profileModalAvatarImg;
+    private TMP_Text profileModalAvatarInitials;
+    private TMP_Text profileModalNameLabel;
+    private TMP_Text profileModalEmailLabel;
+    private TMP_Text profileModalProviderBadge;
+    private TMP_Text profileModalStatsLabel;
+    private TMP_Text profileModalStatusLabel;
+    private Button profileAdoptSocialBtn;
+
+    private GameObject deleteAccountModal;
+    private TMP_InputField deleteConfirmInput;
+    private TMP_Text deleteConfirmBtnLabel;
+    private TMP_Text deleteConfirmErrorLabel;
+    private bool deleteConfirmSecondTapArmed;
     private TMP_Text createLobbyBtnLabel;
     private TMP_Text joinCodeBtnLabel;
     private TMP_Text refreshLobbiesBtnLabel;
@@ -225,8 +266,13 @@ public class RoatanOnlineController : MonoBehaviour
         BuildRejoinModal(safeRoot);
         BuildIncomingInviteModal(safeRoot);
         BuildInvitePlayersModal(safeRoot);
+        BuildOAuthWaitingModal(safeRoot);
+        BuildSocialProfileModal(safeRoot);
+        BuildProfileModal(safeRoot);
+        BuildDeleteAccountModal(safeRoot);
         RoatanLocalization.LanguageChanged += RefreshLocalizedTexts;
         ServerEndpointChanged += SyncServerEndpointFieldsFromPrefs;
+        Application.deepLinkActivated += OnDeepLinkActivated;
         RefreshLocalizedTexts();
         onlineRoot.SetActive(false);
     }
@@ -287,6 +333,7 @@ public class RoatanOnlineController : MonoBehaviour
     {
         RoatanLocalization.LanguageChanged -= RefreshLocalizedTexts;
         ServerEndpointChanged -= SyncServerEndpointFieldsFromPrefs;
+        Application.deepLinkActivated -= OnDeepLinkActivated;
         UnsubscribeClient();
         if (Networking.Instance != null)
         {
@@ -307,6 +354,7 @@ public class RoatanOnlineController : MonoBehaviour
 
         if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
         {
+            RefreshHubProfileHeader();
             ShowSubView(hubView);
             RequestLobbiesList();
             RequestPlayerRoster();
@@ -319,6 +367,10 @@ public class RoatanOnlineController : MonoBehaviour
             if (Networking.Instance != null && !Networking.Instance.IsConnected && !isConnecting)
             {
                 AttemptServerConnect();
+            }
+            if (!string.IsNullOrWhiteSpace(Application.absoluteURL))
+            {
+                OnDeepLinkActivated(Application.absoluteURL);
             }
         }
 
@@ -403,6 +455,9 @@ public class RoatanOnlineController : MonoBehaviour
         eh.RemoveTableBotResponseEvent += OnTableActionLobbyUpdatedResponse;
         eh.StartTableMatchResponseEvent += OnStartTableMatchResponse;
         eh.TableStateUpdatedEvent += OnTableStateUpdated;
+        eh.GetInfoProfileResponseEvent += OnGetInfoProfileResponse;
+        eh.UpdateProfileAvatarResponseEvent += OnUpdateProfileAvatarResponse;
+        eh.DeleteAccountResponseEvent += OnDeleteAccountResponse;
     }
 
     private void UnsubscribeClient()
@@ -442,6 +497,9 @@ public class RoatanOnlineController : MonoBehaviour
         eh.RemoveTableBotResponseEvent -= OnTableActionLobbyUpdatedResponse;
         eh.StartTableMatchResponseEvent -= OnStartTableMatchResponse;
         eh.TableStateUpdatedEvent -= OnTableStateUpdated;
+        eh.GetInfoProfileResponseEvent -= OnGetInfoProfileResponse;
+        eh.UpdateProfileAvatarResponseEvent -= OnUpdateProfileAvatarResponse;
+        eh.DeleteAccountResponseEvent -= OnDeleteAccountResponse;
         subscribedClient = null;
     }
 
@@ -576,27 +634,311 @@ public class RoatanOnlineController : MonoBehaviour
             return;
         }
 
-        string deviceId = PlayerPrefs.GetString(PrefSocialDeviceIdKey, string.Empty);
-        if (string.IsNullOrWhiteSpace(deviceId))
+        CancelPendingOAuthFlow();
+        oauthFlowCoroutine = StartCoroutine(BeginSocialOAuthCoroutine(provider));
+    }
+
+    private void CancelPendingOAuthFlow()
+    {
+        if (oauthFlowCoroutine != null)
         {
-            deviceId = Guid.NewGuid().ToString("N").Substring(0, 10);
-            PlayerPrefs.SetString(PrefSocialDeviceIdKey, deviceId);
-            PlayerPrefs.Save();
+            StopCoroutine(oauthFlowCoroutine);
+            oauthFlowCoroutine = null;
+        }
+        pendingOAuthProvider = null;
+        pendingOAuthState = null;
+        oauthCodeSubmitted = false;
+        if (oauthWaitingModal != null) oauthWaitingModal.SetActive(false);
+    }
+
+    private string GetHttpBaseUrl()
+    {
+        string raw = Networking.Instance != null && !string.IsNullOrWhiteSpace(Networking.Instance.CurrentServerUrl)
+            ? Networking.Instance.CurrentServerUrl
+            : GetSavedServerUrl();
+
+        string normalized = NormalizeDisplayUrl(raw);
+        if (normalized.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "https://" + normalized.Substring(6);
+        }
+        else if (normalized.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "http://" + normalized.Substring(5);
         }
 
-        string hintedName = loginUserInput != null && !string.IsNullOrWhiteSpace(loginUserInput.text)
-            ? loginUserInput.text.Trim()
-            : (regUserInput != null && !string.IsNullOrWhiteSpace(regUserInput.text)
-                ? regUserInput.text.Trim()
-                : $"{provider}Player");
+        if (normalized.EndsWith("/ws", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized.Substring(0, normalized.Length - 3);
+        }
+
+        return normalized.TrimEnd('/');
+    }
+
+    private IEnumerator BeginSocialOAuthCoroutine(string provider)
+    {
+        string httpBase = GetHttpBaseUrl();
+        string startUrl = $"{httpBase}/auth/oauth/{provider.ToLowerInvariant()}/start?mode=json";
+        SetFeedback($"Checking {provider} sign-in...", RoatanVisualAssets.IslandGold);
+
+        using (UnityWebRequest req = UnityWebRequest.Get(startUrl))
+        {
+            req.timeout = 10;
+            yield return req.SendWebRequest();
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                oauthFlowCoroutine = null;
+                OpenSocialProfileCompletionModal(provider, $"Enter your {provider} email and choose a username to sign in.");
+                yield break;
+            }
+
+            bool configured = false;
+            string authorizeUrl = string.Empty;
+            string state = string.Empty;
+            string serverMsg = string.Empty;
+            try
+            {
+                JObject json = JObject.Parse(req.downloadHandler.text);
+                configured = json["configured"] != null && json["configured"].Value<bool>();
+                authorizeUrl = json["authorizeUrl"]?.ToString() ?? string.Empty;
+                state = json["state"]?.ToString() ?? string.Empty;
+                serverMsg = json["message"]?.ToString() ?? string.Empty;
+            }
+            catch
+            {
+                configured = false;
+            }
+
+            if (!configured || string.IsNullOrWhiteSpace(authorizeUrl) || string.IsNullOrWhiteSpace(state))
+            {
+                oauthFlowCoroutine = null;
+                string hint = string.IsNullOrWhiteSpace(serverMsg)
+                    ? $"Enter your real {provider} email and choose your username to continue."
+                    : $"Local test server mode — enter your real {provider} email and choose a username:";
+                OpenSocialProfileCompletionModal(provider, hint);
+                yield break;
+            }
+
+            pendingOAuthProvider = provider;
+            pendingOAuthState = state;
+            oauthCodeSubmitted = false;
+
+            if (oauthWaitingModal != null && oauthWaitingLabel != null)
+            {
+                oauthWaitingLabel.text = $"Complete {provider} sign-in in your browser.\nYou will return to Roatan Domino automatically once approved.";
+                oauthWaitingModal.transform.SetAsLastSibling();
+                oauthWaitingModal.SetActive(true);
+            }
+
+            Application.OpenURL(authorizeUrl);
+            oauthFlowCoroutine = StartCoroutine(PollOAuthSessionCoroutine(provider, state, httpBase));
+        }
+    }
+
+    private IEnumerator PollOAuthSessionCoroutine(string provider, string state, string httpBase)
+    {
+        string pollUrl = $"{httpBase}/auth/oauth/poll/{Uri.EscapeDataString(state)}";
+        float elapsed = 0f;
+        const float maxWaitSeconds = 180f;
+
+        while (elapsed < maxWaitSeconds && !oauthCodeSubmitted && string.Equals(pendingOAuthState, state, StringComparison.Ordinal))
+        {
+            yield return new WaitForSeconds(1.5f);
+            elapsed += 1.5f;
+
+            if (oauthCodeSubmitted || !string.Equals(pendingOAuthState, state, StringComparison.Ordinal))
+            {
+                yield break;
+            }
+
+            using (UnityWebRequest req = UnityWebRequest.Get(pollUrl))
+            {
+                req.timeout = 8;
+                yield return req.SendWebRequest();
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    if (req.responseCode == 404)
+                    {
+                        CancelPendingOAuthFlow();
+                        ShowAuthError($"{provider} sign-in session expired. Please try again.");
+                        yield break;
+                    }
+                    continue;
+                }
+
+                try
+                {
+                    JObject json = JObject.Parse(req.downloadHandler.text);
+                    string status = json["status"]?.ToString() ?? "pending";
+                    if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string oneTimeCode = json["oneTimeCode"]?.ToString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(oneTimeCode))
+                        {
+                            RedeemOAuthOneTimeCode(provider, oneTimeCode);
+                            yield break;
+                        }
+                    }
+                    else if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string err = json["error"]?.ToString() ?? $"{provider} sign-in was cancelled.";
+                        CancelPendingOAuthFlow();
+                        ShowAuthError(err);
+                        yield break;
+                    }
+                }
+                catch
+                {
+                    // Ignore transient JSON parse error and continue polling
+                }
+            }
+        }
+
+        if (!oauthCodeSubmitted)
+        {
+            CancelPendingOAuthFlow();
+            ShowAuthError($"{provider} sign-in timed out. Please try again.");
+        }
+    }
+
+    private void OnDeepLinkActivated(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        if (!url.StartsWith("roatandomino://auth", StringComparison.OrdinalIgnoreCase)) return;
+
+        string code = ExtractQueryParam(url, "code");
+        string provider = ExtractQueryParam(url, "provider");
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            provider = pendingOAuthProvider ?? "Google";
+        }
+
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            RedeemOAuthOneTimeCode(provider, code);
+        }
+    }
+
+    private static string ExtractQueryParam(string url, string key)
+    {
+        int qIdx = url.IndexOf('?');
+        if (qIdx < 0 || qIdx >= url.Length - 1) return string.Empty;
+        string query = url.Substring(qIdx + 1);
+        string[] pairs = query.Split('&');
+        foreach (string pair in pairs)
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            string k = Uri.UnescapeDataString(pair.Substring(0, eq));
+            if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(pair.Substring(eq + 1));
+            }
+        }
+        return string.Empty;
+    }
+
+    private void RedeemOAuthOneTimeCode(string provider, string oneTimeCode)
+    {
+        if (oauthCodeSubmitted || string.IsNullOrWhiteSpace(oneTimeCode)) return;
+        oauthCodeSubmitted = true;
+        if (oauthFlowCoroutine != null)
+        {
+            StopCoroutine(oauthFlowCoroutine);
+            oauthFlowCoroutine = null;
+        }
+        if (oauthWaitingModal != null) oauthWaitingModal.SetActive(false);
+
+        if (!EnsureConnectedForRequest())
+        {
+            oauthCodeSubmitted = false;
+            ShowAuthError("Disconnected from server. Please reconnect and try again.");
+            return;
+        }
 
         subscribedClient.AddToSendQueue(MessageFrameBuilder.SocialAuthFrame(new SocialAuthDto
         {
             Provider = provider,
-            ProviderUserId = $"{provider.ToLowerInvariant()}_{deviceId}",
-            DisplayName = hintedName
+            OneTimeCode = oneTimeCode
         }));
-        SetFeedback($"Signing in with {provider}...", RoatanVisualAssets.IslandGold);
+        SetFeedback($"Finishing {provider} sign-in...", RoatanVisualAssets.IslandGold);
+    }
+
+    private void OpenSocialProfileCompletionModal(string provider, string subtitle)
+    {
+        socialProfileProvider = provider;
+        socialProfileAvatarBase64 = null;
+
+        if (socialProfileTitleLabel != null)
+        {
+            socialProfileTitleLabel.text = $"Complete {provider} Profile";
+        }
+        if (socialProfileSubLabel != null)
+        {
+            socialProfileSubLabel.text = subtitle;
+        }
+        if (socialProfileEmailInput != null)
+        {
+            string prefillEmail = regEmailInput != null && !string.IsNullOrWhiteSpace(regEmailInput.text)
+                ? regEmailInput.text.Trim()
+                : (loginUserInput != null && loginUserInput.text.Contains("@") ? loginUserInput.text.Trim() : string.Empty);
+            socialProfileEmailInput.text = prefillEmail;
+        }
+        if (socialProfileUserInput != null)
+        {
+            string prefillUser = regUserInput != null && !string.IsNullOrWhiteSpace(regUserInput.text)
+                ? regUserInput.text.Trim()
+                : (loginUserInput != null && !loginUserInput.text.Contains("@") ? loginUserInput.text.Trim() : string.Empty);
+            socialProfileUserInput.text = prefillUser;
+        }
+        if (socialProfileErrorLabel != null)
+        {
+            socialProfileErrorLabel.text = string.Empty;
+        }
+
+        ApplyCircularAvatar(socialProfileAvatarImg, socialProfileAvatarInitials, "social_preview", null, provider);
+        if (socialProfileModal != null)
+        {
+            socialProfileModal.transform.SetAsLastSibling();
+            socialProfileModal.SetActive(true);
+        }
+    }
+
+    private void SubmitSocialProfileCompletion()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        string email = socialProfileEmailInput != null ? socialProfileEmailInput.text.Trim() : string.Empty;
+        string username = socialProfileUserInput != null ? socialProfileUserInput.text.Trim() : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(email) || !EmailValidationRegex.IsMatch(email))
+        {
+            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Please enter a valid email address.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(username) || !UsernameValidationRegex.IsMatch(username))
+        {
+            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Username must be 3–16 letters or numbers.";
+            return;
+        }
+
+        if (!EnsureConnectedForRequest())
+        {
+            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Unable to reach server. Please check connection.";
+            return;
+        }
+
+        if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = string.Empty;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SocialAuthFrame(new SocialAuthDto
+        {
+            Provider = socialProfileProvider ?? "Google",
+            Email = email,
+            DisplayName = username,
+            AvatarBase64 = socialProfileAvatarBase64
+        }));
+        SetFeedback($"Signing in with {socialProfileProvider}...", RoatanVisualAssets.IslandGold);
     }
 
     public static bool ValidateRegistrationInputs(string email, string username, string password, string birthdate, out string error)
@@ -737,6 +1079,14 @@ public class RoatanOnlineController : MonoBehaviour
     {
         RoatanSoundFX.Instance?.PlayTap();
         if (!EnsureConnectedForRequest() || currentLobby == null) return;
+
+        int humanCount = currentLobby.Players != null ? currentLobby.Players.Count(p => !p.IsBot) : 0;
+        if (humanCount < 2)
+        {
+            SetFeedback($"Need at least 2 real players to start online ({humanCount}/2 humans seated). Use Offline Mode to play solo vs bots.", RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
         subscribedClient.AddToSendQueue(MessageFrameBuilder.StartTableMatchFrame());
         SetFeedback("Starting match...", RoatanVisualAssets.IslandGold);
     }
@@ -810,13 +1160,19 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnSocialAuthResponse(ResponseDto dto)
     {
+        CancelPendingOAuthFlow();
         if (dto.OkResult)
         {
+            if (socialProfileModal != null) socialProfileModal.SetActive(false);
             CompleteSignInSuccess("Player");
         }
         else
         {
             string err = FormatFriendlyError(dto, "Social sign-in failed. Please try again.");
+            if (socialProfileModal != null && socialProfileModal.activeSelf && socialProfileErrorLabel != null)
+            {
+                socialProfileErrorLabel.text = err;
+            }
             ShowAuthError(err);
             SetFeedback(err, RoatanVisualAssets.SunsetCoral);
         }
@@ -827,6 +1183,8 @@ public class RoatanOnlineController : MonoBehaviour
         isSignedIn = true;
         ClearAuthError();
         SetServerSettingsExpanded(false);
+        if (socialProfileModal != null) socialProfileModal.SetActive(false);
+        if (oauthWaitingModal != null) oauthWaitingModal.SetActive(false);
         SetFeedback("Welcome back!", RoatanVisualAssets.PalmGreen);
         subscribedClient.AddToSendQueue(new List<MessageFrame>
         {
@@ -834,10 +1192,254 @@ public class RoatanOnlineController : MonoBehaviour
             MessageFrameBuilder.GetAllLobbyFrame(),
             MessageFrameBuilder.GetPlayerRosterFrame()
         });
-        string loginName = subscribedClient.User != null ? subscribedClient.User.Login : fallbackName;
-        int elo = subscribedClient.User != null ? subscribedClient.User.Score : 1000;
-        hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
+        RefreshHubProfileHeader(fallbackName);
         ShowSubView(hubView);
+
+        // Automatically download & cache social profile photo (Google/Facebook) if we have an AvatarUrl without cached bytes yet
+        UserDto user = subscribedClient?.User;
+        if (user != null && !string.IsNullOrWhiteSpace(user.AvatarUrl) && string.IsNullOrWhiteSpace(user.AvatarBase64))
+        {
+            StartCoroutine(AdoptSocialPhotoCoroutine(user.AvatarUrl, silent: true));
+        }
+    }
+
+    private void RefreshHubProfileHeader(string fallbackName = "Online Player")
+    {
+        UserDto user = subscribedClient?.User;
+        string loginName = user != null && !string.IsNullOrWhiteSpace(user.Login) ? user.Login : fallbackName;
+        int elo = user != null ? user.Score : 1000;
+        if (hubWelcomeLabel != null)
+        {
+            hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
+        }
+        ApplyCircularAvatar(
+            hubAvatarImg,
+            hubAvatarInitialsLabel,
+            user != null ? $"u_{user.Id}" : "local",
+            user?.AvatarBase64,
+            loginName);
+    }
+
+    private void OnGetInfoProfileResponse(ResponseObjectDto<InfoProfileDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        if (profileModal != null && profileModal.activeSelf)
+        {
+            RefreshProfileModalUI(dto.Object.Statistic);
+        }
+    }
+
+    private void OnUpdateProfileAvatarResponse(ResponseObjectDto<UserDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            string err = FormatFriendlyError(dto, "Could not update profile photo.");
+            if (profileModalStatusLabel != null) profileModalStatusLabel.text = err;
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        RefreshHubProfileHeader();
+        if (profileModal != null && profileModal.activeSelf)
+        {
+            RefreshProfileModalUI(null);
+            if (profileModalStatusLabel != null)
+            {
+                profileModalStatusLabel.text = "Profile photo saved!";
+                profileModalStatusLabel.color = RoatanVisualAssets.PalmGreen;
+            }
+        }
+        if (lobbyView != null && lobbyView.activeSelf && currentLobby != null)
+        {
+            RefreshLobbyView();
+        }
+        SetFeedback("Profile photo updated!", RoatanVisualAssets.PalmGreen);
+    }
+
+    private void OnDeleteAccountResponse(ResponseDto dto)
+    {
+        if (dto == null || !dto.OkResult)
+        {
+            string err = FormatFriendlyError(dto, "Could not delete account. Please try again.");
+            if (deleteConfirmErrorLabel != null) deleteConfirmErrorLabel.text = err;
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        // Clear all local credentials, cached avatars, and active match sessions
+        PlayerPrefs.DeleteKey(PrefSocialDeviceIdKey);
+        PlayerPrefs.Save();
+        RoatanMatchSessionStore.ClearSession();
+        RoatanAndroidPhotoPicker.ClearCache();
+        pendingSavedSession = null;
+        currentLobby = null;
+        localReady = false;
+        isSignedIn = false;
+
+        if (loginUserInput != null) loginUserInput.text = string.Empty;
+        if (loginPassInput != null) loginPassInput.text = string.Empty;
+        if (regEmailInput != null) regEmailInput.text = string.Empty;
+        if (regUserInput != null) regUserInput.text = string.Empty;
+        if (regPassInput != null) regPassInput.text = string.Empty;
+        if (profileModal != null) profileModal.SetActive(false);
+        if (deleteAccountModal != null) deleteAccountModal.SetActive(false);
+
+        ShowSubView(authView);
+        SelectAuthTab(isSignIn: true);
+        SetFeedback("Your account has been permanently deleted.", RoatanVisualAssets.IslandGold);
+    }
+
+    private IEnumerator AdoptSocialPhotoCoroutine(string avatarUrl, bool silent)
+    {
+        if (!silent && profileModalStatusLabel != null)
+        {
+            profileModalStatusLabel.text = "Downloading social photo...";
+            profileModalStatusLabel.color = RoatanVisualAssets.IslandGold;
+        }
+
+        yield return RoatanAndroidPhotoPicker.DownloadAndCompressUrlCoroutine(
+            avatarUrl,
+            base64 =>
+            {
+                if (EnsureConnectedForRequest())
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.UpdateProfileAvatarFrame(new UpdateProfileAvatarDto
+                    {
+                        AvatarBase64 = base64,
+                        AvatarUrl = avatarUrl
+                    }));
+                }
+            },
+            err =>
+            {
+                if (!silent)
+                {
+                    if (profileModalStatusLabel != null)
+                    {
+                        profileModalStatusLabel.text = err;
+                        profileModalStatusLabel.color = RoatanVisualAssets.SunsetCoral;
+                    }
+                    SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+                }
+            });
+    }
+
+    private void OpenProfileModal()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (subscribedClient?.User == null) return;
+        RefreshProfileModalUI(null);
+        if (profileModalStatusLabel != null) profileModalStatusLabel.text = string.Empty;
+        if (profileModal != null)
+        {
+            profileModal.transform.SetAsLastSibling();
+            profileModal.SetActive(true);
+        }
+        if (EnsureConnectedForRequest())
+        {
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.GetInfoProfileFrame());
+        }
+    }
+
+    private void RefreshProfileModalUI(StatisticDto stats)
+    {
+        UserDto user = subscribedClient?.User;
+        if (user == null) return;
+
+        ApplyCircularAvatar(profileModalAvatarImg, profileModalAvatarInitials, $"u_{user.Id}", user.AvatarBase64, user.Login);
+        if (profileModalNameLabel != null) profileModalNameLabel.text = user.Login;
+        if (profileModalEmailLabel != null) profileModalEmailLabel.text = string.IsNullOrWhiteSpace(user.Email) ? "No email on file" : user.Email;
+
+        string provider = string.IsNullOrWhiteSpace(user.AuthProvider) ? "Email" : user.AuthProvider;
+        if (profileModalProviderBadge != null)
+        {
+            profileModalProviderBadge.text = $"Signed in with {provider}";
+        }
+
+        if (profileModalStatsLabel != null)
+        {
+            if (stats != null)
+            {
+                profileModalStatsLabel.text = $"Elo {user.Score}  •  Played: {stats.NumberOfGamePlayed}  •  Wins: {stats.NumberOfGameWon}  •  Losses: {stats.NumberOfGameLost}";
+            }
+            else
+            {
+                profileModalStatsLabel.text = $"Elo {user.Score}  •  Online Profile";
+            }
+        }
+
+        if (profileAdoptSocialBtn != null)
+        {
+            bool hasSocialPhoto = !string.IsNullOrWhiteSpace(user.AvatarUrl);
+            profileAdoptSocialBtn.gameObject.SetActive(hasSocialPhoto);
+        }
+    }
+
+    private void OpenDeleteAccountModal()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        deleteConfirmSecondTapArmed = false;
+        if (deleteConfirmInput != null) deleteConfirmInput.text = string.Empty;
+        if (deleteConfirmErrorLabel != null) deleteConfirmErrorLabel.text = string.Empty;
+        if (deleteConfirmBtnLabel != null) deleteConfirmBtnLabel.text = "Confirm Delete";
+        if (deleteAccountModal != null)
+        {
+            deleteAccountModal.transform.SetAsLastSibling();
+            deleteAccountModal.SetActive(true);
+        }
+    }
+
+    private void SubmitDeleteAccountConfirmed()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        string typed = deleteConfirmInput != null ? deleteConfirmInput.text.Trim() : string.Empty;
+        bool typedDelete = string.Equals(typed, "DELETE", StringComparison.OrdinalIgnoreCase);
+
+        if (!typedDelete && !deleteConfirmSecondTapArmed)
+        {
+            deleteConfirmSecondTapArmed = true;
+            if (deleteConfirmBtnLabel != null) deleteConfirmBtnLabel.text = "Tap Again to Permanently Delete";
+            if (deleteConfirmErrorLabel != null)
+            {
+                deleteConfirmErrorLabel.text = "Type DELETE or tap once more to permanently delete your account.";
+                deleteConfirmErrorLabel.color = RoatanVisualAssets.IslandGold;
+            }
+            return;
+        }
+
+        if (!EnsureConnectedForRequest())
+        {
+            if (deleteConfirmErrorLabel != null)
+            {
+                deleteConfirmErrorLabel.text = "Not connected to server.";
+                deleteConfirmErrorLabel.color = RoatanVisualAssets.SunsetCoral;
+            }
+            return;
+        }
+
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.DeleteAccountFrame());
+        if (deleteConfirmErrorLabel != null)
+        {
+            deleteConfirmErrorLabel.text = "Deleting account...";
+            deleteConfirmErrorLabel.color = RoatanVisualAssets.IslandGold;
+        }
+    }
+
+    private static void ApplyCircularAvatar(Image avatarImg, TMP_Text initialsLbl, string cacheKey, string base64, string displayName)
+    {
+        if (avatarImg == null) return;
+        Color bg = RoatanAndroidPhotoPicker.GetFallbackAvatarColor(displayName);
+        Sprite sprite = RoatanAndroidPhotoPicker.GetOrCreateCircularAvatarSprite(cacheKey, base64, bg, out bool hasPhoto);
+        avatarImg.sprite = sprite;
+        avatarImg.color = Color.white;
+        if (initialsLbl != null)
+        {
+            initialsLbl.gameObject.SetActive(!hasPhoto);
+            if (!hasPhoto)
+            {
+                initialsLbl.text = RoatanAndroidPhotoPicker.GetInitials(displayName);
+            }
+        }
     }
 
     private void OnRegisterResponse(ResponseDto dto)
@@ -2196,10 +2798,24 @@ public class RoatanOnlineController : MonoBehaviour
     {
         hubView = CreateStretchPanel(parent, "HubView", Color.clear);
 
-        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 640f), new Vector2(940f, 84f));
-        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 25, FontStyles.Bold, Color.white, new Vector2(-140f, 0f), new Vector2(580f, 54f));
+        GameObject profileBar = CreateCard(hubView.transform, "HubProfileCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, 640f), new Vector2(940f, 88f));
+        GameObject hubAvObj = new GameObject("HubAvatar");
+        hubAvObj.transform.SetParent(profileBar.transform, false);
+        RectTransform hubAvRect = hubAvObj.AddComponent<RectTransform>();
+        hubAvRect.anchoredPosition = new Vector2(-418f, 0f);
+        hubAvRect.sizeDelta = new Vector2(64f, 64f);
+        hubAvatarImg = hubAvObj.AddComponent<Image>();
+        hubAvatarImg.raycastTarget = true;
+        Button hubAvBtn = hubAvObj.AddComponent<Button>();
+        hubAvBtn.targetGraphic = hubAvatarImg;
+        hubAvBtn.onClick.AddListener(OpenProfileModal);
+        hubAvatarInitialsLabel = CreateText(hubAvObj.transform, "Init", "?", 24, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(56f, 44f));
+        hubAvatarInitialsLabel.raycastTarget = false;
+
+        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 24, FontStyles.Bold, Color.white, new Vector2(-150f, 0f), new Vector2(440f, 54f));
         hubWelcomeLabel.alignment = TextAlignmentOptions.MidlineLeft;
-        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(335f, 0f), new Vector2(210f, 58f), 23, SubmitLogout);
+        CreatePillButton(profileBar.transform, "BtnOpenProfile", "Profile", RoatanVisualAssets.BrightLagoon, new Vector2(168f, 0f), new Vector2(160f, 58f), 22, OpenProfileModal);
+        Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(356f, 0f), new Vector2(184f, 58f), 22, SubmitLogout);
         signOutBtnLabel = outBtn.GetComponentInChildren<TMP_Text>();
 
         Button rankedBtn = CreatePillButton(hubView.transform, "BtnQuickRanked", "Quick Ranked Match", RoatanVisualAssets.IslandGold, new Vector2(0f, 548f), new Vector2(940f, 72f), 28, RequestQuickRanked);
@@ -2615,6 +3231,180 @@ public class RoatanOnlineController : MonoBehaviour
         invitePlayersModal.SetActive(false);
     }
 
+    private void BuildOAuthWaitingModal(Transform safeRoot)
+    {
+        oauthWaitingModal = CreateStretchPanel(safeRoot, "OAuthWaitingModal", new Color(0f, 0f, 0f, 0.78f));
+        GameObject card = CreateCard(oauthWaitingModal.transform, "OAuthWaitCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 460f));
+        CreateText(card.transform, "Title", "BROWSER SIGN-IN", 36, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 155f), new Vector2(760f, 54f));
+        oauthWaitingLabel = CreateText(card.transform, "Body", "Complete sign-in in your browser...", 25, FontStyles.Normal, Color.white, new Vector2(0f, 20f), new Vector2(740f, 160f));
+        CreatePillButton(card.transform, "BtnCancelOAuth", "Cancel", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -135f), new Vector2(380f, 76f), 26, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            CancelPendingOAuthFlow();
+        });
+        oauthWaitingModal.SetActive(false);
+    }
+
+    private void BuildSocialProfileModal(Transform safeRoot)
+    {
+        socialProfileModal = CreateStretchPanel(safeRoot, "SocialProfileModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(socialProfileModal.transform, "SocialProfileCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 920f));
+        socialProfileTitleLabel = CreateText(card.transform, "Title", "Complete Profile", 36, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 395f), new Vector2(800f, 54f));
+        socialProfileSubLabel = CreateText(card.transform, "Sub", "Enter your real email and choose a username:", 21, FontStyles.Normal, new Color(0.84f, 0.94f, 0.97f), new Vector2(0f, 330f), new Vector2(800f, 56f));
+
+        // Optional circular avatar preview + Choose Photo button
+        GameObject avObj = new GameObject("SocialAvatarPreview");
+        avObj.transform.SetParent(card.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(-190f, 205f);
+        avRect.sizeDelta = new Vector2(124f, 124f);
+        socialProfileAvatarImg = avObj.AddComponent<Image>();
+        socialProfileAvatarInitials = CreateText(avObj.transform, "Init", "?", 42, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(110f, 80f));
+        socialProfileAvatarInitials.raycastTarget = false;
+
+        CreatePillButton(card.transform, "BtnPickSocialPhoto", "Choose Photo (Optional)", RoatanVisualAssets.BrightLagoon, new Vector2(115f, 205f), new Vector2(400f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RoatanAndroidPhotoPicker.PickPhoto(
+                b64 =>
+                {
+                    socialProfileAvatarBase64 = b64;
+                    string previewName = !string.IsNullOrWhiteSpace(socialProfileUserInput?.text) ? socialProfileUserInput.text : socialProfileProvider;
+                    ApplyCircularAvatar(socialProfileAvatarImg, socialProfileAvatarInitials, "social_preview", b64, previewName);
+                },
+                err =>
+                {
+                    if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = err;
+                });
+        });
+
+        CreateFieldTitle(card.transform, "SocEmailLbl", "Email Address", new Vector2(0f, 96f));
+        socialProfileEmailInput = CreateInputField(card.transform, "SocEmailInput", "you@gmail.com", "", new Vector2(0f, 40f), new Vector2(780f, 70f));
+
+        CreateFieldTitle(card.transform, "SocUserLbl", "Username (3–16 letters or numbers)", new Vector2(0f, -38f));
+        socialProfileUserInput = CreateInputField(card.transform, "SocUserInput", "Choose your player name", "", new Vector2(0f, -94f), new Vector2(780f, 70f));
+
+        socialProfileErrorLabel = CreateText(card.transform, "SocErr", "", 20, FontStyles.Bold, RoatanVisualAssets.SunsetCoral, new Vector2(0f, -172f), new Vector2(780f, 56f));
+
+        CreatePillButton(card.transform, "BtnSocialContinue", "Continue", RoatanVisualAssets.PalmGreen, new Vector2(0f, -264f), new Vector2(620f, 86f), 30, SubmitSocialProfileCompletion);
+        CreatePillButton(card.transform, "BtnSocialCancel", "Cancel", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(0f, -370f), new Vector2(360f, 72f), 25, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            socialProfileModal.SetActive(false);
+        });
+
+        socialProfileModal.SetActive(false);
+    }
+
+    private void BuildProfileModal(Transform safeRoot)
+    {
+        profileModal = CreateStretchPanel(safeRoot, "PlayerProfileModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(profileModal.transform, "ProfileCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 1020f));
+
+        CreateText(card.transform, "Title", "PLAYER PROFILE", 36, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-30f, 446f), new Vector2(680f, 54f));
+        CreatePillButton(card.transform, "BtnCloseProfile", "X", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(375f, 446f), new Vector2(68f, 60f), 28, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            profileModal.SetActive(false);
+        });
+
+        // Circular 164x164 avatar display
+        GameObject avObj = new GameObject("ProfileAvatar");
+        avObj.transform.SetParent(card.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(0f, 300f);
+        avRect.sizeDelta = new Vector2(164f, 164f);
+        profileModalAvatarImg = avObj.AddComponent<Image>();
+        profileModalAvatarInitials = CreateText(avObj.transform, "Init", "?", 58, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(140f, 100f));
+        profileModalAvatarInitials.raycastTarget = false;
+
+        profileModalNameLabel = CreateText(card.transform, "PName", "Player", 34, FontStyles.Bold, Color.white, new Vector2(0f, 180f), new Vector2(780f, 48f));
+        profileModalEmailLabel = CreateText(card.transform, "PEmail", "player@example.com", 22, FontStyles.Normal, new Color(0.80f, 0.92f, 0.96f), new Vector2(0f, 132f), new Vector2(780f, 36f));
+
+        GameObject badge = CreateCard(card.transform, "ProviderBadge", new Color(0.09f, 0.27f, 0.34f, 0.95f), new Vector2(0f, 76f), new Vector2(460f, 46f));
+        profileModalProviderBadge = CreateText(badge.transform, "BadgeTxt", "Signed in with Email", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(430f, 36f));
+
+        GameObject statsCard = CreateCard(card.transform, "StatsCard", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, -8f), new Vector2(790f, 78f));
+        profileModalStatsLabel = CreateText(statsCard.transform, "StatsTxt", "Elo 1000", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(750f, 60f));
+
+        profileModalStatusLabel = CreateText(card.transform, "StatusTxt", "", 20, FontStyles.Italic, RoatanVisualAssets.IslandGold, new Vector2(0f, -74f), new Vector2(780f, 36f));
+
+        CreatePillButton(card.transform, "BtnChangePhoto", "Change Photo", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -148f), new Vector2(620f, 80f), 27, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RoatanAndroidPhotoPicker.PickPhoto(
+                b64 =>
+                {
+                    if (EnsureConnectedForRequest())
+                    {
+                        if (profileModalStatusLabel != null)
+                        {
+                            profileModalStatusLabel.text = "Uploading profile photo...";
+                            profileModalStatusLabel.color = RoatanVisualAssets.IslandGold;
+                        }
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.UpdateProfileAvatarFrame(new UpdateProfileAvatarDto
+                        {
+                            AvatarBase64 = b64
+                        }));
+                    }
+                },
+                err =>
+                {
+                    if (profileModalStatusLabel != null)
+                    {
+                        profileModalStatusLabel.text = err;
+                        profileModalStatusLabel.color = RoatanVisualAssets.SunsetCoral;
+                    }
+                    SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+                });
+        });
+
+        profileAdoptSocialBtn = CreatePillButton(card.transform, "BtnAdoptSocialPhoto", "Adopt Social Photo", RoatanVisualAssets.PalmGreen, new Vector2(0f, -244f), new Vector2(620f, 76f), 25, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            string url = subscribedClient?.User?.AvatarUrl;
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                StartCoroutine(AdoptSocialPhotoCoroutine(url, silent: false));
+            }
+        });
+        profileAdoptSocialBtn.gameObject.SetActive(false);
+
+        CreatePillButton(card.transform, "BtnDeleteAccount", "Delete Account", new Color(0.68f, 0.16f, 0.18f, 1f), new Vector2(0f, -356f), new Vector2(540f, 76f), 26, OpenDeleteAccountModal);
+
+        CreatePillButton(card.transform, "BtnProfileDone", "Close", new Color(0.20f, 0.24f, 0.28f, 1f), new Vector2(0f, -448f), new Vector2(360f, 68f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            profileModal.SetActive(false);
+        });
+
+        profileModal.SetActive(false);
+    }
+
+    private void BuildDeleteAccountModal(Transform safeRoot)
+    {
+        deleteAccountModal = CreateStretchPanel(safeRoot, "DeleteAccountModal", new Color(0f, 0f, 0f, 0.84f));
+        GameObject card = CreateCard(deleteAccountModal.transform, "DeleteCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(860f, 680f));
+
+        CreateText(card.transform, "Title", "DELETE ACCOUNT?", 38, FontStyles.Bold, RoatanVisualAssets.SunsetCoral, new Vector2(0f, 265f), new Vector2(780f, 56f));
+        CreateText(card.transform, "WarnBody", "This will permanently delete your account, profile photo, and Elo history, and remove you from all tables.\n\nType DELETE or tap Confirm to permanently delete your account:", 23, FontStyles.Normal, Color.white, new Vector2(0f, 130f), new Vector2(780f, 175f));
+
+        deleteConfirmInput = CreateInputField(card.transform, "DeleteConfirmInput", "Type DELETE to confirm", "", new Vector2(0f, -2f), new Vector2(680f, 72f));
+        deleteConfirmErrorLabel = CreateText(card.transform, "DelErr", "", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, -72f), new Vector2(760f, 44f));
+
+        Button confirmBtn = CreatePillButton(card.transform, "BtnConfirmDeleteAccount", "Confirm Delete", new Color(0.74f, 0.16f, 0.18f, 1f), new Vector2(0f, -162f), new Vector2(620f, 86f), 27, SubmitDeleteAccountConfirmed);
+        deleteConfirmBtnLabel = confirmBtn.GetComponentInChildren<TMP_Text>();
+
+        CreatePillButton(card.transform, "BtnCancelDeleteAccount", "Cancel", new Color(0.22f, 0.26f, 0.30f, 1f), new Vector2(0f, -264f), new Vector2(380f, 72f), 25, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            deleteConfirmSecondTapArmed = false;
+            deleteAccountModal.SetActive(false);
+        });
+
+        deleteAccountModal.SetActive(false);
+    }
+
     // ==================== HELPERS ====================
 
     private void ShowSubView(GameObject target)
@@ -2811,14 +3601,26 @@ public class RoatanOnlineController : MonoBehaviour
             ? new Color(0.08f, 0.24f, 0.30f, 0.96f)
             : new Color(0.07f, 0.14f, 0.18f, 0.80f);
 
-        GameObject row = CreateCard(parent, $"Roster_{player.UserId}", bg, Vector2.zero, new Vector2(840f, 92f));
-        row.AddComponent<LayoutElement>().preferredHeight = 92f;
+        GameObject row = CreateCard(parent, $"Roster_{player.UserId}", bg, Vector2.zero, new Vector2(840f, 96f));
+        row.AddComponent<LayoutElement>().preferredHeight = 96f;
 
         Color dotColor = player.IsOnline ? new Color(0.22f, 0.88f, 0.48f, 1f) : new Color(0.50f, 0.56f, 0.60f, 1f);
-        CreateText(row.transform, "Dot", "●", 26, FontStyles.Bold, dotColor, new Vector2(-380f, 0f), new Vector2(36f, 44f));
+        CreateText(row.transform, "Dot", "●", 24, FontStyles.Bold, dotColor, new Vector2(-386f, 0f), new Vector2(30f, 40f));
+
+        // Circular Player Avatar Thumbnail
+        GameObject avObj = new GameObject("Avatar");
+        avObj.transform.SetParent(row.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(-334f, 0f);
+        avRect.sizeDelta = new Vector2(60f, 60f);
+        Image avImg = avObj.AddComponent<Image>();
+        avImg.raycastTarget = false;
+        TMP_Text avInit = CreateText(avObj.transform, "Init", "?", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(52f, 40f));
+        avInit.raycastTarget = false;
+        ApplyCircularAvatar(avImg, avInit, $"roster_{player.UserId}", player.AvatarBase64, player.Username);
 
         string youSuffix = player.UserId == selfId ? " (You)" : string.Empty;
-        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  •  Elo {player.Elo}", 23, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-120f, 14f), new Vector2(470f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  •  Elo {player.Elo}", 22, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-78f, 15f), new Vector2(430f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
 
         string statusText = player.IsOnline
             ? (string.IsNullOrWhiteSpace(player.TableName) ? player.Status : $"{player.Status} • {player.TableName}")
@@ -2826,7 +3628,7 @@ public class RoatanOnlineController : MonoBehaviour
         Color statusColor = !player.IsOnline
             ? new Color(0.55f, 0.62f, 0.66f)
             : (player.Status == "Available" ? new Color(0.32f, 0.90f, 0.56f) : RoatanVisualAssets.IslandGold);
-        CreateText(row.transform, "PStatus", statusText, 19, FontStyles.Normal, statusColor, new Vector2(-120f, -18f), new Vector2(470f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(row.transform, "PStatus", statusText, 18, FontStyles.Normal, statusColor, new Vector2(-78f, -18f), new Vector2(430f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
 
         if (player.IsOnline && player.UserId != selfId)
         {
@@ -3081,8 +3883,28 @@ public class RoatanOnlineController : MonoBehaviour
                     ? $"Bot • {seat.BotDifficulty ?? "Pro"}"
                     : (seat.IsReady ? $"Elo {seat.Player.Elo} • READY" : $"Elo {seat.Player.Elo}");
 
-                CreateText(seatCard.transform, "OccName", occupantTitle, 21, FontStyles.Bold, Color.white, new Vector2(0f, 6f), new Vector2(cardSize.x - 18f, 34f));
-                CreateText(seatCard.transform, "OccSub", subLine, 17, FontStyles.Normal, seat.IsReady ? new Color(0.45f, 0.95f, 0.65f) : new Color(0.80f, 0.92f, 0.96f), new Vector2(0f, -24f), new Vector2(cardSize.x - 18f, 26f));
+                // Circular seat avatar thumbnail
+                GameObject seatAvObj = new GameObject("SeatAvatar");
+                seatAvObj.transform.SetParent(seatCard.transform, false);
+                RectTransform seatAvRect = seatAvObj.AddComponent<RectTransform>();
+                float avSize = isTopOrBottom ? 54f : 46f;
+                float avX = -cardSize.x * 0.5f + avSize * 0.5f + 14f;
+                float avY = seat.IsBot && isHost ? 4f : -6f;
+                seatAvRect.anchoredPosition = new Vector2(avX, avY);
+                seatAvRect.sizeDelta = new Vector2(avSize, avSize);
+                Image seatAvImg = seatAvObj.AddComponent<Image>();
+                seatAvImg.raycastTarget = false;
+                TMP_Text seatAvInit = CreateText(seatAvObj.transform, "Init", "?", isTopOrBottom ? 20 : 17, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(avSize - 6f, avSize - 10f));
+                seatAvInit.raycastTarget = false;
+                ApplyCircularAvatar(seatAvImg, seatAvInit, $"seat_{seat.Player.Id}", seat.Player.AvatarBase64, seat.Player.Name);
+
+                float textLeftPad = avSize + 24f;
+                float textW = cardSize.x - textLeftPad - 12f;
+                float textX = textLeftPad * 0.5f - 4f;
+                TMP_Text occNameTxt = CreateText(seatCard.transform, "OccName", occupantTitle, isTopOrBottom ? 20 : 18, FontStyles.Bold, Color.white, new Vector2(textX, avY + 12f), new Vector2(textW, 30f));
+                occNameTxt.alignment = TextAlignmentOptions.MidlineLeft;
+                TMP_Text occSubTxt = CreateText(seatCard.transform, "OccSub", subLine, isTopOrBottom ? 16 : 15, FontStyles.Normal, seat.IsReady ? new Color(0.45f, 0.95f, 0.65f) : new Color(0.80f, 0.92f, 0.96f), new Vector2(textX, avY - 14f), new Vector2(textW, 24f));
+                occSubTxt.alignment = TextAlignmentOptions.MidlineLeft;
 
                 if (seat.IsBot && isHost)
                 {
@@ -3121,21 +3943,56 @@ public class RoatanOnlineController : MonoBehaviour
             spawnedSeatCards.Add(seatCard);
         }
 
+        // Enforce Minimum 2 Real Human Players for Online Matches
+        int humanCount = currentLobby.Players != null ? currentLobby.Players.Count(p => !p.IsBot) : 0;
+        bool hasEnoughHumans = humanCount >= 2;
+        bool allFilled = seatedCount >= currentLobby.MaxNumberOfPlayer;
+        bool canStart = allFilled && hasEnoughHumans;
+
+        if (lobbyTimerLabel != null)
+        {
+            if (!hasEnoughHumans)
+            {
+                lobbyTimerLabel.text = $"Need at least 2 real players to start online ({humanCount}/2 humans seated) — use Offline Mode for solo vs bots";
+                lobbyTimerLabel.color = RoatanVisualAssets.IslandGold;
+            }
+            else if (!allFilled)
+            {
+                lobbyTimerLabel.text = "Tap an open seat to switch, add bots, or Ready up!";
+                lobbyTimerLabel.color = Color.white;
+            }
+            else
+            {
+                lobbyTimerLabel.text = isHost
+                    ? "All seats filled — tap Start Match when ready!"
+                    : "All seats filled — waiting for Host to start match...";
+                lobbyTimerLabel.color = new Color(0.45f, 0.95f, 0.65f);
+            }
+        }
+
         // Host Start Match Button vs Ready Button layout
         if (startMatchBtn != null)
         {
             startMatchBtn.gameObject.SetActive(isHost);
-            bool allFilled = seatedCount >= currentLobby.MaxNumberOfPlayer;
-            startMatchBtn.interactable = allFilled;
+            startMatchBtn.interactable = canStart;
             if (startMatchBtnImg != null)
             {
-                startMatchBtnImg.color = allFilled ? RoatanVisualAssets.PalmGreen : new Color(0.22f, 0.30f, 0.34f, 0.90f);
+                startMatchBtnImg.color = canStart ? RoatanVisualAssets.PalmGreen : new Color(0.22f, 0.30f, 0.34f, 0.90f);
             }
             if (startMatchBtnLabel != null)
             {
-                startMatchBtnLabel.text = allFilled
-                    ? "Start Match"
-                    : $"Fill Seats ({seatedCount}/{currentLobby.MaxNumberOfPlayer})";
+                if (!hasEnoughHumans)
+                {
+                    startMatchBtnLabel.text = $"Need 2+ Humans ({humanCount}/2)";
+                }
+                else if (!allFilled)
+                {
+                    startMatchBtnLabel.text = $"Fill Seats ({seatedCount}/{currentLobby.MaxNumberOfPlayer})";
+                }
+                else
+                {
+                    startMatchBtnLabel.text = "Start Match";
+                }
             }
         }
 

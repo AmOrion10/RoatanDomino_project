@@ -209,6 +209,23 @@ public class Client : IClient
                 User = null;
                 userToken = Guid.Empty;
                 break;
+            case FrameCommandType.UpdateProfileAvatar:
+                ResponseObjectDto<UserDto> avatarResp = frame.GetObjectFromMessage<ResponseObjectDto<UserDto>>();
+                if (avatarResp != null && avatarResp.OkResult && avatarResp.Object != null)
+                {
+                    User = avatarResp.Object;
+                }
+                break;
+            case FrameCommandType.DeleteAccount:
+                ResponseDto deleteResp = frame.GetObjectFromMessage<ResponseDto>();
+                if (deleteResp != null && deleteResp.OkResult)
+                {
+                    User = null;
+                    userToken = Guid.Empty;
+                    Friends.Clear();
+                    FriendRequests.Clear();
+                }
+                break;
             case FrameCommandType.RejoinMatch:
                 ResponseObjectDto<RejoinMatchSnapshotDto> rejoinResp = frame.GetObjectFromMessage<ResponseObjectDto<RejoinMatchSnapshotDto>>();
                 if (rejoinResp != null && rejoinResp.OkResult && rejoinResp.Object != null)

@@ -40,12 +40,12 @@ public class CreateUserCommandHandler(IUserRepository userRepository) : ICommand
 
         if (await userRepository.ExistsByEmail(request.Email))
         {
-            throw new UserAlreadyExistException("An account with this email address already exists.");
+            throw new UserAlreadyExistException("An account with this email address already exists. Please sign in instead.");
         }
 
         if (await userRepository.ExistsByLogin(request.Login))
         {
-            throw new UserAlreadyExistException("That username is already taken. Please choose another.");
+            throw new UserAlreadyExistException("That username is already taken. Please choose another username.");
         }
 
         User user = new(request.Email, request.Login);

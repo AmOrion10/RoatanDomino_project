@@ -8,14 +8,28 @@ public class TimerManager : ITimerManager
 {
     public void UpdateTimerInLobby(Lobby lobby)
     {
-        int numberOfPlayerReady = lobby.PlayersInLobby.Count(p => p.IsReady);
+        int humanCount = lobby.GetHumanPlayers().Count;
+        int numberOfPlayerReady = lobby.PlayersInLobby.Count(p => !p.IsBot && p.IsReady);
+
+        // Online tables require at least 2 real human players before any auto-start countdown can run
+        if (humanCount < 2)
+        {
+            if (lobby.Timer.HasStarted)
+            {
+                lobby.Timer.Duration = ITimerManager.LobbyTimerCanceled;
+                lobby.Timer.HasStarted = false;
+            }
+            return;
+        }
+
+        int totalReadyIncludingBots = lobby.PlayersInLobby.Count(p => p.IsReady);
         if (lobby.Timer.HasStarted)
         {
-            if (numberOfPlayerReady == lobby.MaxNumberOfPlayer && lobby.Timer.Duration > ITimerManager.LobbyTimerAllReady)
+            if (totalReadyIncludingBots == lobby.MaxNumberOfPlayer && lobby.Timer.Duration > ITimerManager.LobbyTimerAllReady)
             {
                 lobby.Timer.Duration = ITimerManager.LobbyTimerAllReady;
             }
-            else if (numberOfPlayerReady == 0 || (numberOfPlayerReady == 1 && lobby.PlayersInLobby.Count == 1))
+            else if (numberOfPlayerReady == 0)
             {
                 lobby.Timer.Duration = ITimerManager.LobbyTimerCanceled;
                 lobby.Timer.HasStarted = false;
@@ -23,7 +37,7 @@ public class TimerManager : ITimerManager
         }
         else
         {
-            if (numberOfPlayerReady >= 1 && numberOfPlayerReady < lobby.MaxNumberOfPlayer && lobby.PlayersInLobby.Count > 1)
+            if (numberOfPlayerReady >= 1 && totalReadyIncludingBots < lobby.MaxNumberOfPlayer && humanCount > 1)
             {
                 lobby.Timer.Duration = ITimerManager.LobbyTimerAtLeastOneReady;
                 lobby.Timer.HasStarted = true;

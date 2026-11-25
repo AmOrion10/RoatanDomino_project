@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 
 namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
 {
@@ -26,6 +26,15 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
         /// Can be null
         /// </summary>
         [JsonProperty(PropertyName = "n")]
-        public string Nationality { get; set; } 
+        public string Nationality { get; set; }
+
+        [JsonProperty(PropertyName = "au", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarUrl { get; set; }
+
+        [JsonProperty(PropertyName = "ab", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarBase64 { get; set; }
+
+        [JsonProperty(PropertyName = "ap", NullValueHandling = NullValueHandling.Ignore)]
+        public string AuthProvider { get; set; }
     }
 }

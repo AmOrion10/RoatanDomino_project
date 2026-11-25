@@ -35,9 +35,10 @@ public static class DependencyInjection
 
         services.AddScoped<IMailSender, MailSender>();
 
-        services.AddScoped<ServerUpdater>();
-        services.AddScoped<LobbyServerUpdater>();
-        services.AddScoped<GameServerUpdater>();
+        services.AddSingleton<ServerUpdater>();
+        services.AddSingleton<LobbyServerUpdater>();
+        services.AddSingleton<GameServerUpdater>();
+        services.AddSingleton<OAuthStateStore>();
         services.AddScoped<ClientDisconnectionManager>();
         services.AddScoped<ResetPasswordManager>();
         services.AddScoped<SocialAuthService>();

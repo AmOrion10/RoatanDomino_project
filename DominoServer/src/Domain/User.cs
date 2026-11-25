@@ -1,4 +1,4 @@
-﻿namespace Domain;
+namespace Domain;
 
 public class User(string email, string login)
 {
@@ -9,6 +9,9 @@ public class User(string email, string login)
     public DateTime DateSignup { get; set; }
     public DateOnly Birthdate { get; set; }
     public string? Nationality { get; set; }
+    public string? AvatarUrl { get; set; }
+    public string? AvatarBase64 { get; set; }
+    public string AuthProvider { get; set; } = "Email";
     public UserStats? Statistics { get; set; }
 
     public User(User user) : this(user.Email, user.Login)
@@ -18,6 +21,9 @@ public class User(string email, string login)
         DateSignup = user.DateSignup;
         Birthdate = user.Birthdate;
         Nationality = user.Nationality;
+        AvatarUrl = user.AvatarUrl;
+        AvatarBase64 = user.AvatarBase64;
+        AuthProvider = user.AuthProvider;
         Statistics = user.Statistics;
     }
 

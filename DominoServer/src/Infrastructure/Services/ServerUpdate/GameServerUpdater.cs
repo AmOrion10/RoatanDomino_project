@@ -47,7 +47,7 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             return;
         }
 
-        IServiceScope scope = serviceProvider.CreateScope();
+        using IServiceScope scope = serviceProvider.CreateScope();
         IMessageDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IMessageDispatcher>();
 
         List<int> gamesWithTimerExpired = await dispatcher.Dispatch(new UpdateBeforeGameTimerCommand((int)timeElapsedBeforeGame.TotalSeconds));
@@ -57,37 +57,57 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         foreach (int gameId in gamesWithTimerExpired)
         {
             logger.LogInformation("Game {gameId} has timer expired", gameId);
-            List<IClient> clientsInGame = await dispatcher.Dispatch(new GetAllClientsForGameQuery(gameId));
-            Game game = await dispatcher.Dispatch(new GameStartingCommand(gameId));
-            Chat chat = await dispatcher.Dispatch(new ClientsInGameJoinChatCommand(game.Id));
-            await SendHandsToPlayers(clientsInGame, game);
+            await StartAndDealGameAsync(gameId, skipOpeningDelay: false);
+        }
+    }
 
-            await Task.Delay(1000); // We wait a bit before continuing
+    public async Task StartAndDealGameAsync(int gameId, bool skipOpeningDelay = false)
+    {
+        using IServiceScope scope = serviceProvider.CreateScope();
+        IGameManager gameManager = scope.ServiceProvider.GetRequiredService<IGameManager>();
+        IMessageDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IMessageDispatcher>();
 
-            game = await dispatcher.Dispatch(new GamePlaceFirstDominoCommand(gameId));
+        Game? targetGame = gameManager.GetById(gameId);
+        if (targetGame is null) return;
 
-            Timer generalTimer = await dispatcher.Dispatch(new GetGeneralTimerOfGameQuery(gameId));
-            Timer timerPerTurn = await dispatcher.Dispatch(new GetPlayerTurnTimerQuery(gameId));
+        lock (targetGame)
+        {
+            if (targetGame.HasDealtOpeningHand) return;
+            targetGame.HasDealtOpeningHand = true;
+            targetGame.StartTimer.HasStarted = false;
+            targetGame.StartTimer.Duration = 0;
+        }
 
-            List<MessageFrame> framesToBeSendedToAllClients =
-            [
-                MessageFrameBuilder.JoinChatFrame(DtoBuilder.GetChatDto(chat)),
-                MessageFrameBuilder.GameGeneralTimerFrame(DtoBuilder.GetTimerDto(generalTimer)),
-                MessageFrameBuilder.PlayerPlaysFrame(DtoBuilder.GetPlayerPlayPlaceDominoDto(game)),
-                MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
-                MessageFrameBuilder.NumberOfDominoPerPlayerFrame(DtoBuilder.GetNumberOfDominoPerPlayerDto(game.GetNumberOfDominoAllPlayer()))
-            ];
+        List<IClient> clientsInGame = await dispatcher.Dispatch(new GetAllClientsForGameQuery(gameId));
+        Game game = await dispatcher.Dispatch(new GameStartingCommand(gameId));
+        Chat chat = await dispatcher.Dispatch(new ClientsInGameJoinChatCommand(game.Id));
+        await SendHandsToPlayers(clientsInGame, game);
 
-            foreach (IClient clientInGame in clientsInGame)
-            {
-                await clientInGame.SendAsync(new NetworkFrame(framesToBeSendedToAllClients));
-            }
+        await Task.Delay(skipOpeningDelay ? 150 : 1000);
 
-            IClient? clientPlaying = clientsInGame.FirstOrDefault(c => c.User!.Id == game.PlayerPlaying.Id);
-            if (clientPlaying is not null)
-            {
-                await clientPlaying.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(DtoBuilder.GetPlayerPossibleMovesDto(game))));
-            }
+        game = await dispatcher.Dispatch(new GamePlaceFirstDominoCommand(gameId));
+
+        Timer generalTimer = await dispatcher.Dispatch(new GetGeneralTimerOfGameQuery(gameId));
+        Timer timerPerTurn = await dispatcher.Dispatch(new GetPlayerTurnTimerQuery(gameId));
+
+        List<MessageFrame> framesToBeSendedToAllClients =
+        [
+            MessageFrameBuilder.JoinChatFrame(DtoBuilder.GetChatDto(chat)),
+            MessageFrameBuilder.GameGeneralTimerFrame(DtoBuilder.GetTimerDto(generalTimer)),
+            MessageFrameBuilder.PlayerPlaysFrame(DtoBuilder.GetPlayerPlayPlaceDominoDto(game)),
+            MessageFrameBuilder.ChangePlayerTurnFrame(DtoBuilder.GetPlayerTurnDto(game, DtoBuilder.GetTimerDto(timerPerTurn))),
+            MessageFrameBuilder.NumberOfDominoPerPlayerFrame(DtoBuilder.GetNumberOfDominoPerPlayerDto(game.GetNumberOfDominoAllPlayer()))
+        ];
+
+        foreach (IClient clientInGame in clientsInGame)
+        {
+            await clientInGame.SendAsync(new NetworkFrame(framesToBeSendedToAllClients));
+        }
+
+        IClient? clientPlaying = clientsInGame.FirstOrDefault(c => c.User!.Id == game.PlayerPlaying.Id);
+        if (clientPlaying is not null)
+        {
+            await clientPlaying.SendAsync(new NetworkFrame(MessageFrameBuilder.PossibleMovesFrame(DtoBuilder.GetPlayerPossibleMovesDto(game))));
         }
     }
 

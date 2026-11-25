@@ -48,6 +48,8 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<LobbyDto>> RemoveTableBotResponseEvent;
     public event Action<ResponseDto> StartTableMatchResponseEvent;
     public event Action<ResponseDto> SendTableInviteResponseEvent;
+    public event Action<ResponseObjectDto<UserDto>> UpdateProfileAvatarResponseEvent;
+    public event Action<ResponseDto> DeleteAccountResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -162,6 +164,12 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.SendTableInvite:
                 SendTableInviteResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.UpdateProfileAvatar:
+                UpdateProfileAvatarResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<UserDto>>());
+                break;
+            case FrameCommandType.DeleteAccount:
+                DeleteAccountResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
                 break;
         }
 

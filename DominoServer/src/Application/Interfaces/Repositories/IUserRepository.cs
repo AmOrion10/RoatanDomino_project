@@ -23,5 +23,7 @@ public interface IUserRepository
     Task ChangePassword(long id, string newPassword);
     Task<User?> GetByEmail(string email);
     Task<List<User>> GetAllUsers();
-    Task<User> FindOrCreateSocialUser(string provider, string providerUserId, string? email, string? displayName);
+    Task<User> FindOrCreateSocialUser(string provider, string providerUserId, string? email, string? displayName, string? avatarUrl = null, string? avatarBase64 = null);
+    Task<User> UpdateAvatar(long userId, string? avatarBase64, string? avatarUrl);
+    Task<bool> DeleteUser(long userId);
 }

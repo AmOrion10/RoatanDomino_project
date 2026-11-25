@@ -1,6 +1,7 @@
 using Application;
 using Application.Common;
 using Application.Interfaces;
+using Application.Interfaces.Repositories;
 using Application.Messages.Commands.User;
 using Application.Messages.Queries.Chat;
 
@@ -21,7 +22,8 @@ public class LoggingFrameHandlers(
     ClientDisconnectionManager disconnectionManager,
     ResetPasswordManager resetPasswordManager,
     SocialAuthService socialAuthService,
-    PresenceService presenceService) : BaseFrameHandlers
+    PresenceService presenceService,
+    IUserRepository userRepository) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -30,6 +32,7 @@ public class LoggingFrameHandlers(
         handler.RegisterHandler(FrameCommandType.SocialAuth, SocialAuthCallback, needToBeLoggedIn: false);
         handler.RegisterHandler(FrameCommandType.GetPlayerRoster, GetPlayerRosterCallback);
         handler.RegisterHandler(FrameCommandType.Disconnection, DeconnexionCallback);
+        handler.RegisterHandler(FrameCommandType.DeleteAccount, DeleteAccountCallback);
         handler.RegisterHandler(FrameCommandType.ReadyConnected, ReadyConnectedCallback);
         handler.RegisterHandler(FrameCommandType.AskResetPassword, AskResetPasswordCallback, needToBeLoggedIn: false);
         handler.RegisterHandler(FrameCommandType.ResetPassword, ResetPasswordCallback, needToBeLoggedIn: false);
@@ -86,6 +89,21 @@ public class LoggingFrameHandlers(
     private async Task DeconnexionCallback(MessageFrame frame, IClient client)
     {
         DisconnectionResult result = await dispatcher.Dispatch(new LogoutUserCommand(client));
+        NetworkFrame networkFrame = new([
+            MessageFrameBuilder.LeaveChatFrame(DtoBuilder.GetChatDto(result.GlobalChat)),
+            MessageFrameBuilder.ResponseFrame(ResponseDto.Ok(), frame.CommandType)
+        ]);
+        await client.SendAsync(networkFrame);
+        await disconnectionManager.ProcessDisconnection(result);
+    }
+
+    private async Task DeleteAccountCallback(MessageFrame frame, IClient client)
+    {
+        long userId = client.User!.Id;
+        DisconnectionResult result = await dispatcher.Dispatch(new LogoutUserCommand(client));
+        await userRepository.DeleteUser(userId);
+        client.User = null;
+
         NetworkFrame networkFrame = new([
             MessageFrameBuilder.LeaveChatFrame(DtoBuilder.GetChatDto(result.GlobalChat)),
             MessageFrameBuilder.ResponseFrame(ResponseDto.Ok(), frame.CommandType)

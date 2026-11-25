@@ -21,5 +21,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto
 
         [JsonProperty(PropertyName = "si", NullValueHandling = NullValueHandling.Ignore)]
         public int SeatIndex { get; set; }
+
+        [JsonProperty(PropertyName = "au", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarUrl { get; set; }
+
+        [JsonProperty(PropertyName = "ab", NullValueHandling = NullValueHandling.Ignore)]
+        public string AvatarBase64 { get; set; }
     }
 }

@@ -15,6 +15,8 @@ using DominoCommon.com.domino.common.Scripts.Networking.Frame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
+using Infrastructure.Services.ServerUpdate;
+
 using Timer = Domain.Timer;
 
 namespace Infrastructure.Services.FrameHandlers;
@@ -23,7 +25,8 @@ public class GameFrameHandlers(
     IMessageDispatcher dispatcher,
     IGameManager gameManager,
     ITokenManager tokenManager,
-    IChatManager chatManager) : BaseFrameHandlers
+    IChatManager chatManager,
+    GameServerUpdater gameServerUpdater) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -112,6 +115,14 @@ public class GameFrameHandlers(
         foreach (IClient clientInGame in clientsInGame)
         {
             await clientInGame.SendAsync(new NetworkFrame(MessageFrameBuilder.GameStartingTimerFrame(timerDto)));
+        }
+
+        // For modern Roatan tables (including humans + bots), immediately deal tiles once all humans are ready
+        // so clients never hang on "Waiting for server to deal dominoes..."
+        Game? game = gameManager.GetById(gameId);
+        if (game is not null && !game.IsLegacyDrawAdvance && !game.HasDealtOpeningHand)
+        {
+            await gameServerUpdater.StartAndDealGameAsync(gameId, skipOpeningDelay: true);
         }
     }
 

@@ -93,7 +93,9 @@ public class PresenceService(
                 Username = user.Login,
                 Elo = user.Score,
                 IsOnline = false,
-                Status = "Offline"
+                Status = "Offline",
+                AvatarUrl = user.AvatarUrl,
+                AvatarBase64 = user.AvatarBase64
             };
         }
 
@@ -108,7 +110,9 @@ public class PresenceService(
                 IsOnline = true,
                 Status = "In Match",
                 TableId = game.LobbyId > 0 ? game.LobbyId : game.Id,
-                TableName = game.MatchTitle
+                TableName = game.MatchTitle,
+                AvatarUrl = user.AvatarUrl,
+                AvatarBase64 = user.AvatarBase64
             };
         }
 
@@ -123,7 +127,9 @@ public class PresenceService(
                 IsOnline = true,
                 Status = "At Table",
                 TableId = lobby.Id,
-                TableName = lobby.Name
+                TableName = lobby.Name,
+                AvatarUrl = user.AvatarUrl,
+                AvatarBase64 = user.AvatarBase64
             };
         }
 
@@ -133,7 +139,9 @@ public class PresenceService(
             Username = user.Login,
             Elo = user.Score,
             IsOnline = true,
-            Status = "Available"
+            Status = "Available",
+            AvatarUrl = user.AvatarUrl,
+            AvatarBase64 = user.AvatarBase64
         };
     }
 }

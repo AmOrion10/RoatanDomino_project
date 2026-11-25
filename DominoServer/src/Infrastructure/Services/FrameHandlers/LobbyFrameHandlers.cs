@@ -287,6 +287,15 @@ public class LobbyFrameHandlers(
             return;
         }
 
+        int humanCount = lobby.GetHumanPlayers().Count;
+        if (humanCount < 2)
+        {
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
+                ResponseDto.Error(ErrorTypes.Unknown, $"Need at least 2 real players to start online ({humanCount}/2 humans seated). Use Offline Mode to play solo against bots."),
+                frame.CommandType)));
+            return;
+        }
+
         if (lobby.PlayersInLobby.Count < lobby.MaxNumberOfPlayer)
         {
             await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
@@ -297,6 +306,10 @@ public class LobbyFrameHandlers(
 
         List<IClient> clients = await dispatcher.Dispatch(new GetAllClientsForLobbyQuery(lobby.Id));
         Chat chat = await dispatcher.Dispatch(new GetChatQuery(lobby.ChatId));
+
+        // Create the live Game BEFORE notifying clients so their immediate ReadyInGame frame never races!
+        await dispatcher.Dispatch(new CreateGameCommand(lobby.Id, seedGenerator.GetNewSeed()));
+        await dispatcher.Dispatch(new DeleteLobbyCommand(lobby.Id));
 
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(ResponseDto.Ok(), frame.CommandType)));
 
@@ -309,8 +322,6 @@ public class LobbyFrameHandlers(
             await clientInLobby.SendAsync(launchFrame);
         }
 
-        await dispatcher.Dispatch(new CreateGameCommand(lobby.Id, seedGenerator.GetNewSeed()));
-        await dispatcher.Dispatch(new DeleteLobbyCommand(lobby.Id));
         await presenceService.BroadcastRosterAsync();
     }
 

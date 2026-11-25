@@ -1,3 +1,6 @@
+using Application;
+using Application.Common;
+using Application.Exceptions;
 using Application.Exceptions.Connection;
 using Application.Exceptions.Lobby;
 using Application.Interfaces;
@@ -11,15 +14,25 @@ using Domain;
 using Domain.Game;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
+using DominoCommon.com.domino.common.Scripts.Networking.Frame;
+using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
+using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
+using Infrastructure;
 using Infrastructure.Database;
 using Infrastructure.Services;
+using Infrastructure.Services.FrameHandlers;
 using Infrastructure.Services.Managers;
 using Infrastructure.Services.Repositories;
+using Infrastructure.Services.ServerUpdate;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace UnitTests;
@@ -213,7 +226,8 @@ public class RoatanMultiplayerTableAndAuthTests
 
         try
         {
-            SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, NullLogger<SocialAuthService>.Instance);
+            OAuthStateStore oauthStore = new();
+            SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
 
             // Create one offline registered user
             await userRepo.Create(new User("offline@roatan.com", "OfflineUser"), "ValidPass!1", new DateOnly(1998, 4, 10));
@@ -262,5 +276,263 @@ public class RoatanMultiplayerTableAndAuthTests
             Environment.SetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID", prevGoogle);
             Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", prevFb);
         }
+    }
+
+    [Fact]
+    public async Task DuplicateEmailAndUsername_AreRejectedCaseInsensitively_WithExactMessages()
+    {
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(DuplicateEmailAndUsername_AreRejectedCaseInsensitively_WithExactMessages));
+        UserRepository repo = new(db, new NationalityRepository(db));
+        CreateUserCommandHandler handler = new(repo);
+
+        await handler.Handle(new CreateUserCommand
+        {
+            Email = "IslandKing@Roatan.com",
+            Login = "RoatanKing",
+            Password = "Password!1",
+            Birthdate = "04/15/1994"
+        }, CancellationToken.None);
+
+        // Case-insensitive duplicate email must be rejected
+        UserAlreadyExistException emailEx = await Assert.ThrowsAsync<UserAlreadyExistException>(() =>
+            handler.Handle(new CreateUserCommand
+            {
+                Email = "islandking@roatan.com",
+                Login = "DifferentName",
+                Password = "Password!1",
+                Birthdate = "04/15/1994"
+            }, CancellationToken.None));
+        Assert.Equal("An account with this email address already exists. Please sign in instead.", emailEx.Message);
+
+        // Case-insensitive duplicate username must be rejected
+        UserAlreadyExistException userEx = await Assert.ThrowsAsync<UserAlreadyExistException>(() =>
+            handler.Handle(new CreateUserCommand
+            {
+                Email = "another@roatan.com",
+                Login = "roatanking",
+                Password = "Password!1",
+                Birthdate = "04/15/1994"
+            }, CancellationToken.None));
+        Assert.Equal("That username is already taken. Please choose another username.", userEx.Message);
+    }
+
+    [Fact]
+    public async Task ProfileAvatar_PersistsUnder32KB_RejectsOversized_AndPropagatesToTableAndRoster()
+    {
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(ProfileAvatar_PersistsUnder32KB_RejectsOversized_AndPropagatesToTableAndRoster));
+        UserRepository userRepo = new(db, new NationalityRepository(db));
+        ClientManagerMock clientManager = new();
+        LobbyManager lobbyManager = CreateLobbyManager();
+        GameManager gameManager = new(new ChatManager());
+
+        await userRepo.Create(new User("avatar@roatan.com", "AvatarPro"), "ValidPass!1", new DateOnly(1992, 6, 12));
+        User created = (await userRepo.GetByEmail("avatar@roatan.com"))!;
+
+        // Valid compressed thumbnail (2 KB <= 32 KB)
+        byte[] smallBytes = Enumerable.Range(0, 2048).Select(i => (byte)(i % 251)).ToArray();
+        string smallBase64 = Convert.ToBase64String(smallBytes);
+
+        User updated = await userRepo.UpdateAvatar(created.Id, smallBase64, "https://lh3.googleusercontent.com/photo.jpg");
+        Assert.Equal(smallBase64, updated.AvatarBase64);
+        Assert.Equal("https://lh3.googleusercontent.com/photo.jpg", updated.AvatarUrl);
+
+        // Reload from DB and verify persistence
+        User reloaded = (await userRepo.GetById(created.Id))!;
+        Assert.Equal(smallBase64, reloaded.AvatarBase64);
+        Assert.Equal("https://lh3.googleusercontent.com/photo.jpg", reloaded.AvatarUrl);
+
+        // Oversized (> 32 KB) must be rejected
+        byte[] tooBigBytes = new byte[40 * 1024];
+        string tooBigBase64 = Convert.ToBase64String(tooBigBytes);
+        await Assert.ThrowsAnyAsync<BaseApplicationException>(() =>
+            userRepo.UpdateAvatar(created.Id, tooBigBase64, null));
+
+        // Verify avatar propagates to UserDto, LobbyDto seat, and PlayerPresenceDto
+        UserDto userDto = DtoBuilder.GetUserDto(reloaded);
+        Assert.Equal(smallBase64, userDto.AvatarBase64);
+        Assert.Equal("https://lh3.googleusercontent.com/photo.jpg", userDto.AvatarUrl);
+
+        ClientMock client = new() { Id = 77, IsLoggedIn = true, User = reloaded };
+        clientManager.HandleNewClient(client);
+        Lobby table = lobbyManager.CreateLobby(client, 4, true, "Avatar Table");
+        LobbyDto tableDto = DtoBuilder.GetLobbyDto(table).Object;
+        Assert.Equal(smallBase64, tableDto.Seats[0].Player.AvatarBase64);
+
+        PresenceService presence = new(userRepo, clientManager, lobbyManager, gameManager);
+        PlayerRosterDto roster = await presence.BuildRosterAsync();
+        Assert.Equal(smallBase64, roster.Players.Single(p => p.UserId == reloaded.Id).AvatarBase64);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_DeletesFromDatabase_RemovesFromActiveTable_AndClearsRoster()
+    {
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(DeleteAccount_DeletesFromDatabase_RemovesFromActiveTable_AndClearsRoster));
+        UserRepository userRepo = new(db, new NationalityRepository(db));
+        ClientManagerMock clientManager = new();
+        LobbyManager lobbyManager = CreateLobbyManager();
+        GameManager gameManager = new(new ChatManager());
+        TokenManager tokenManager = new();
+        ChatManager chatManager = new();
+
+        await userRepo.Create(new User("delete.me@roatan.com", "DeleteMe"), "ValidPass!1", new DateOnly(1995, 2, 14));
+        User user = (await userRepo.GetByEmail("delete.me@roatan.com"))!;
+
+        ClientMock client = new() { Id = 88, IsLoggedIn = true, User = user };
+        clientManager.HandleNewClient(client);
+        tokenManager.GenerateTokenForClient(client);
+        Lobby table = lobbyManager.CreateLobby(client, 4, true, "Temp Table");
+        Assert.NotNull(lobbyManager.GetLobbyForClient(client));
+
+        // Delete user cleanly (mirroring DeleteAccountCallback + DELETE /auth/account)
+        lobbyManager.RemovePlayerFromLobby(client, table.Id);
+        tokenManager.RemoveTokenForClientIfPresent(client);
+        client.IsLoggedIn = false;
+        client.User = null;
+
+        bool deleted = await userRepo.DeleteUser(user.Id);
+        Assert.True(deleted);
+        Assert.False(await userRepo.ExistsByEmail("delete.me@roatan.com"));
+        Assert.False(await userRepo.ExistsByLogin("DeleteMe"));
+        Assert.Null(lobbyManager.GetLobbyForClient(client));
+
+        PresenceService presence = new(userRepo, clientManager, lobbyManager, gameManager);
+        PlayerRosterDto roster = await presence.BuildRosterAsync();
+        Assert.DoesNotContain(roster.Players, p => p.UserId == user.Id);
+    }
+
+    [Fact]
+    public async Task OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsGenericStubLogin()
+    {
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsGenericStubLogin));
+        UserRepository userRepo = new(db, new NationalityRepository(db));
+        ClientManagerMock clientManager = new();
+        TokenManager tokenManager = new();
+        ChatManager chatManager = new();
+        OAuthStateStore oauthStore = new();
+
+        SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
+
+        // Generic stub without email must be rejected (no more GooglePlayer/FacebookPlayer)
+        await Assert.ThrowsAsync<InvalidEmailFormatException>(() =>
+            socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+            {
+                Provider = "Google",
+                DisplayName = "GooglePlayer"
+            }));
+
+        // Real OAuth one-time code flow creates user with real email, username, AuthProvider, and AvatarUrl
+        OAuthPendingSession pending = oauthStore.CreatePending("Google");
+        bool completedOk = oauthStore.TryComplete(
+            pending.State,
+            providerUserId: "google-sub-999",
+            email: "real.player@gmail.com",
+            displayName: "RealIslandStar",
+            avatarUrl: "https://lh3.googleusercontent.com/real-avatar.jpg",
+            avatarBase64: null,
+            out string oneTimeCode);
+        Assert.True(completedOk);
+        Assert.False(string.IsNullOrWhiteSpace(oneTimeCode));
+
+        User authed = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+        {
+            Provider = "Google",
+            OneTimeCode = oneTimeCode
+        });
+        Assert.Equal("real.player@gmail.com", authed.Email);
+        Assert.Equal("RealIslandStar", authed.Login);
+        Assert.Equal("Google", authed.AuthProvider);
+        Assert.Equal("https://lh3.googleusercontent.com/real-avatar.jpg", authed.AvatarUrl);
+
+        // Reusing a single-use OAuth code must fail
+        await Assert.ThrowsAnyAsync<BaseApplicationException>(() =>
+            socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+            {
+                Provider = "Google",
+                OneTimeCode = oneTimeCode
+            }));
+    }
+
+    [Fact]
+    public async Task OnlineTableStart_RequiresMinimumTwoRealHumans_AndImmediatelyDealsToHumansAndBots()
+    {
+        ServiceCollection services = [];
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = $"InMemory:{nameof(OnlineTableStart_RequiresMinimumTwoRealHumans_AndImmediatelyDealsToHumansAndBots)}"
+            })
+            .Build();
+        services.AddLogging();
+        services.AddScoped<IMessageDispatcher, MessageDispatcher>();
+        services.AddInfrastructure(config);
+        services.AddApplication();
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        ILobbyManager lobbyManager = provider.GetRequiredService<ILobbyManager>();
+        IGameManager gameManager = provider.GetRequiredService<IGameManager>();
+        IClientManager clientManager = provider.GetRequiredService<IClientManager>();
+        IMessageFrameHandler frameHandler = provider.GetRequiredService<IMessageFrameHandler>();
+
+        ClientMock host = CreateLoggedInClient(1, 501, "HostHuman");
+        ClientMock friend = CreateLoggedInClient(2, 502, "FriendHuman");
+        clientManager.HandleNewClient(host);
+        clientManager.HandleNewClient(friend);
+
+        // 1 Human + 3 Bots -> MUST be rejected (< 2 real humans)
+        Lobby table = lobbyManager.CreateLobby(host, 4, true, "Two Human Rule Table", tableStyle: TableStyle.DRAW, matchFormat: MatchFormat.SIX_LOV);
+        Assert.NotNull(lobbyManager.AddBotToLobby(host, table.Id, 1, "Pro"));
+        Assert.NotNull(lobbyManager.AddBotToLobby(host, table.Id, 2, "Pro"));
+        Assert.NotNull(lobbyManager.AddBotToLobby(host, table.Id, 3, "Pro"));
+        Assert.True(table.IsFull());
+
+        using (IServiceScope scope = provider.CreateScope())
+        {
+            LobbyFrameHandlers lobbyHandlers = scope.ServiceProvider.GetRequiredService<LobbyFrameHandlers>();
+            GameFrameHandlers gameHandlers = scope.ServiceProvider.GetRequiredService<GameFrameHandlers>();
+            lobbyHandlers.RegisterHandlers(frameHandler);
+            gameHandlers.RegisterHandlers(frameHandler);
+
+            await frameHandler.HandleAsync(MessageFrameBuilder.StartTableMatchFrame(), host);
+
+            ResponseDto soloReject = host.FramesSended
+                .SelectMany(nf => nf.Frames)
+                .Where(f => f.SubCommandType == FrameCommandType.StartTableMatch)
+                .Select(f => f.GetObjectFromMessage<ResponseDto>())
+                .Last();
+            Assert.False(soloReject.OkResult);
+            Assert.Contains("Need at least 2 real players to start online (1/2 humans seated)", soloReject.ErrorMessage);
+            Assert.Null(gameManager.GetById(table.Id));
+
+            // Now remove 1 bot and seat 2nd real human (2 Humans + 2 Bots)
+            Assert.True(lobbyManager.RemoveBotFromLobby(host, table.Id, 2));
+            lobbyManager.AddPlayerToLobby(friend, table.Id);
+            Assert.Equal(2, table.GetHumanPlayers().Count);
+            Assert.True(table.IsFull());
+
+            host.FramesSended.Clear();
+            friend.FramesSended.Clear();
+
+            // Host starts match -> game must exist BEFORE LobbyTimerExpired and immediately deal once both humans send ReadyInGame
+            await frameHandler.HandleAsync(MessageFrameBuilder.StartTableMatchFrame(), host);
+
+            Assert.NotNull(gameManager.GetById(table.Id));
+            Assert.Contains(host.FramesSended.SelectMany(nf => nf.Frames), f => f.CommandType == FrameCommandType.LobbyTimerExpired);
+            Assert.Contains(friend.FramesSended.SelectMany(nf => nf.Frames), f => f.CommandType == FrameCommandType.LobbyTimerExpired);
+
+            // Both humans send ReadyInGame -> server immediately deals hands without hanging!
+            await frameHandler.HandleAsync(MessageFrameBuilder.ReadyInGameFrame(), host);
+            await frameHandler.HandleAsync(MessageFrameBuilder.ReadyInGameFrame(), friend);
+        }
+
+        List<MessageFrame> hostFrames = host.FramesSended.SelectMany(nf => nf.Frames).ToList();
+        List<MessageFrame> friendFrames = friend.FramesSended.SelectMany(nf => nf.Frames).ToList();
+        MessageFrame? hostHandFrame = hostFrames.FirstOrDefault(f => f.CommandType == FrameCommandType.DominoDistribution);
+        MessageFrame? friendHandFrame = friendFrames.FirstOrDefault(f => f.CommandType == FrameCommandType.DominoDistribution);
+        Assert.NotNull(hostHandFrame);
+        Assert.NotNull(friendHandFrame);
+        Assert.InRange(hostHandFrame!.GetObjectFromMessage<HandDto>().Dominoes.Count, 6, 7);
+        Assert.InRange(friendHandFrame!.GetObjectFromMessage<HandDto>().Dominoes.Count, 6, 7);
+        Assert.Contains(hostFrames, f => f.CommandType == FrameCommandType.PlayerPlays);
+        Assert.Contains(hostFrames, f => f.CommandType == FrameCommandType.ChangePlayerTurn);
     }
 }

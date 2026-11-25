@@ -82,7 +82,7 @@ public class GameManager(IChatManager chatManager) : IGameManager
         lock (games)
         {
             Game game = games.First(g => g.Id == gameId);
-            return game.Players.All(gp => gp.IsReady);
+            return game.Players.All(gp => gp.IsReady || gp.IsPermanentlyBot);
         }
     }
 

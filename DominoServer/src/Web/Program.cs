@@ -5,6 +5,7 @@ using Application.Common;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
+using Application.Interfaces.Repositories;
 
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 
@@ -103,8 +104,85 @@ public class Program
             clients = cm.GetAllClients().Count,
             maxClients,
             openTables = lm.GetAllPublicLobbies().Count,
+            googleOAuthConfigured = SocialAuthService.IsProviderConfigured("Google"),
+            facebookOAuthConfigured = SocialAuthService.IsProviderConfigured("Facebook"),
             utc = DateTime.UtcNow
         }));
+
+        app.MapGet("/auth/oauth/{provider}/start", (HttpContext context, string provider, SocialAuthService socialAuth) =>
+        {
+            string baseUrl = ResolvePublicBaseUrl(context);
+            string? requestedState = context.Request.Query["state"].FirstOrDefault();
+            bool jsonMode = string.Equals(context.Request.Query["mode"].FirstOrDefault(), "json", StringComparison.OrdinalIgnoreCase);
+
+            var (configured, normalizedProvider, state, authorizeUrl, message) = socialAuth.StartOAuthFlow(provider, baseUrl, requestedState);
+            if (!configured || string.IsNullOrWhiteSpace(authorizeUrl))
+            {
+                return Results.Ok(new
+                {
+                    configured = false,
+                    provider = normalizedProvider,
+                    message = message ?? "OAuth client IDs are not configured on this server."
+                });
+            }
+
+            if (jsonMode)
+            {
+                return Results.Ok(new
+                {
+                    configured = true,
+                    provider = normalizedProvider,
+                    state,
+                    authorizeUrl
+                });
+            }
+
+            return Results.Redirect(authorizeUrl);
+        });
+
+        app.MapGet("/auth/oauth/{provider}/callback", async (HttpContext context, string provider, SocialAuthService socialAuth, CancellationToken ct) =>
+        {
+            string baseUrl = ResolvePublicBaseUrl(context);
+            string? code = context.Request.Query["code"].FirstOrDefault();
+            string? state = context.Request.Query["state"].FirstOrDefault();
+            string? providerError = context.Request.Query["error"].FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(providerError))
+            {
+                if (!string.IsNullOrWhiteSpace(state))
+                {
+                    await socialAuth.CompleteOAuthCallbackAsync(provider, null, state, baseUrl, ct);
+                }
+                return Results.Content(BuildOAuthResultHtml(false, provider, string.Empty, "Sign-in was cancelled."), "text/html");
+            }
+
+            var (ok, oneTimeCode, normalizedProvider, errorMsg) = await socialAuth.CompleteOAuthCallbackAsync(provider, code, state, baseUrl, ct);
+            string deepLink = ok
+                ? $"roatandomino://auth?code={Uri.EscapeDataString(oneTimeCode)}&provider={Uri.EscapeDataString(normalizedProvider)}&state={Uri.EscapeDataString(state ?? string.Empty)}"
+                : string.Empty;
+
+            return Results.Content(BuildOAuthResultHtml(ok, normalizedProvider, deepLink, errorMsg ?? "Signed in! Returning to Roatan Domino..."), "text/html");
+        });
+
+        app.MapGet("/auth/oauth/poll/{state}", (string state, SocialAuthService socialAuth) =>
+        {
+            OAuthPendingSession? session = socialAuth.PollOAuthSession(state);
+            if (session is null)
+            {
+                return Results.NotFound(new { status = "expired", error = "OAuth session expired." });
+            }
+
+            return Results.Ok(new
+            {
+                status = session.Status,
+                provider = session.Provider,
+                oneTimeCode = session.OneTimeCode,
+                email = session.Email,
+                displayName = session.DisplayName,
+                avatarUrl = session.AvatarUrl,
+                error = session.ErrorMessage
+            });
+        });
 
         app.MapPost("/auth/social", async (SocialAuthDto request, SocialAuthService socialAuth, CancellationToken ct) =>
         {
@@ -114,13 +192,7 @@ public class Program
                 return Results.Ok(new
                 {
                     ok = true,
-                    user = new
-                    {
-                        id = user.Id,
-                        username = user.Login,
-                        email = user.Email,
-                        elo = user.Score
-                    }
+                    user = DtoBuilder.GetUserDto(user)
                 });
             }
             catch (BaseApplicationException ex)
@@ -131,6 +203,68 @@ public class Program
                     error = ex.Message
                 });
             }
+        });
+
+        app.MapDelete("/auth/account", async (
+            HttpContext context,
+            IUserRepository userRepo,
+            IClientManager cm,
+            ILobbyManager lm,
+            ITokenManager tm,
+            PresenceService presence) =>
+        {
+            long userId = 0;
+            string? userIdParam = context.Request.Query["userId"].FirstOrDefault();
+            string? emailParam = context.Request.Query["email"].FirstOrDefault();
+            string? authHeader = context.Request.Headers.Authorization.FirstOrDefault();
+            string? tokenParam = !string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? authHeader["Bearer ".Length..].Trim()
+                : context.Request.Query["token"].FirstOrDefault();
+
+            if (long.TryParse(userIdParam, out long parsedId) && parsedId > 0)
+            {
+                userId = parsedId;
+            }
+            else if (!string.IsNullOrWhiteSpace(emailParam))
+            {
+                Domain.User? byEmail = await userRepo.GetByEmail(emailParam);
+                if (byEmail is not null) userId = byEmail.Id;
+            }
+
+            if (userId <= 0)
+            {
+                return Results.BadRequest(new { ok = false, error = "Missing valid userId or email." });
+            }
+
+            // If user is currently connected, remove them from any active table and log them out cleanly
+            IClient? activeClient = cm.GetAllLoggedInClients().FirstOrDefault(c => c.User is not null && c.User.Id == userId);
+            if (activeClient is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(tokenParam) &&
+                    Guid.TryParse(tokenParam, out Guid providedToken) &&
+                    tm.GetTokenForClient(activeClient) != providedToken)
+                {
+                    return Results.Unauthorized();
+                }
+
+                Domain.Lobby? activeTable = lm.GetLobbyForClient(activeClient);
+                if (activeTable is not null)
+                {
+                    lm.RemovePlayerFromLobby(activeClient, activeTable.Id);
+                }
+                tm.RemoveTokenForClientIfPresent(activeClient);
+                activeClient.IsLoggedIn = false;
+                activeClient.User = null;
+            }
+
+            bool deleted = await userRepo.DeleteUser(userId);
+            if (!deleted)
+            {
+                return Results.NotFound(new { ok = false, error = "Account not found." });
+            }
+
+            await presence.BroadcastRosterAsync();
+            return Results.Ok(new { ok = true, deletedUserId = userId });
         });
 
         app.Map("/ws", async (HttpContext context, IClientManager cm, ILogger<WebSocketClient> wsLogger) =>
@@ -158,6 +292,42 @@ public class Program
 
         app.Logger.LogInformation("DominoServer WebSocket + HTTP host listening on {urls} (maxClients={maxClients})", listenUrls, maxClients);
         await app.RunAsync();
+    }
+
+    private static string ResolvePublicBaseUrl(HttpContext context)
+    {
+        string? envBase = Environment.GetEnvironmentVariable("PUBLIC_BASE_URL");
+        if (!string.IsNullOrWhiteSpace(envBase))
+        {
+            return envBase.Trim().TrimEnd('/');
+        }
+
+        string scheme = context.Request.Scheme;
+        string host = context.Request.Host.ToString();
+        return $"{scheme}://{host}".TrimEnd('/');
+    }
+
+    private static string BuildOAuthResultHtml(bool success, string provider, string deepLink, string message)
+    {
+        string safeProvider = System.Net.WebUtility.HtmlEncode(provider);
+        string safeMessage = System.Net.WebUtility.HtmlEncode(message);
+        string redirectScript = success && !string.IsNullOrWhiteSpace(deepLink)
+            ? $"<script>setTimeout(function(){{ window.location.href = {System.Text.Json.JsonSerializer.Serialize(deepLink)}; }}, 150);</script>"
+            : string.Empty;
+        string buttonHtml = success && !string.IsNullOrWhiteSpace(deepLink)
+            ? $"<a href=\"{System.Net.WebUtility.HtmlEncode(deepLink)}\" style=\"display:inline-block;margin-top:20px;padding:14px 28px;background:#26A65B;color:#fff;text-decoration:none;border-radius:999px;font-weight:bold;font-size:16px;\">Return to Roatan Domino</a>"
+            : string.Empty;
+
+        return $@"<!doctype html>
+<html><head><meta charset=""utf-8""/><meta name=""viewport"" content=""width=device-width,initial-scale=1""/>
+<title>Roatan Domino — {safeProvider} Sign-In</title></head>
+<body style=""margin:0;background:#08202A;color:#F2FAFC;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;"">
+<div style=""background:#0D2E3B;border:1px solid #F7C948;border-radius:20px;padding:32px;max-width:420px;text-align:center;"">
+<h2 style=""color:#F7C948;margin-top:0;"">Roatan Domino</h2>
+<p style=""font-size:17px;line-height:1.5;"">{safeMessage}</p>
+{buttonHtml}
+<p style=""font-size:13px;color:#9DC4D0;margin-top:20px;"">You can close this browser tab and return to the game.</p>
+</div>{redirectScript}</body></html>";
     }
 
     private static async Task HandleWebSocketUpgradeAsync(HttpContext context, IClientManager clientManager, ILogger<WebSocketClient> wsLogger)
@@ -192,6 +362,12 @@ public class Program
             using IServiceScope scope = services.CreateScope();
             ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             await db.Database.EnsureCreatedAsync();
+
+            if (db.Database.IsRelational())
+            {
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN avatar_url TEXT NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN auth_provider VARCHAR(32) NULL"); } catch { }
+            }
 
             if (!await db.Dominos.AnyAsync())
             {
@@ -238,7 +414,7 @@ public class Program
 }
 
 internal sealed class GameLoopHostedService(
-    IServiceScopeFactory scopeFactory,
+    ServerUpdater serverUpdater,
     IChronometer chronometer,
     ILogger<GameLoopHostedService> logger) : BackgroundService
 {
@@ -253,8 +429,6 @@ internal sealed class GameLoopHostedService(
                 TimeSpan deltaTime = chronometer.GetTimedElapsed();
                 chronometer.StartFrame();
 
-                using IServiceScope scope = scopeFactory.CreateScope();
-                ServerUpdater serverUpdater = scope.ServiceProvider.GetRequiredService<ServerUpdater>();
                 await serverUpdater.UpdateAsync(deltaTime);
 
                 chronometer.EndFrame();

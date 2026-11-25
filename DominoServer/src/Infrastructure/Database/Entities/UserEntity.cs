@@ -20,6 +20,10 @@ public class UserEntity
 
     public long? AvatarId { get; set; }
 
+    public string? AvatarUrl { get; set; }
+
+    public string? AuthProvider { get; set; }
+
     public int Score { get; set; }
 
     public DateOnly Birthdate { get; set; }
@@ -64,7 +68,10 @@ public class UserEntity
             Score = Score,
             DateSignup = DateSignup,
             Birthdate = Birthdate,
-            Nationality = NationalityId is null ? null : Nationality!.Name,
+            Nationality = NationalityId is null ? null : Nationality?.Name,
+            AvatarUrl = AvatarUrl,
+            AvatarBase64 = Avatar is not null && Avatar.Image is { Length: > 0 } ? Convert.ToBase64String(Avatar.Image) : null,
+            AuthProvider = string.IsNullOrWhiteSpace(AuthProvider) ? "Email" : AuthProvider
         };
     }
 }

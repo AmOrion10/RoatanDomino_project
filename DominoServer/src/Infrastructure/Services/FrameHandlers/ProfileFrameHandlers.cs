@@ -1,6 +1,9 @@
-﻿using Application.Common;
+using Application.Common;
 using Application.Interfaces;
+using Application.Interfaces.Managers;
+using Application.Interfaces.Repositories;
 using Application.Messages.Commands.User;
+using Application.Messages.Queries.Lobby;
 using Application.Messages.Queries.User;
 
 using Domain;
@@ -14,7 +17,11 @@ using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
 namespace Infrastructure.Services.FrameHandlers;
 
-public class ProfileFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHandlers
+public class ProfileFrameHandlers(
+    IMessageDispatcher dispatcher,
+    IUserRepository userRepository,
+    ILobbyManager lobbyManager,
+    PresenceService presenceService) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -24,6 +31,7 @@ public class ProfileFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHand
         handler.RegisterHandler(FrameCommandType.GetOtherUserInfo, GetOtherUserInfoCallback);
         handler.RegisterHandler(FrameCommandType.GetAllHistoryGames, GetAllHistoryGamesCallback);
         handler.RegisterHandler(FrameCommandType.GetHistoryGame, GetHistoryGameCallback);
+        handler.RegisterHandler(FrameCommandType.UpdateProfileAvatar, UpdateProfileAvatarCallback);
     }
 
     private async Task GetInfoProfileCallback(MessageFrame frame, IClient client)
@@ -47,6 +55,49 @@ public class ProfileFrameHandlers(IMessageDispatcher dispatcher) : BaseFrameHand
         User user = await dispatcher.Dispatch(new GetUserInfoQuery(client));
         ResponseObjectDto<InfoProfileDto> response = DtoBuilder.GetInfoProfileDto(user);
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, FrameCommandType.GetInfoProfile)));
+    }
+
+    private async Task UpdateProfileAvatarCallback(MessageFrame frame, IClient client)
+    {
+        UpdateProfileAvatarDto dto = frame.GetObjectFromMessage<UpdateProfileAvatarDto>();
+        User updated = await userRepository.UpdateAvatar(client.User!.Id, dto.AvatarBase64, dto.AvatarUrl);
+        client.User = updated;
+
+        // Sync avatar on any active lobby seat for this player
+        Lobby? activeLobby = lobbyManager.GetLobbyForClient(client);
+        if (activeLobby is not null)
+        {
+            LobbyPlayer? seatPlayer = activeLobby.PlayersInLobby.FirstOrDefault(p => !p.IsBot && p.Id == updated.Id);
+            if (seatPlayer is not null)
+            {
+                seatPlayer.AvatarBase64 = updated.AvatarBase64;
+                seatPlayer.AvatarUrl = updated.AvatarUrl;
+            }
+            if (activeLobby.Creator.Id == updated.Id)
+            {
+                activeLobby.Creator.AvatarBase64 = updated.AvatarBase64;
+                activeLobby.Creator.AvatarUrl = updated.AvatarUrl;
+            }
+        }
+
+        ResponseObjectDto<UserDto> response = new()
+        {
+            OkResult = true,
+            Object = DtoBuilder.GetUserDto(updated)
+        };
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
+
+        if (activeLobby is not null)
+        {
+            List<IClient> clientsInLobby = await dispatcher.Dispatch(new GetAllClientsForLobbyQuery(activeLobby.Id));
+            NetworkFrame tableFrame = new(MessageFrameBuilder.TableStateUpdatedFrame(DtoBuilder.GetLobbyDtoObject(activeLobby)));
+            foreach (IClient c in clientsInLobby)
+            {
+                await c.SendAsync(tableFrame);
+            }
+        }
+
+        await presenceService.BroadcastRosterAsync();
     }
 
     private async Task UpdatePasswordCallback(MessageFrame frame, IClient client)

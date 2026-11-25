@@ -1,4 +1,4 @@
-﻿using Infrastructure.Database.Entities;
+using Infrastructure.Database.Entities;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -345,13 +345,18 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.DateSignup).HasColumnName("date_signup");
             entity.Property(e => e.DateLastLogin).HasColumnName("date_last_login");
             entity.Property(e => e.AvatarId).HasColumnName("avatar");
+            entity.Property(e => e.AvatarUrl).HasColumnName("avatar_url");
+            entity.Property(e => e.AuthProvider).HasColumnName("auth_provider");
             entity.Property(e => e.Score).HasDefaultValue(10000).HasColumnName("score");
             entity.Property(e => e.Birthdate).HasColumnName("birthday");
             entity.Property(e => e.NationalityId).HasColumnName("nationality");
             entity.Property(e => e.RankId).HasColumnName("rank");
 
             entity.HasOne(d => d.Avatar)
-                .WithOne(p => p.User);
+                .WithOne(p => p.User)
+                .HasForeignKey<UserEntity>(d => d.AvatarId);
+
+            entity.Navigation(e => e.Avatar).AutoInclude();
 
             entity.HasOne(d => d.Nationality)
                 .WithMany(p => p.Users)
