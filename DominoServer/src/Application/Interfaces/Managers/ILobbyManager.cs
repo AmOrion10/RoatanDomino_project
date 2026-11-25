@@ -8,7 +8,9 @@ public interface ILobbyManager
     bool MaintainHouseTable { get; set; }
     Lobby EnsureHouseTable();
     Lobby CreateLobby(IClient creator, int maxNumberOfPlayer, bool lobbyPublic, string name, bool ranked = false, string? code = null, TableStyle? tableStyle = null, MatchFormat? matchFormat = null, bool? oneOnePlayoff = null);
+    Lobby CreateTeamChallengeLobby(IClient challenger, long challengeId, long teamAId, string teamAName, string teamATag, long teamBId, string teamBName, string teamBTag, MatchFormat matchFormat, TableStyle tableStyle);
     void AddPlayerToLobby(IClient player, int lobbyId);
+    int AddPlayerToTeamChallengeLobby(IClient player, int lobbyId, long? playerTeamId);
     void RemovePlayerFromLobby(IClient player, int lobbyId);
     void ReadyPlayerStateChange(IClient player, int lobbyId);
     bool SwitchSeat(IClient player, int lobbyId, int targetSeatIndex);

@@ -49,7 +49,12 @@ public static class DtoBuilder
             TableStyle = lobby.TableStyle,
             MatchFormat = lobby.MatchFormat,
             OneOnePlayoff = lobby.OneOnePlayoff,
-            IsHouseTable = lobby.IsHouseTable
+            IsHouseTable = lobby.IsHouseTable,
+            IsTeamChallenge = lobby.IsTeamChallenge,
+            TeamAId = lobby.TeamAId,
+            TeamAName = lobby.TeamAName,
+            TeamBId = lobby.TeamBId,
+            TeamBName = lobby.TeamBName
         };
     }
 
@@ -152,6 +157,11 @@ public static class DtoBuilder
                     MatchFormat = l.MatchFormat,
                     OneOnePlayoff = l.OneOnePlayoff,
                     IsHouseTable = l.IsHouseTable,
+                    IsTeamChallenge = l.IsTeamChallenge,
+                    TeamAId = l.TeamAId,
+                    TeamAName = l.TeamAName,
+                    TeamBId = l.TeamBId,
+                    TeamBName = l.TeamBName,
                     SeatedPlayers = l.GetSeatedPlayersOrdered()
                         .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
                         .ToList()

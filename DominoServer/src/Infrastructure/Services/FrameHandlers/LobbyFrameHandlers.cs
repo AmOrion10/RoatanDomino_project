@@ -22,7 +22,8 @@ public class LobbyFrameHandlers(
     ILobbyManager lobbyManager,
     IClientManager clientManager,
     ISeedGenerator seedGenerator,
-    PresenceService presenceService) : BaseFrameHandlers
+    PresenceService presenceService,
+    TeamService teamService) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -66,7 +67,18 @@ public class LobbyFrameHandlers(
     private async Task JoinLobbyCallback(MessageFrame frame, IClient client)
     {
         JoinLobbyDto dto = frame.GetObjectFromMessage<JoinLobbyDto>();
-        Lobby lobby = await dispatcher.Dispatch(new JoinLobbyCommand(client, dto.LobbyIdToJoin));
+        Lobby? target = lobbyManager.GetLobbyById(dto.LobbyIdToJoin);
+        Lobby lobby;
+        if (target is not null && target.IsTeamChallenge)
+        {
+            long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
+            lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            lobby = target;
+        }
+        else
+        {
+            lobby = await dispatcher.Dispatch(new JoinLobbyCommand(client, dto.LobbyIdToJoin));
+        }
         await SendLobbyToClientAndInformOtherClientsInLobby(client, lobby);
         await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
     }
@@ -74,7 +86,18 @@ public class LobbyFrameHandlers(
     private async Task JoinLobbyWithCodeCallback(MessageFrame frame, IClient client)
     {
         LobbyCodeDto dto = frame.GetObjectFromMessage<LobbyCodeDto>();
-        Lobby lobby = await dispatcher.Dispatch(new JoinLobbyWithCodeCommand(client, dto.Code));
+        Lobby? target = lobbyManager.GetLobbyByCode(dto.Code);
+        Lobby lobby;
+        if (target is not null && target.IsTeamChallenge)
+        {
+            long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
+            lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            lobby = target;
+        }
+        else
+        {
+            lobby = await dispatcher.Dispatch(new JoinLobbyWithCodeCommand(client, dto.Code));
+        }
         await SendLobbyToClientAndInformOtherClientsInLobby(client, lobby);
         await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
     }

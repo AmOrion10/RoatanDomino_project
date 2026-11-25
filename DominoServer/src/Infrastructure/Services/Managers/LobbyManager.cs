@@ -77,6 +77,86 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
         return lobby;
     }
 
+    public Lobby CreateTeamChallengeLobby(
+        IClient challenger,
+        long challengeId,
+        long teamAId,
+        string teamAName,
+        string teamATag,
+        long teamBId,
+        string teamBName,
+        string teamBTag,
+        MatchFormat matchFormat,
+        TableStyle tableStyle)
+    {
+        int maxPlayers = matchFormat == MatchFormat.TWO_BEST ? 2 : 4;
+        string code = codeGenerator.GenerateCodeForLobby();
+        string tableName = $"[{teamATag}] vs [{teamBTag}]";
+        LobbyPlayer lobbyCreator = new(challenger.User!) { SeatIndex = 0 };
+        Lobby lobby = new(
+            lobbyIdCounter++,
+            lobbyCreator,
+            maxPlayers,
+            isPublic: false,
+            name: tableName,
+            ranked: false,
+            code: code,
+            tableStyle: tableStyle,
+            matchFormat: matchFormat,
+            oneOnePlayoff: false)
+        {
+            PlayersInLobby = [lobbyCreator],
+            ChatId = chatManager.CreateChat("Team Challenge"),
+            IsTeamChallenge = true,
+            TeamChallengeId = challengeId,
+            TeamAId = teamAId,
+            TeamAName = teamAName,
+            TeamATag = teamATag,
+            TeamBId = teamBId,
+            TeamBName = teamBName,
+            TeamBTag = teamBTag
+        };
+
+        lock (lobbies)
+        {
+            lobbies.Add(lobby);
+        }
+        chatManager.ClientJoinChat(challenger, lobby.ChatId);
+        return lobby;
+    }
+
+    public int AddPlayerToTeamChallengeLobby(IClient player, int lobbyId, long? playerTeamId)
+    {
+        Lobby lobby;
+        int assignedSeat;
+        lock (lobbies)
+        {
+            lobby = lobbies.First(l => l.Id == lobbyId);
+            LobbyPlayer? alreadySeated = lobby.PlayersInLobby.FirstOrDefault(p => !p.IsBot && p.Id == player.User!.Id);
+            if (alreadySeated is not null)
+            {
+                return alreadySeated.SeatIndex;
+            }
+
+            if (lobby.PlayersInLobby.Count >= lobby.MaxNumberOfPlayer)
+            {
+                throw new MaxNumberOfPlayerReachedException($"This Team Challenge table is full ({lobby.PlayersInLobby.Count}/{lobby.MaxNumberOfPlayer} players).");
+            }
+
+            assignedSeat = lobby.FindOpenSeatForTeam(playerTeamId);
+            if (assignedSeat < 0)
+            {
+                throw new MaxNumberOfPlayerReachedException("Your team's seats at this Team Challenge table are full (or you belong to neither team).");
+            }
+
+            lobby.PlayersInLobby.Add(new LobbyPlayer(player.User!) { SeatIndex = assignedSeat });
+        }
+
+        timerManager.UpdateTimerInLobby(lobby);
+        chatManager.ClientJoinChat(player, lobby.ChatId);
+        return assignedSeat;
+    }
+
     public static int NormalizeMaxPlayers(int requestedMaxPlayers, MatchFormat? matchFormat)
     {
         if (matchFormat.HasValue)

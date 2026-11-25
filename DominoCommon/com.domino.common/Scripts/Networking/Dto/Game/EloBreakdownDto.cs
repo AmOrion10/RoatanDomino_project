@@ -66,6 +66,60 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Game
         public bool IsRankedApplied { get; set; }
     }
 
+    public class TeamEloChangeDto
+    {
+        [JsonProperty(PropertyName = "i")]
+        public long TeamId { get; set; }
+
+        [JsonProperty(PropertyName = "n")]
+        public string TeamName { get; set; }
+
+        [JsonProperty(PropertyName = "t")]
+        public string TeamTag { get; set; }
+
+        [JsonProperty(PropertyName = "pe")]
+        public int PreviousElo { get; set; }
+
+        [JsonProperty(PropertyName = "ne")]
+        public int NewElo { get; set; }
+
+        [JsonProperty(PropertyName = "d")]
+        public int Delta { get; set; }
+
+        [JsonProperty(PropertyName = "pt")]
+        public RoatanRankTier PreviousTier { get; set; }
+
+        [JsonProperty(PropertyName = "nt")]
+        public RoatanRankTier NewTier { get; set; }
+
+        [JsonProperty(PropertyName = "tn")]
+        public string TierName { get; set; }
+
+        [JsonProperty(PropertyName = "tc")]
+        public string TierColorHex { get; set; }
+
+        [JsonProperty(PropertyName = "res")]
+        public string ResultLabel { get; set; }
+
+        [JsonProperty(PropertyName = "bd")]
+        public int BaseEloDelta { get; set; }
+
+        [JsonProperty(PropertyName = "sb")]
+        public int SpecialWinBonus { get; set; }
+    }
+
+    public class TeamEloBreakdownDto
+    {
+        [JsonProperty(PropertyName = "ci")]
+        public long ChallengeId { get; set; }
+
+        [JsonProperty(PropertyName = "a")]
+        public TeamEloChangeDto TeamA { get; set; }
+
+        [JsonProperty(PropertyName = "b")]
+        public TeamEloChangeDto TeamB { get; set; }
+    }
+
     public class MatchEloBreakdownDto
     {
         [JsonProperty(PropertyName = "g")]
@@ -76,5 +130,8 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Game
 
         [JsonProperty(PropertyName = "p")]
         public List<PlayerEloBreakdownDto> Players { get; set; } = new List<PlayerEloBreakdownDto>();
+
+        [JsonProperty(PropertyName = "tb", NullValueHandling = NullValueHandling.Ignore)]
+        public TeamEloBreakdownDto TeamBreakdown { get; set; }
     }
 }

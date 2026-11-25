@@ -70,6 +70,14 @@ public class Game
     public int ChatId { get; set; }
     public bool HasDealtOpeningHand { get; set; }
     public bool IsOnlineMatch { get; set; } = true;
+    public bool IsTeamChallenge { get; set; }
+    public long? TeamChallengeId { get; set; }
+    public long? TeamAId { get; set; }
+    public string? TeamAName { get; set; }
+    public string? TeamATag { get; set; }
+    public long? TeamBId { get; set; }
+    public string? TeamBName { get; set; }
+    public string? TeamBTag { get; set; }
     public DateTime CurrentTurnStartedUtc { get; private set; } = DateTime.UtcNow;
     public bool EloAppliedForCurrentMatch { get; set; }
     public MatchEloBreakdownDto? LastMatchEloBreakdown { get; set; }

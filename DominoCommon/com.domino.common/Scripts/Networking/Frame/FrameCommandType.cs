@@ -101,5 +101,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         PromoteOrDemoteMember,
         KickTeamMember,
         LeaveTeam,
+
+        // Team Challenges & Team Leaderboard
+        GetTeamLeaderboard,
+        SendTeamChallenge,
+        RespondTeamChallenge,
+        TeamChallengeNotification,
     }
 }

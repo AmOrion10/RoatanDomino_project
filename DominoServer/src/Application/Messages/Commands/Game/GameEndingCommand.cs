@@ -21,7 +21,8 @@ public class GameEndingCommandHandler(
     IGameManager gameManager,
     IChatManager chatManager,
     IMessageDispatcher dispatcher,
-    IUserRepository userRepository) : ICommandHandler<GameEndingCommand, Game>
+    IUserRepository userRepository,
+    ITeamChallengeEloUpdater? teamChallengeEloUpdater = null) : ICommandHandler<GameEndingCommand, Game>
 {
     public async Task<Game> Handle(GameEndingCommand request, CancellationToken cancellationToken)
     {
@@ -81,6 +82,56 @@ public class GameEndingCommandHandler(
                         connectedClient.User.AverageTurnSeconds = player.AverageTurnSeconds;
                         connectedClient.User.OnlineMatchesLast7Days = player.OnlineMatchesLast7Days;
                         connectedClient.User.LastOnlineMatchUtc = player.LastOnlineMatchUtc;
+                    }
+                }
+
+                // Update Team Elo & Team W/L when a Team Challenge (Crew vs. Crew) match completes
+                if (game.IsTeamChallenge &&
+                    game.TeamAId.HasValue &&
+                    game.TeamBId.HasValue &&
+                    teamChallengeEloUpdater is not null)
+                {
+                    HandResolution? res = game.LastHandResolution;
+                    bool isDraw = res is not null && res.IsDraw;
+                    bool isKeyWin = res is not null && res.IsKeyWin;
+                    bool isBreakWin = res is not null && res.BreakTriggered;
+
+                    int winningSlot = -1;
+                    if (!isDraw)
+                    {
+                        if (game.MatchWinningTeamId is 0 or 1)
+                        {
+                            winningSlot = game.MatchWinningTeamId;
+                        }
+                        else if (res is not null && res.WinningTeamId is 0 or 1)
+                        {
+                            winningSlot = res.WinningTeamId;
+                        }
+                        else if (game.MatchWinner is not null)
+                        {
+                            winningSlot = game.MatchWinner.TeamId;
+                        }
+                        else if (res?.Winner is not null)
+                        {
+                            winningSlot = res.Winner.TeamId;
+                        }
+                        else if (game.Classement.Count > 0)
+                        {
+                            winningSlot = game.Classement[0].TeamId;
+                        }
+                    }
+
+                    TeamEloBreakdownDto? teamBreakdown = await teamChallengeEloUpdater.ApplyTeamChallengeMatchResultAsync(
+                        game.TeamChallengeId,
+                        game.TeamAId.Value,
+                        game.TeamBId.Value,
+                        winningSlot,
+                        isDraw,
+                        isKeyWin,
+                        isBreakWin);
+                    if (teamBreakdown is not null)
+                    {
+                        breakdown.TeamBreakdown = teamBreakdown;
                     }
                 }
             }

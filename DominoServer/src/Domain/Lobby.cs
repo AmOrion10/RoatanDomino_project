@@ -29,6 +29,14 @@ public class Lobby(
     public bool? OneOnePlayoff { get; } = oneOnePlayoff;
     public bool IsHouseTable { get; } = isHouseTable;
     public int ChatId { get; set; }
+    public bool IsTeamChallenge { get; set; }
+    public long? TeamChallengeId { get; set; }
+    public long? TeamAId { get; set; }
+    public string? TeamAName { get; set; }
+    public string? TeamATag { get; set; }
+    public long? TeamBId { get; set; }
+    public string? TeamBName { get; set; }
+    public string? TeamBTag { get; set; }
 
     public bool IsEmpty()
     {
@@ -64,6 +72,46 @@ public class Lobby(
                 return i;
             }
         }
+        return -1;
+    }
+
+    /// <summary>
+    /// Auto-seats Team A on North/South seats (0 &amp; 2 in 2v2, or 0 in 1v1)
+    /// and Team B on East/West seats (1 &amp; 3 in 2v2, or 1 in 1v1).
+    /// </summary>
+    public int FindOpenSeatForTeam(long? playerTeamId)
+    {
+        if (!IsTeamChallenge)
+        {
+            return FindFirstOpenSeat();
+        }
+        if (!playerTeamId.HasValue)
+        {
+            return -1;
+        }
+
+        int[] allowedSeats;
+        if (TeamAId.HasValue && playerTeamId.Value == TeamAId.Value)
+        {
+            allowedSeats = MaxNumberOfPlayer == 4 ? [0, 2] : [0];
+        }
+        else if (TeamBId.HasValue && playerTeamId.Value == TeamBId.Value)
+        {
+            allowedSeats = MaxNumberOfPlayer == 4 ? [1, 3] : [1];
+        }
+        else
+        {
+            return -1;
+        }
+
+        foreach (int seat in allowedSeats)
+        {
+            if (seat < MaxNumberOfPlayer && PlayersInLobby.All(p => p.SeatIndex != seat))
+            {
+                return seat;
+            }
+        }
+
         return -1;
     }
 

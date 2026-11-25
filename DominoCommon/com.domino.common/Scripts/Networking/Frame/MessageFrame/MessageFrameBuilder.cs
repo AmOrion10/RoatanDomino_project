@@ -238,5 +238,17 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame LeaveTeamFrame()
             => new MessageFrame(FrameCommandType.LeaveTeam, string.Empty);
+
+        public static MessageFrame GetTeamLeaderboardFrame()
+            => new MessageFrame(FrameCommandType.GetTeamLeaderboard, string.Empty);
+
+        public static MessageFrame SendTeamChallengeFrame(SendTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.SendTeamChallenge, dto.ToJson());
+
+        public static MessageFrame RespondTeamChallengeFrame(RespondTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamChallenge, dto.ToJson());
+
+        public static MessageFrame TeamChallengeNotificationFrame(TeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.TeamChallengeNotification, dto.ToJson());
     }
 }

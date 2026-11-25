@@ -54,6 +54,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<TeamInviteEntity> TeamInvites { get; set; }
 
+    public DbSet<TeamChallengeEntity> TeamChallenges { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AvatarEntity>(entity =>
@@ -541,6 +543,33 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(e => e.InvitedByUser)
                 .WithMany()
                 .HasForeignKey(e => e.InvitedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
+        });
+
+        modelBuilder.Entity<TeamChallengeEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("TeamChallenges");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ChallengerTeamId).HasColumnName("challenger_team_id");
+            entity.Property(e => e.TargetTeamId).HasColumnName("target_team_id");
+            entity.Property(e => e.GameMode).HasColumnName("game_mode");
+            entity.Property(e => e.Variant).HasColumnName("variant");
+            entity.Property(e => e.TableId).HasColumnName("table_id");
+            entity.Property(e => e.TableCode).HasColumnName("table_code");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.CreatedUtc).HasColumnName("created_utc");
+
+            entity.HasOne(e => e.ChallengerTeam)
+                .WithMany()
+                .HasForeignKey(e => e.ChallengerTeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TargetTeam)
+                .WithMany()
+                .HasForeignKey(e => e.TargetTeamId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
         });
     }

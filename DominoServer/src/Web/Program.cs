@@ -326,6 +326,14 @@ public class Program
             return Results.Ok(board);
         });
 
+        app.MapGet("/api/leaderboard/teams", async (HttpContext context, TeamService teamService) =>
+        {
+            long? userId = long.TryParse(context.Request.Query["userId"].FirstOrDefault(), out long parsedId) && parsedId > 0 ? parsedId : null;
+            int limit = int.TryParse(context.Request.Query["limit"].FirstOrDefault(), out int parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
+            DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams.TeamLeaderboardDto board = await teamService.GetTeamLeaderboardAsync(userId, limit);
+            return Results.Ok(board);
+        });
+
         app.Map("/ws", async (HttpContext context, IClientManager cm, ILogger<WebSocketClient> wsLogger) =>
         {
             await HandleWebSocketUpgradeAsync(context, cm, wsLogger);
@@ -489,6 +497,22 @@ public class Program
                             invited_by_user_id BIGINT NOT NULL,
                             created_at_utc DATETIME NOT NULL,
                             UNIQUE KEY UX_TeamInvites_TeamInvited (team_id, invited_user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamChallenges (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            challenger_team_id BIGINT NOT NULL,
+                            target_team_id BIGINT NOT NULL,
+                            game_mode INT NOT NULL DEFAULT 0,
+                            variant INT NOT NULL DEFAULT 0,
+                            table_id INT NOT NULL DEFAULT 0,
+                            table_code VARCHAR(32) NOT NULL DEFAULT '',
+                            status INT NOT NULL DEFAULT 0,
+                            created_utc DATETIME NOT NULL
                         )");
                 }
                 catch { }

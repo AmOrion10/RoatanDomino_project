@@ -46,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<PresenceService>();
         services.AddScoped<LeaderboardService>();
         services.AddScoped<TeamService>();
+        services.AddScoped<ITeamChallengeEloUpdater>(sp => sp.GetRequiredService<TeamService>());
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IFriendRequestRepository, FriendRequestRepository>();

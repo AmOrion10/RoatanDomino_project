@@ -55,7 +55,15 @@ public class GameManager(IChatManager chatManager) : IGameManager
             {
                 ChatId = chatManager.CreateChat("Game"),
                 LobbyId = lobby.Id,
-                MatchTitle = lobby.Name
+                MatchTitle = lobby.Name,
+                IsTeamChallenge = lobby.IsTeamChallenge,
+                TeamChallengeId = lobby.TeamChallengeId,
+                TeamAId = lobby.TeamAId,
+                TeamAName = lobby.TeamAName,
+                TeamATag = lobby.TeamATag,
+                TeamBId = lobby.TeamBId,
+                TeamBName = lobby.TeamBName,
+                TeamBTag = lobby.TeamBTag
             };
         }
         else

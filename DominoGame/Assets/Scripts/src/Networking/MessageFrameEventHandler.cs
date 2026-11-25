@@ -63,6 +63,9 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<MyTeamDetailsDto>> PromoteOrDemoteMemberResponseEvent;
     public event Action<ResponseObjectDto<MyTeamDetailsDto>> KickTeamMemberResponseEvent;
     public event Action<ResponseObjectDto<MyTeamDetailsDto>> LeaveTeamResponseEvent;
+    public event Action<ResponseObjectDto<TeamLeaderboardDto>> GetTeamLeaderboardResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> SendTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> RespondTeamChallengeResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -82,6 +85,7 @@ public class MessageFrameEventHandler
     public event Action<NumberOfDominoPerPlayerDto> NumberOfDominoPerPlayerEvent;
     public event Action<EndGameDto> EndGameEvent;
     public event Action<MatchEloBreakdownDto> MatchEloBreakdownEvent;
+    public event Action<TeamChallengeDto> TeamChallengeNotificationEvent;
     public event Action<ReceiveChatMessageDto> ReceiveChatMessageEvent;
     public event Action<ChatDto> JoinChatEvent;
     public event Action<ChatDto> LeaveChatEvent;
@@ -221,6 +225,15 @@ public class MessageFrameEventHandler
             case FrameCommandType.LeaveTeam:
                 LeaveTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
                 break;
+            case FrameCommandType.GetTeamLeaderboard:
+                GetTeamLeaderboardResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamLeaderboardDto>>());
+                break;
+            case FrameCommandType.SendTeamChallenge:
+                SendTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.RespondTeamChallenge:
+                RespondTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
+                break;
         }
 
         switch (frame.CommandType)
@@ -275,6 +288,9 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.MatchEloBreakdown:
                 MatchEloBreakdownEvent?.Invoke(frame.GetObjectFromMessage<MatchEloBreakdownDto>());
+                break;
+            case FrameCommandType.TeamChallengeNotification:
+                TeamChallengeNotificationEvent?.Invoke(frame.GetObjectFromMessage<TeamChallengeDto>());
                 break;
             case FrameCommandType.GameGeneralTimer:
                 GameGeneralTimerEvent?.Invoke(frame.GetObjectFromMessage<TimerDto>());

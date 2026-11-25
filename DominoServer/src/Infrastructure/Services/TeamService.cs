@@ -3,8 +3,14 @@ using System.Text.RegularExpressions;
 using Application.Interfaces;
 using Application.Interfaces.Managers;
 
+using Domain;
+using Domain.Game;
+
 using DominoCommon.com.domino.common.Scripts.Enums;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
+using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
+using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
 
 using Infrastructure.Database;
 using Infrastructure.Database.Entities;
@@ -23,7 +29,10 @@ public sealed class TeamActionResult<T>
     public static TeamActionResult<T> Fail(string message) => new() { Ok = false, ErrorMessage = message };
 }
 
-public class TeamService(ApplicationDbContext dbContext, IClientManager clientManager)
+public class TeamService(
+    ApplicationDbContext dbContext,
+    IClientManager clientManager,
+    ILobbyManager? lobbyManager = null) : ITeamChallengeEloUpdater
 {
     private static readonly Regex TagPattern = new(@"^[A-Za-z0-9]{3,4}$", RegexOptions.Compiled);
 
@@ -706,6 +715,10 @@ public class TeamService(ApplicationDbContext dbContext, IClientManager clientMa
                 .FirstOrDefaultAsync(t => t.Id == teamId);
             if (emptyTeam is not null)
             {
+                List<TeamChallengeEntity> challenges = await dbContext.TeamChallenges
+                    .Where(c => c.ChallengerTeamId == teamId || c.TargetTeamId == teamId)
+                    .ToListAsync();
+                if (challenges.Count > 0) dbContext.TeamChallenges.RemoveRange(challenges);
                 dbContext.TeamJoinRequests.RemoveRange(emptyTeam.JoinRequests);
                 dbContext.TeamInvites.RemoveRange(emptyTeam.Invites);
                 dbContext.Teams.Remove(emptyTeam);
@@ -722,6 +735,411 @@ public class TeamService(ApplicationDbContext dbContext, IClientManager clientMa
         }
 
         return TeamActionResult<MyTeamDetailsDto>.Success(await GetMyTeamAsync(userId, "You left the team."));
+    }
+
+    public async Task<long?> GetUserTeamIdAsync(long userId)
+    {
+        TeamMemberEntity? membership = await dbContext.TeamMembers.FirstOrDefaultAsync(m => m.UserId == userId);
+        return membership?.TeamId;
+    }
+
+    public async Task<TeamLeaderboardDto> GetTeamLeaderboardAsync(long? requestingUserId = null, int limit = 100)
+    {
+        int cappedLimit = Math.Clamp(limit, 1, 500);
+        long? myTeamId = requestingUserId.HasValue && requestingUserId.Value > 0
+            ? await GetUserTeamIdAsync(requestingUserId.Value)
+            : null;
+
+        List<TeamEntity> allTeams = await dbContext.Teams
+            .Include(t => t.Members)
+                .ThenInclude(m => m.User)
+            .ToListAsync();
+
+        List<TeamEntity> ordered = allTeams
+            .OrderByDescending(t => RoatanRankTierHelper.ClampElo(t.TeamElo))
+            .ThenByDescending(t => t.TeamWins)
+            .ThenByDescending(t => t.Members.Count)
+            .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        List<TeamLeaderboardEntryDto> topEntries = [];
+        TeamLeaderboardEntryDto? myTeamEntry = null;
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            TeamEntity t = ordered[i];
+            int rank = i + 1;
+            int clampedElo = RoatanRankTierHelper.ClampElo(t.TeamElo);
+            RoatanRankTierInfo tierInfo = RoatanRankTierHelper.GetInfoForElo(clampedElo);
+            string captainName = t.Members
+                .FirstOrDefault(m => m.Role == TeamRole.Captain)?.User?.Login
+                ?? t.Members.FirstOrDefault()?.User?.Login
+                ?? "Captain";
+
+            TeamLeaderboardEntryDto entry = new()
+            {
+                Rank = rank,
+                TeamId = t.Id,
+                Name = t.Name,
+                Tag = t.Tag,
+                TeamElo = clampedElo,
+                TeamRankTier = tierInfo.Tier,
+                TierName = tierInfo.DisplayName,
+                TierColorHex = tierInfo.BadgeColorHex,
+                TeamWins = t.TeamWins,
+                TeamLosses = t.TeamLosses,
+                CaptainUsername = captainName,
+                MemberCount = t.Members.Count,
+                MaxMembers = t.MaxMembers
+            };
+
+            if (i < cappedLimit)
+            {
+                topEntries.Add(entry);
+            }
+
+            if (myTeamId.HasValue && t.Id == myTeamId.Value)
+            {
+                myTeamEntry = entry;
+            }
+        }
+
+        return new TeamLeaderboardDto
+        {
+            Entries = topEntries,
+            MyTeamEntry = myTeamEntry,
+            TotalTeams = ordered.Count
+        };
+    }
+
+    public async Task<TeamActionResult<TeamChallengeActionResponseDto>> SendTeamChallengeAsync(
+        IClient challengerClient,
+        SendTeamChallengeDto request)
+    {
+        if (challengerClient.User is null || request is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Invalid Team Challenge request.");
+        }
+
+        if (lobbyManager is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Team Challenge matchmaking is unavailable.");
+        }
+
+        long actorUserId = challengerClient.User.Id;
+        TeamMemberEntity? actorMembership = await dbContext.TeamMembers
+            .FirstOrDefaultAsync(m => m.UserId == actorUserId);
+
+        if (actorMembership is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("You must be in a team to send a Team Challenge.");
+        }
+
+        if (actorMembership.Role != TeamRole.Captain && actorMembership.Role != TeamRole.ViceCaptain)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Only a Team Captain or Vice-Captain can send a Team Challenge.");
+        }
+
+        if (actorMembership.TeamId == request.TargetTeamId)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("You cannot challenge your own team.");
+        }
+
+        TeamEntity? challengerTeam = await dbContext.Teams
+            .Include(t => t.Members)
+            .FirstOrDefaultAsync(t => t.Id == actorMembership.TeamId);
+        TeamEntity? targetTeam = await dbContext.Teams
+            .Include(t => t.Members)
+            .FirstOrDefaultAsync(t => t.Id == request.TargetTeamId);
+
+        if (challengerTeam is null || targetTeam is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Target team not found.");
+        }
+
+        MatchFormat mode = request.GameMode == MatchFormat.TWO_BEST ? MatchFormat.TWO_BEST : MatchFormat.SIX_LOV;
+        TableStyle variant = request.Variant == TableStyle.BLOCK ? TableStyle.BLOCK : TableStyle.DRAW;
+
+        // If challenger is currently seated in another waiting table, remove cleanly first
+        Lobby? existingLobby = lobbyManager.GetLobbyForClient(challengerClient);
+        if (existingLobby is not null)
+        {
+            lobbyManager.RemovePlayerFromLobby(challengerClient, existingLobby.Id);
+        }
+
+        DateTime utcNow = DateTime.UtcNow;
+        TeamChallengeEntity challenge = new()
+        {
+            ChallengerTeamId = challengerTeam.Id,
+            TargetTeamId = targetTeam.Id,
+            GameMode = mode,
+            Variant = variant,
+            Status = TeamChallengeStatus.Pending,
+            CreatedUtc = utcNow
+        };
+        await dbContext.TeamChallenges.AddAsync(challenge);
+        await dbContext.SaveChangesAsync();
+
+        Lobby challengeTable = lobbyManager.CreateTeamChallengeLobby(
+            challengerClient,
+            challenge.Id,
+            challengerTeam.Id,
+            challengerTeam.Name,
+            challengerTeam.Tag,
+            targetTeam.Id,
+            targetTeam.Name,
+            targetTeam.Tag,
+            mode,
+            variant);
+
+        challenge.TableId = challengeTable.Id;
+        challenge.TableCode = challengeTable.Code;
+        await dbContext.SaveChangesAsync();
+
+        string modeText = mode == MatchFormat.TWO_BEST ? "Two-Best 1v1" : "Six-Lov 2v2";
+        string variantText = variant == TableStyle.BLOCK ? "Block" : "Draw";
+        TeamChallengeDto challengeDto = BuildChallengeDto(
+            challenge,
+            challengerTeam,
+            targetTeam,
+            $"[{challengerTeam.Tag}] {challengerTeam.Name} challenged your crew to {modeText} ({variantText})!");
+
+        // Broadcast TeamChallengeNotification to all online Captains & Vice-Captains of the challenged team
+        HashSet<long> targetLeaderIds = targetTeam.Members
+            .Where(m => m.Role == TeamRole.Captain || m.Role == TeamRole.ViceCaptain)
+            .Select(m => m.UserId)
+            .ToHashSet();
+
+        NetworkFrame notifFrame = new(MessageFrameBuilder.TeamChallengeNotificationFrame(challengeDto));
+        foreach (IClient online in clientManager.GetAllLoggedInClients())
+        {
+            if (online.User is not null && targetLeaderIds.Contains(online.User.Id))
+            {
+                try { await online.SendAsync(notifFrame); } catch { }
+            }
+        }
+
+        return TeamActionResult<TeamChallengeActionResponseDto>.Success(new TeamChallengeActionResponseDto
+        {
+            Challenge = challengeDto,
+            Table = DtoBuilder.GetLobbyDtoObject(challengeTable)
+        });
+    }
+
+    public async Task<TeamActionResult<TeamChallengeActionResponseDto>> RespondTeamChallengeAsync(
+        IClient responderClient,
+        RespondTeamChallengeDto request)
+    {
+        if (responderClient.User is null || request is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Invalid challenge response.");
+        }
+
+        if (lobbyManager is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Team Challenge matchmaking is unavailable.");
+        }
+
+        TeamChallengeEntity? challenge = await dbContext.TeamChallenges
+            .Include(c => c.ChallengerTeam)
+                .ThenInclude(t => t.Members)
+            .Include(c => c.TargetTeam)
+                .ThenInclude(t => t.Members)
+            .FirstOrDefaultAsync(c => c.Id == request.ChallengeId);
+
+        if (challenge is null)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Team Challenge not found.");
+        }
+
+        if (challenge.Status != TeamChallengeStatus.Pending)
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail($"This challenge has already been {challenge.Status.ToString().ToLowerInvariant()}.");
+        }
+
+        long actorUserId = responderClient.User.Id;
+        TeamMemberEntity? targetMembership = challenge.TargetTeam.Members
+            .FirstOrDefault(m => m.UserId == actorUserId);
+
+        if (targetMembership is null ||
+            (targetMembership.Role != TeamRole.Captain && targetMembership.Role != TeamRole.ViceCaptain))
+        {
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("Only a Captain or Vice-Captain of the challenged team can accept or decline.");
+        }
+
+        if (!request.Accept)
+        {
+            challenge.Status = TeamChallengeStatus.Declined;
+            await dbContext.SaveChangesAsync();
+
+            if (challenge.TableId > 0 && lobbyManager.ExistById(challenge.TableId))
+            {
+                lobbyManager.DeleteLobby(challenge.TableId);
+            }
+
+            TeamChallengeDto declinedDto = BuildChallengeDto(
+                challenge,
+                challenge.ChallengerTeam,
+                challenge.TargetTeam,
+                $"[{challenge.TargetTeam.Tag}] {challenge.TargetTeam.Name} declined the Team Challenge.");
+
+            HashSet<long> challengerMemberIds = challenge.ChallengerTeam.Members.Select(m => m.UserId).ToHashSet();
+            NetworkFrame declinedFrame = new(MessageFrameBuilder.TeamChallengeNotificationFrame(declinedDto));
+            foreach (IClient online in clientManager.GetAllLoggedInClients())
+            {
+                if (online.User is not null && challengerMemberIds.Contains(online.User.Id))
+                {
+                    try { await online.SendAsync(declinedFrame); } catch { }
+                }
+            }
+
+            return TeamActionResult<TeamChallengeActionResponseDto>.Success(new TeamChallengeActionResponseDto
+            {
+                Challenge = declinedDto,
+                Table = null
+            });
+        }
+
+        Lobby? challengeTable = lobbyManager.GetLobbyById(challenge.TableId);
+        if (challengeTable is null)
+        {
+            challenge.Status = TeamChallengeStatus.Declined;
+            await dbContext.SaveChangesAsync();
+            return TeamActionResult<TeamChallengeActionResponseDto>.Fail("The Team Challenge table is no longer open.");
+        }
+
+        Lobby? responderCurrentLobby = lobbyManager.GetLobbyForClient(responderClient);
+        if (responderCurrentLobby is not null && responderCurrentLobby.Id != challengeTable.Id)
+        {
+            lobbyManager.RemovePlayerFromLobby(responderClient, responderCurrentLobby.Id);
+        }
+
+        // Auto-seat the accepting leader into Team B's seat (Seat 1)
+        lobbyManager.AddPlayerToTeamChallengeLobby(responderClient, challengeTable.Id, challenge.TargetTeamId);
+
+        challenge.Status = TeamChallengeStatus.Accepted;
+        await dbContext.SaveChangesAsync();
+
+        var updatedTableDto = DtoBuilder.GetLobbyDtoObject(challengeTable);
+        TeamChallengeDto acceptedDto = BuildChallengeDto(
+            challenge,
+            challenge.ChallengerTeam,
+            challenge.TargetTeam,
+            $"Team Challenge ACCEPTED! [{challenge.ChallengerTeam.Tag}] vs [{challenge.TargetTeam.Tag}] — Join Table Code {challengeTable.Code}!");
+
+        // Broadcast updated table state to seated players & notify both teams' online members so teammates can fill open seats
+        HashSet<long> seatedIds = challengeTable.PlayersInLobby.Where(p => !p.IsBot).Select(p => p.Id).ToHashSet();
+        HashSet<long> bothTeamMemberIds = challenge.ChallengerTeam.Members.Select(m => m.UserId)
+            .Concat(challenge.TargetTeam.Members.Select(m => m.UserId))
+            .ToHashSet();
+
+        NetworkFrame tableUpdateFrame = new(MessageFrameBuilder.TableStateUpdatedFrame(updatedTableDto));
+        NetworkFrame acceptedNotifFrame = new(MessageFrameBuilder.TeamChallengeNotificationFrame(acceptedDto));
+
+        foreach (IClient online in clientManager.GetAllLoggedInClients())
+        {
+            if (online.User is null || online.User.Id == actorUserId) continue;
+
+            if (seatedIds.Contains(online.User.Id))
+            {
+                try { await online.SendAsync(tableUpdateFrame); } catch { }
+            }
+
+            if (bothTeamMemberIds.Contains(online.User.Id))
+            {
+                try { await online.SendAsync(acceptedNotifFrame); } catch { }
+            }
+        }
+
+        return TeamActionResult<TeamChallengeActionResponseDto>.Success(new TeamChallengeActionResponseDto
+        {
+            Challenge = acceptedDto,
+            Table = updatedTableDto
+        });
+    }
+
+    public async Task<TeamEloBreakdownDto?> ApplyTeamChallengeMatchResultAsync(
+        long? challengeId,
+        long teamAId,
+        long teamBId,
+        int winningTeamSlot,
+        bool isDraw,
+        bool isKeyWin,
+        bool isGameBrukWin)
+    {
+        TeamEntity? teamA = await dbContext.Teams.FirstOrDefaultAsync(t => t.Id == teamAId);
+        TeamEntity? teamB = await dbContext.Teams.FirstOrDefaultAsync(t => t.Id == teamBId);
+        if (teamA is null || teamB is null) return null;
+
+        TeamEloBreakdownDto breakdown = RoatanEloCalculator.CalculateTeamChallengeElo(new TeamChallengeEloInput
+        {
+            ChallengeId = challengeId ?? 0,
+            TeamAId = teamA.Id,
+            TeamAName = teamA.Name,
+            TeamATag = teamA.Tag,
+            TeamACurrentElo = teamA.TeamElo,
+            TeamBId = teamB.Id,
+            TeamBName = teamB.Name,
+            TeamBTag = teamB.Tag,
+            TeamBCurrentElo = teamB.TeamElo,
+            WinningTeamSlot = winningTeamSlot,
+            IsDraw = isDraw,
+            IsKeyWin = isKeyWin,
+            IsGameBrukWin = isGameBrukWin
+        });
+
+        teamA.TeamElo = breakdown.TeamA.NewElo;
+        teamB.TeamElo = breakdown.TeamB.NewElo;
+
+        if (!isDraw && winningTeamSlot == 0)
+        {
+            teamA.TeamWins++;
+            teamB.TeamLosses++;
+        }
+        else if (!isDraw && winningTeamSlot == 1)
+        {
+            teamB.TeamWins++;
+            teamA.TeamLosses++;
+        }
+
+        if (challengeId.HasValue && challengeId.Value > 0)
+        {
+            TeamChallengeEntity? challenge = await dbContext.TeamChallenges.FirstOrDefaultAsync(c => c.Id == challengeId.Value);
+            if (challenge is not null)
+            {
+                challenge.Status = TeamChallengeStatus.Completed;
+            }
+        }
+
+        await dbContext.SaveChangesAsync();
+        return breakdown;
+    }
+
+    private static TeamChallengeDto BuildChallengeDto(
+        TeamChallengeEntity challenge,
+        TeamEntity challengerTeam,
+        TeamEntity targetTeam,
+        string? message = null)
+    {
+        return new TeamChallengeDto
+        {
+            ChallengeId = challenge.Id,
+            ChallengerTeamId = challengerTeam.Id,
+            ChallengerTeamName = challengerTeam.Name,
+            ChallengerTeamTag = challengerTeam.Tag,
+            ChallengerTeamElo = RoatanRankTierHelper.ClampElo(challengerTeam.TeamElo),
+            TargetTeamId = targetTeam.Id,
+            TargetTeamName = targetTeam.Name,
+            TargetTeamTag = targetTeam.Tag,
+            TargetTeamElo = RoatanRankTierHelper.ClampElo(targetTeam.TeamElo),
+            GameMode = challenge.GameMode,
+            Variant = challenge.Variant,
+            TableId = challenge.TableId,
+            TableCode = challenge.TableCode,
+            Status = challenge.Status,
+            CreatedUtc = challenge.CreatedUtc,
+            Message = message
+        };
     }
 
     private async Task<List<TeamInviteDto>> GetPendingInvitesForUserAsync(long userId)

@@ -24,6 +24,35 @@ public class TeamFrameHandlers(TeamService teamService) : BaseFrameHandlers
         handler.RegisterHandler(FrameCommandType.PromoteOrDemoteMember, PromoteOrDemoteMemberCallback);
         handler.RegisterHandler(FrameCommandType.KickTeamMember, KickTeamMemberCallback);
         handler.RegisterHandler(FrameCommandType.LeaveTeam, LeaveTeamCallback);
+        handler.RegisterHandler(FrameCommandType.GetTeamLeaderboard, GetTeamLeaderboardCallback);
+        handler.RegisterHandler(FrameCommandType.SendTeamChallenge, SendTeamChallengeCallback);
+        handler.RegisterHandler(FrameCommandType.RespondTeamChallenge, RespondTeamChallengeCallback);
+    }
+
+    private async Task GetTeamLeaderboardCallback(MessageFrame frame, IClient client)
+    {
+        long? userId = client.User is not null && client.User.Id > 0 ? client.User.Id : null;
+        TeamLeaderboardDto leaderboard = await teamService.GetTeamLeaderboardAsync(userId, limit: 100);
+        ResponseObjectDto<TeamLeaderboardDto> response = new()
+        {
+            OkResult = true,
+            Object = leaderboard
+        };
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
+    }
+
+    private async Task SendTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        SendTeamChallengeDto dto = frame.GetObjectFromMessage<SendTeamChallengeDto>();
+        TeamActionResult<TeamChallengeActionResponseDto> result = await teamService.SendTeamChallengeAsync(client, dto);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
+    }
+
+    private async Task RespondTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        RespondTeamChallengeDto dto = frame.GetObjectFromMessage<RespondTeamChallengeDto>();
+        TeamActionResult<TeamChallengeActionResponseDto> result = await teamService.RespondTeamChallengeAsync(client, dto);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
     }
 
     private async Task GetTeamsCallback(MessageFrame frame, IClient client)
@@ -119,9 +148,17 @@ public class TeamFrameHandlers(TeamService teamService) : BaseFrameHandlers
         FrameCommandType commandType,
         TeamActionResult<MyTeamDetailsDto> result)
     {
+        await SendGenericTeamResultAsync(client, commandType, result);
+    }
+
+    private static async Task SendGenericTeamResultAsync<T>(
+        IClient client,
+        FrameCommandType commandType,
+        TeamActionResult<T> result)
+    {
         if (result.Ok && result.Data is not null)
         {
-            ResponseObjectDto<MyTeamDetailsDto> okResponse = new()
+            ResponseObjectDto<T> okResponse = new()
             {
                 OkResult = true,
                 Object = result.Data
@@ -130,7 +167,7 @@ public class TeamFrameHandlers(TeamService teamService) : BaseFrameHandlers
             return;
         }
 
-        ResponseObjectDto<MyTeamDetailsDto> errorResponse = new()
+        ResponseObjectDto<T> errorResponse = new()
         {
             OkResult = false,
             ErrorType = ErrorTypes.Unknown,

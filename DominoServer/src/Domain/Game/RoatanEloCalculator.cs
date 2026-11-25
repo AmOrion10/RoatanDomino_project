@@ -30,6 +30,24 @@ public sealed class EloMatchContext
     public List<EloPlayerMatchInput> Players { get; init; } = [];
 }
 
+public sealed class TeamChallengeEloInput
+{
+    public long ChallengeId { get; init; }
+    public long TeamAId { get; init; }
+    public string TeamAName { get; init; } = string.Empty;
+    public string TeamATag { get; init; } = string.Empty;
+    public int TeamACurrentElo { get; init; } = RoatanRankTierHelper.DefaultElo;
+    public long TeamBId { get; init; }
+    public string TeamBName { get; init; } = string.Empty;
+    public string TeamBTag { get; init; } = string.Empty;
+    public int TeamBCurrentElo { get; init; } = RoatanRankTierHelper.DefaultElo;
+    /// <summary>0 = Team A won, 1 = Team B won, -1 = Draw.</summary>
+    public int WinningTeamSlot { get; init; } = -1;
+    public bool IsDraw { get; init; }
+    public bool IsKeyWin { get; init; }
+    public bool IsGameBrukWin { get; init; }
+}
+
 /// <summary>
 /// Online-only Chess-style Elo rating calculator for Roatan Domino.
 /// Base Chess expected-score delta (K = 32, minimum floor 100 Elo)
@@ -352,5 +370,81 @@ public static class RoatanEloCalculator
             user.OnlineMatchesLast7Days = 1;
         }
         user.LastOnlineMatchUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Calculates Crew vs. Crew Team Elo changes (Chess expected score K = 32, minimum floor 100 Elo,
+    /// plus +6 Elo bonus for Key / Capicu or Game Bruk wins).
+    /// </summary>
+    public static TeamEloBreakdownDto CalculateTeamChallengeElo(TeamChallengeEloInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        int eloA = RoatanRankTierHelper.ClampElo(input.TeamACurrentElo);
+        int eloB = RoatanRankTierHelper.ClampElo(input.TeamBCurrentElo);
+
+        double expectedA = CalculateExpectedScore(eloA, eloB);
+        double expectedB = CalculateExpectedScore(eloB, eloA);
+
+        bool isDraw = input.IsDraw || (input.WinningTeamSlot != 0 && input.WinningTeamSlot != 1);
+        double scoreA = isDraw ? 0.5 : (input.WinningTeamSlot == 0 ? 1.0 : 0.0);
+        double scoreB = isDraw ? 0.5 : (input.WinningTeamSlot == 1 ? 1.0 : 0.0);
+
+        int baseDeltaA = (int)Math.Round(KFactor * (scoreA - expectedA), MidpointRounding.AwayFromZero);
+        int baseDeltaB = (int)Math.Round(KFactor * (scoreB - expectedB), MidpointRounding.AwayFromZero);
+
+        bool specialWin = input.IsKeyWin || input.IsGameBrukWin;
+        int bonusA = !isDraw && input.WinningTeamSlot == 0 && specialWin ? SpecialWinBonus : 0;
+        int bonusB = !isDraw && input.WinningTeamSlot == 1 && specialWin ? SpecialWinBonus : 0;
+
+        int newEloA = Math.Max(MinElo, eloA + baseDeltaA + bonusA);
+        int newEloB = Math.Max(MinElo, eloB + baseDeltaB + bonusB);
+
+        RoatanRankTier prevTierA = RoatanRankTierHelper.FromElo(eloA);
+        RoatanRankTierInfo newTierA = RoatanRankTierHelper.GetInfoForElo(newEloA);
+
+        RoatanRankTier prevTierB = RoatanRankTierHelper.FromElo(eloB);
+        RoatanRankTierInfo newTierB = RoatanRankTierHelper.GetInfoForElo(newEloB);
+
+        string winLabel = input.IsKeyWin ? "Key / Capicu Win" : (input.IsGameBrukWin ? "Game Bruk Win" : "Win");
+        string resA = isDraw ? "Draw" : (input.WinningTeamSlot == 0 ? winLabel : "Loss");
+        string resB = isDraw ? "Draw" : (input.WinningTeamSlot == 1 ? winLabel : "Loss");
+
+        return new TeamEloBreakdownDto
+        {
+            ChallengeId = input.ChallengeId,
+            TeamA = new TeamEloChangeDto
+            {
+                TeamId = input.TeamAId,
+                TeamName = input.TeamAName,
+                TeamTag = input.TeamATag,
+                PreviousElo = eloA,
+                NewElo = newEloA,
+                Delta = newEloA - eloA,
+                PreviousTier = prevTierA,
+                NewTier = newTierA.Tier,
+                TierName = newTierA.DisplayName,
+                TierColorHex = newTierA.BadgeColorHex,
+                ResultLabel = resA,
+                BaseEloDelta = baseDeltaA,
+                SpecialWinBonus = bonusA
+            },
+            TeamB = new TeamEloChangeDto
+            {
+                TeamId = input.TeamBId,
+                TeamName = input.TeamBName,
+                TeamTag = input.TeamBTag,
+                PreviousElo = eloB,
+                NewElo = newEloB,
+                Delta = newEloB - eloB,
+                PreviousTier = prevTierB,
+                NewTier = newTierB.Tier,
+                TierName = newTierB.DisplayName,
+                TierColorHex = newTierB.BadgeColorHex,
+                ResultLabel = resB,
+                BaseEloDelta = baseDeltaB,
+                SpecialWinBonus = bonusB
+            }
+        };
     }
 }
