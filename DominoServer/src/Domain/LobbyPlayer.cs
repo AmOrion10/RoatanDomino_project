@@ -10,15 +10,17 @@ public class LobbyPlayer(User user) : User(user)
     public static LobbyPlayer CreateBot(long botId, string botName, int seatIndex, string difficulty)
     {
         string normalizedDifficulty = NormalizeDifficulty(difficulty);
+        int botElo = normalizedDifficulty switch
+        {
+            "Novice" => 850,
+            "Master" => 1550,
+            _ => 1200
+        };
         User botUser = new($"bot.{Math.Abs(botId)}@roatandomino.local", botName)
         {
             Id = botId,
-            Score = normalizedDifficulty switch
-            {
-                "Novice" => 950,
-                "Master" => 1450,
-                _ => 1200
-            }
+            Score = botElo,
+            Elo = botElo
         };
 
         return new LobbyPlayer(botUser)

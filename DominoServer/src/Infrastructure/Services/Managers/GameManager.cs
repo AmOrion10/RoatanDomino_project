@@ -28,12 +28,16 @@ public class GameManager(IChatManager chatManager) : IGameManager
         bool hasBots = orderedSeats.Any(p => p.IsBot);
         List<GamePlayer> players = orderedSeats.Select(lobbyPlayer =>
         {
-            GamePlayer gp = new(lobbyPlayer);
+            GamePlayer gp = new(lobbyPlayer)
+            {
+                IsHumanSeat = !lobbyPlayer.IsBot && lobbyPlayer.Id > 0
+            };
             if (lobbyPlayer.IsBot)
             {
                 gp.IsReady = true;
                 gp.IsBotControlled = true;
                 gp.IsPermanentlyBot = true;
+                gp.IsHumanSeat = false;
                 gp.BotDifficulty = lobbyPlayer.BotDifficulty ?? "Pro";
             }
             return gp;

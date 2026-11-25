@@ -50,6 +50,7 @@ public class MessageFrameEventHandler
     public event Action<ResponseDto> SendTableInviteResponseEvent;
     public event Action<ResponseObjectDto<UserDto>> UpdateProfileAvatarResponseEvent;
     public event Action<ResponseDto> DeleteAccountResponseEvent;
+    public event Action<ResponseObjectDto<LeaderboardDto>> GetLeaderboardResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -68,6 +69,7 @@ public class MessageFrameEventHandler
     public event Action<PossibleMovesDto> PossiblesMovesEvent;
     public event Action<NumberOfDominoPerPlayerDto> NumberOfDominoPerPlayerEvent;
     public event Action<EndGameDto> EndGameEvent;
+    public event Action<MatchEloBreakdownDto> MatchEloBreakdownEvent;
     public event Action<ReceiveChatMessageDto> ReceiveChatMessageEvent;
     public event Action<ChatDto> JoinChatEvent;
     public event Action<ChatDto> LeaveChatEvent;
@@ -171,6 +173,9 @@ public class MessageFrameEventHandler
             case FrameCommandType.DeleteAccount:
                 DeleteAccountResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
                 break;
+            case FrameCommandType.GetLeaderboard:
+                GetLeaderboardResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LeaderboardDto>>());
+                break;
         }
 
         switch (frame.CommandType)
@@ -222,6 +227,9 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.EndGame:
                 EndGameEvent?.Invoke(frame.GetObjectFromMessage<EndGameDto>());
+                break;
+            case FrameCommandType.MatchEloBreakdown:
+                MatchEloBreakdownEvent?.Invoke(frame.GetObjectFromMessage<MatchEloBreakdownDto>());
                 break;
             case FrameCommandType.GameGeneralTimer:
                 GameGeneralTimerEvent?.Invoke(frame.GetObjectFromMessage<TimerDto>());

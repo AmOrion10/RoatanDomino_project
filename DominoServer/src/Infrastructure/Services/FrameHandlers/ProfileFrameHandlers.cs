@@ -21,7 +21,8 @@ public class ProfileFrameHandlers(
     IMessageDispatcher dispatcher,
     IUserRepository userRepository,
     ILobbyManager lobbyManager,
-    PresenceService presenceService) : BaseFrameHandlers
+    PresenceService presenceService,
+    LeaderboardService leaderboardService) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -32,6 +33,19 @@ public class ProfileFrameHandlers(
         handler.RegisterHandler(FrameCommandType.GetAllHistoryGames, GetAllHistoryGamesCallback);
         handler.RegisterHandler(FrameCommandType.GetHistoryGame, GetHistoryGameCallback);
         handler.RegisterHandler(FrameCommandType.UpdateProfileAvatar, UpdateProfileAvatarCallback);
+        handler.RegisterHandler(FrameCommandType.GetLeaderboard, GetLeaderboardCallback);
+    }
+
+    private async Task GetLeaderboardCallback(MessageFrame frame, IClient client)
+    {
+        long? userId = client.User is not null && client.User.Id > 0 ? client.User.Id : null;
+        LeaderboardDto leaderboard = await leaderboardService.BuildLeaderboardAsync(userId, limit: 100);
+        ResponseObjectDto<LeaderboardDto> response = new()
+        {
+            OkResult = true,
+            Object = leaderboard
+        };
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 
     private async Task GetInfoProfileCallback(MessageFrame frame, IClient client)

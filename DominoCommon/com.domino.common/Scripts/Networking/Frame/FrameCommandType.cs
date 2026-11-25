@@ -84,5 +84,9 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         // Profile Avatars & Account Deletion
         UpdateProfileAvatar,
         DeleteAccount,
+
+        // Elo Ranking & Player Leaderboard
+        GetLeaderboard,
+        MatchEloBreakdown,
     }
 }

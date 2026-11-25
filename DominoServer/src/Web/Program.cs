@@ -318,6 +318,14 @@ public class Program
             return Results.Ok(new { ok = true, deletedUserId = userId });
         });
 
+        app.MapGet("/api/leaderboard", async (HttpContext context, LeaderboardService leaderboardService) =>
+        {
+            long? userId = long.TryParse(context.Request.Query["userId"].FirstOrDefault(), out long parsedId) && parsedId > 0 ? parsedId : null;
+            int limit = int.TryParse(context.Request.Query["limit"].FirstOrDefault(), out int parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
+            LeaderboardDto board = await leaderboardService.BuildLeaderboardAsync(userId, limit);
+            return Results.Ok(board);
+        });
+
         app.Map("/ws", async (HttpContext context, IClientManager cm, ILogger<WebSocketClient> wsLogger) =>
         {
             await HandleWebSocketUpgradeAsync(context, cm, wsLogger);
@@ -418,6 +426,15 @@ public class Program
             {
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN avatar_url TEXT NULL"); } catch { }
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN auth_provider VARCHAR(32) NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN elo INT NOT NULL DEFAULT 1000"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN wins INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN losses INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN win_assists INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN total_moves INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN optimal_moves INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN average_turn_seconds DOUBLE NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN online_matches_last_7_days INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN last_online_match_utc DATETIME NULL"); } catch { }
             }
 
             if (!await db.Dominos.AnyAsync())

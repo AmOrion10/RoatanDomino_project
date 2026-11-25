@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddScoped<ResetPasswordManager>();
         services.AddScoped<SocialAuthService>();
         services.AddScoped<PresenceService>();
+        services.AddScoped<LeaderboardService>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IFriendRequestRepository, FriendRequestRepository>();

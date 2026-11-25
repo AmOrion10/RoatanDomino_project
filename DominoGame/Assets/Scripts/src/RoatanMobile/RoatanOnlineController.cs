@@ -143,18 +143,37 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text refreshLobbiesBtnLabel;
     private TMP_InputField createLobbyNameInput;
     private TMP_InputField joinCodeInput;
+    private enum HubBrowserTab
+    {
+        Tables = 0,
+        Players = 1,
+        Leaderboard = 2
+    }
+
     private Image hubTablesTabImg;
     private Image hubPlayersTabImg;
+    private Image hubLeaderboardTabImg;
     private TMP_Text hubTablesTabLabel;
     private TMP_Text hubPlayersTabLabel;
+    private TMP_Text hubLeaderboardTabLabel;
     private GameObject hubTablesScrollObj;
     private GameObject hubPlayersScrollObj;
-    private bool hubShowingPlayersTab;
+    private GameObject hubLeaderboardViewObj;
+    private HubBrowserTab activeHubTab = HubBrowserTab.Tables;
     private RectTransform lobbiesListContent;
     private RectTransform playersRosterContent;
+    private RectTransform leaderboardListContent;
+    private GameObject leaderboardSelfBannerCard;
+    private Image leaderboardSelfAvatarImg;
+    private TMP_Text leaderboardSelfAvatarInitials;
+    private TMP_Text leaderboardSelfRankLabel;
+    private TMP_Text leaderboardSelfNameTierLabel;
+    private TMP_Text leaderboardSelfStatsLabel;
     private readonly List<GameObject> spawnedLobbyRows = new List<GameObject>();
     private readonly List<GameObject> spawnedRosterRows = new List<GameObject>();
+    private readonly List<GameObject> spawnedLeaderboardRows = new List<GameObject>();
     private readonly List<PlayerPresenceDto> latestRoster = new List<PlayerPresenceDto>();
+    private LeaderboardDto latestLeaderboard;
     private int createLobbyMaxPlayers = 4;
     private TableStyle createTableStyle = TableStyle.BLOCK;
     private MatchFormat createMatchFormat = MatchFormat.SIX_LOV;
@@ -212,6 +231,10 @@ public class RoatanOnlineController : MonoBehaviour
     private GameObject onlineEndOverlay;
     private TMP_Text onlineEndTitleLabel;
     private TMP_Text onlineEndBodyLabel;
+    private GameObject onlineEndEloBreakdownCard;
+    private TMP_Text onlineEndEloBreakdownTitle;
+    private TMP_Text onlineEndEloBreakdownBody;
+    private MatchEloBreakdownDto latestMatchEloBreakdown;
     private Button onlineEndPrimaryBtn;
     private TMP_Text onlineEndPrimaryBtnLabel;
     private Button onlineEndNewMatchBtn;
@@ -346,6 +369,7 @@ public class RoatanOnlineController : MonoBehaviour
             ShowSubView(hubView);
             RequestLobbiesList();
             RequestPlayerRoster();
+            RequestLeaderboard();
         }
         else
         {
@@ -429,6 +453,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.PossiblesMovesEvent += OnOnlinePossibleMoves;
         eh.NumberOfDominoPerPlayerEvent += OnOnlineCountsUpdated;
         eh.EndGameEvent += OnOnlineEndGame;
+        eh.MatchEloBreakdownEvent += OnMatchEloBreakdown;
         eh.LeaveGameResponseEvent += OnOnlineLeaveGameResponse;
         eh.CheckActiveMatchResponseEvent += OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent += OnRejoinMatchResponse;
@@ -446,6 +471,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.GetInfoProfileResponseEvent += OnGetInfoProfileResponse;
         eh.UpdateProfileAvatarResponseEvent += OnUpdateProfileAvatarResponse;
         eh.DeleteAccountResponseEvent += OnDeleteAccountResponse;
+        eh.GetLeaderboardResponseEvent += OnGetLeaderboardResponse;
     }
 
     private void UnsubscribeClient()
@@ -471,6 +497,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.PossiblesMovesEvent -= OnOnlinePossibleMoves;
         eh.NumberOfDominoPerPlayerEvent -= OnOnlineCountsUpdated;
         eh.EndGameEvent -= OnOnlineEndGame;
+        eh.MatchEloBreakdownEvent -= OnMatchEloBreakdown;
         eh.LeaveGameResponseEvent -= OnOnlineLeaveGameResponse;
         eh.CheckActiveMatchResponseEvent -= OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent -= OnRejoinMatchResponse;
@@ -488,6 +515,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.GetInfoProfileResponseEvent -= OnGetInfoProfileResponse;
         eh.UpdateProfileAvatarResponseEvent -= OnUpdateProfileAvatarResponse;
         eh.DeleteAccountResponseEvent -= OnDeleteAccountResponse;
+        eh.GetLeaderboardResponseEvent -= OnGetLeaderboardResponse;
         subscribedClient = null;
     }
 
@@ -1049,6 +1077,12 @@ public class RoatanOnlineController : MonoBehaviour
         subscribedClient.AddToSendQueue(MessageFrameBuilder.GetPlayerRosterFrame());
     }
 
+    private void RequestLeaderboard()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetLeaderboardFrame());
+    }
+
     private void RequestQuickRanked()
     {
         RoatanSoundFX.Instance?.PlayTap();
@@ -1237,7 +1271,8 @@ public class RoatanOnlineController : MonoBehaviour
         {
             MessageFrameBuilder.ReadyConnectedFrame(),
             MessageFrameBuilder.GetAllLobbyFrame(),
-            MessageFrameBuilder.GetPlayerRosterFrame()
+            MessageFrameBuilder.GetPlayerRosterFrame(),
+            MessageFrameBuilder.GetLeaderboardFrame()
         });
         RefreshHubProfileHeader(fallbackName);
         ShowSubView(hubView);
@@ -1250,14 +1285,26 @@ public class RoatanOnlineController : MonoBehaviour
         }
     }
 
+    private static int ResolveDisplayElo(UserDto user)
+    {
+        if (user == null) return RoatanRankTierHelper.DefaultElo;
+        return user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
+    }
+
+    private static int ResolveDisplayElo(int rawElo)
+    {
+        return rawElo >= RoatanRankTierHelper.MinElo ? rawElo : RoatanRankTierHelper.DefaultElo;
+    }
+
     private void RefreshHubProfileHeader(string fallbackName = "Online Player")
     {
         UserDto user = subscribedClient?.User;
         string loginName = user != null && !string.IsNullOrWhiteSpace(user.Login) ? user.Login : fallbackName;
-        int elo = user != null ? user.Score : 1000;
+        int elo = ResolveDisplayElo(user);
+        string rankBadge = RoatanRankTierHelper.FormatRichBadge(elo);
         if (hubWelcomeLabel != null)
         {
-            hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
+            hubWelcomeLabel.text = $"{loginName}\n<size=19>{rankBadge}</size>";
         }
         ApplyCircularAvatar(
             hubAvatarImg,
@@ -1270,6 +1317,7 @@ public class RoatanOnlineController : MonoBehaviour
     private void OnGetInfoProfileResponse(ResponseObjectDto<InfoProfileDto> dto)
     {
         if (dto == null || !dto.OkResult || dto.Object == null) return;
+        RefreshHubProfileHeader();
         if (profileModal != null && profileModal.activeSelf)
         {
             RefreshProfileModalUI(dto.Object.Statistic);
@@ -1405,14 +1453,13 @@ public class RoatanOnlineController : MonoBehaviour
 
         if (profileModalStatsLabel != null)
         {
-            if (stats != null)
-            {
-                profileModalStatsLabel.text = $"Elo {user.Score}  •  Played: {stats.NumberOfGamePlayed}  •  Wins: {stats.NumberOfGameWon}  •  Losses: {stats.NumberOfGameLost}";
-            }
-            else
-            {
-                profileModalStatsLabel.text = $"Elo {user.Score}  •  Online Profile";
-            }
+            int elo = ResolveDisplayElo(user);
+            string rankBadge = RoatanRankTierHelper.FormatRichBadge(elo);
+            int wins = user.Wins > 0 || user.Losses > 0 ? user.Wins : (stats != null ? stats.NumberOfGameWon : 0);
+            int losses = user.Wins > 0 || user.Losses > 0 ? user.Losses : (stats != null ? stats.NumberOfGameLost : 0);
+            string accStr = user.TotalMoves > 0 ? $"{user.AccuracyPercent:0.#}%" : "—";
+            string speedStr = user.AverageTurnSeconds > 0.01 ? $"{user.AverageTurnSeconds:0.0}s" : "—";
+            profileModalStatsLabel.text = $"{rankBadge} Elo\n<size=19>W/L: {wins}-{losses}  •  Acc: {accStr}  •  Assists: {user.WinAssists}  •  Avg: {speedStr}</size>";
         }
 
         if (profileAdoptSocialBtn != null)
@@ -1650,7 +1697,7 @@ public class RoatanOnlineController : MonoBehaviour
         int onlineCount = latestRoster.Count(p => p.IsOnline);
         if (hubPlayersTabLabel != null)
         {
-            hubPlayersTabLabel.text = $"Players ({onlineCount} Online)";
+            hubPlayersTabLabel.text = $"Players ({onlineCount})";
         }
 
         RefreshPlayersRosterUI();
@@ -1738,8 +1785,10 @@ public class RoatanOnlineController : MonoBehaviour
         onlineIsBotControlled = false;
         onlineBotPacingRemaining = 0f;
         onlineTurnActionDispatched = false;
+        latestMatchEloBreakdown = null;
         if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
         if (onlineEndOverlay != null) onlineEndOverlay.SetActive(false);
+        if (onlineEndEloBreakdownCard != null) onlineEndEloBreakdownCard.SetActive(false);
         RefreshOnlineTakeoverIndicators();
 
         for (int r = 0; r < 60; r++)
@@ -2281,6 +2330,86 @@ public class RoatanOnlineController : MonoBehaviour
             onlineEndOverlay.transform.SetAsLastSibling();
             onlineEndOverlay.SetActive(true);
         }
+
+        if (dto?.EloBreakdown != null)
+        {
+            OnMatchEloBreakdown(dto.EloBreakdown);
+        }
+        else if (latestMatchEloBreakdown != null)
+        {
+            RefreshOnlineEndEloBreakdownUI(latestMatchEloBreakdown);
+        }
+    }
+
+    private void OnMatchEloBreakdown(MatchEloBreakdownDto breakdown)
+    {
+        if (breakdown == null) return;
+        latestMatchEloBreakdown = breakdown;
+
+        if (subscribedClient?.User != null && breakdown.Players != null)
+        {
+            PlayerEloBreakdownDto local = breakdown.Players.FirstOrDefault(p => p.PlayerId == subscribedClient.User.Id);
+            if (local != null && local.IsRankedApplied)
+            {
+                subscribedClient.User.Elo = local.NewElo;
+                RefreshHubProfileHeader();
+            }
+        }
+
+        RefreshOnlineEndEloBreakdownUI(breakdown);
+        if (EnsureConnectedForRequest())
+        {
+            RequestLeaderboard();
+        }
+    }
+
+    private void RefreshOnlineEndEloBreakdownUI(MatchEloBreakdownDto breakdown)
+    {
+        if (onlineEndEloBreakdownCard == null || onlineEndEloBreakdownTitle == null || onlineEndEloBreakdownBody == null)
+        {
+            return;
+        }
+
+        long localUserId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        PlayerEloBreakdownDto local = breakdown?.Players?.FirstOrDefault(p => p.PlayerId == localUserId)
+            ?? breakdown?.Players?.FirstOrDefault();
+
+        if (local == null)
+        {
+            onlineEndEloBreakdownCard.SetActive(false);
+            return;
+        }
+
+        string tierHex = string.IsNullOrWhiteSpace(local.TierColorHex)
+            ? local.NewTier.GetBadgeColorHex()
+            : local.TierColorHex;
+        string tierName = string.IsNullOrWhiteSpace(local.TierName)
+            ? local.NewTier.GetDisplayName()
+            : local.TierName;
+
+        if (!local.IsRankedApplied)
+        {
+            onlineEndEloBreakdownTitle.text = $"<color={tierHex}>[{tierName}]</color>  •  {local.NewElo} Elo (Unranked)";
+            onlineEndEloBreakdownBody.text = "Online matches with 2+ real players update Elo ratings.";
+            onlineEndEloBreakdownCard.SetActive(true);
+            return;
+        }
+
+        string deltaColor = local.Delta > 0 ? "#4BE38D" : (local.Delta < 0 ? "#F26D5B" : "#B8D8E0");
+        string signedDelta = local.Delta >= 0 ? $"+{local.Delta}" : local.Delta.ToString();
+        string promoTag = local.NewTier > local.PreviousTier ? "  <color=#F7C948>▲ RANK UP!</color>" : string.Empty;
+
+        onlineEndEloBreakdownTitle.text = $"<color={tierHex}>[{tierName}]</color>  •  {local.PreviousElo} → <b>{local.NewElo}</b>  (<color={deltaColor}><b>{signedDelta}</b></color>){promoTag}";
+
+        string speedStr = local.AverageTurnSeconds > 0.01 ? $"{local.AverageTurnSeconds:0.0}s" : "—";
+        string bonusPart = local.SpecialWinBonus > 0 ? $"  |  Bonus +{local.SpecialWinBonus}" : string.Empty;
+        string perfSign = local.PerformanceModifier >= 0 ? $"+{local.PerformanceModifier}" : local.PerformanceModifier.ToString();
+        string baseSign = local.BaseEloDelta >= 0 ? $"+{local.BaseEloDelta}" : local.BaseEloDelta.ToString();
+
+        onlineEndEloBreakdownBody.text =
+            $"Result: <b>{local.ResultLabel}</b>  •  Assists: <b>{local.WinAssists}</b>  •  Accuracy: <b>{local.AccuracyPercent:0.#}%</b>  •  Avg Speed: <b>{speedStr}</b>\n" +
+            $"<size=17><color=#9FC5D0>Base {baseSign}{bonusPart}  |  Performance {perfSign}</color></size>";
+        onlineEndEloBreakdownCard.SetActive(true);
     }
 
     private void OnOnlineLeaveGameResponse(ResponseDto dto)
@@ -2859,7 +2988,7 @@ public class RoatanOnlineController : MonoBehaviour
         hubAvatarInitialsLabel = CreateText(hubAvObj.transform, "Init", "?", 24, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(56f, 44f));
         hubAvatarInitialsLabel.raycastTarget = false;
 
-        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 24, FontStyles.Bold, Color.white, new Vector2(-150f, 0f), new Vector2(440f, 54f));
+        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 22, FontStyles.Bold, Color.white, new Vector2(-150f, 0f), new Vector2(440f, 70f));
         hubWelcomeLabel.alignment = TextAlignmentOptions.MidlineLeft;
         CreatePillButton(profileBar.transform, "BtnOpenProfile", "Profile", RoatanVisualAssets.BrightLagoon, new Vector2(168f, 0f), new Vector2(160f, 58f), 22, OpenProfileModal);
         Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(356f, 0f), new Vector2(184f, 58f), 22, SubmitLogout);
@@ -2941,28 +3070,81 @@ public class RoatanOnlineController : MonoBehaviour
         Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 60f), 24, RequestJoinByCode);
         joinCodeBtnLabel = codeBtn.GetComponentInChildren<TMP_Text>();
 
-        // Public Tables + Online/Offline Players Browser Card
+        // Public Tables + Online/Offline Players + Leaderboard Browser Card
         GameObject listCard = CreateCard(hubView.transform, "TablesBrowserCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -412f), new Vector2(940f, 730f));
 
-        Button tablesTabBtn = CreatePillButton(listCard.transform, "TabPublicTables", "Tables", RoatanVisualAssets.BrightLagoon, new Vector2(-285f, 314f), new Vector2(280f, 58f), 23, () => SelectHubBrowserTab(showPlayers: false));
+        Button tablesTabBtn = CreatePillButton(listCard.transform, "TabPublicTables", "Tables", RoatanVisualAssets.BrightLagoon, new Vector2(-346f, 314f), new Vector2(188f, 58f), 21, () => SelectHubBrowserTab(HubBrowserTab.Tables));
         hubTablesTabImg = tablesTabBtn.GetComponent<Image>();
         hubTablesTabLabel = tablesTabBtn.GetComponentInChildren<TMP_Text>();
 
-        Button playersTabBtn = CreatePillButton(listCard.transform, "TabPlayersRoster", "Players (0 Online)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(25f, 314f), new Vector2(310f, 58f), 22, () => SelectHubBrowserTab(showPlayers: true));
+        Button playersTabBtn = CreatePillButton(listCard.transform, "TabPlayersRoster", "Players (0)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(-122f, 314f), new Vector2(236f, 58f), 20, () => SelectHubBrowserTab(HubBrowserTab.Players));
         hubPlayersTabImg = playersTabBtn.GetComponent<Image>();
         hubPlayersTabLabel = playersTabBtn.GetComponentInChildren<TMP_Text>();
 
-        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshTables", "Refresh Tables", new Color(0.10f, 0.34f, 0.42f, 1f), new Vector2(325f, 314f), new Vector2(246f, 58f), 20, () =>
+        Button leaderboardTabBtn = CreatePillButton(listCard.transform, "TabLeaderboard", "Leaderboard", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(122f, 314f), new Vector2(232f, 58f), 20, () => SelectHubBrowserTab(HubBrowserTab.Leaderboard));
+        hubLeaderboardTabImg = leaderboardTabBtn.GetComponent<Image>();
+        hubLeaderboardTabLabel = leaderboardTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshTables", "Refresh", new Color(0.10f, 0.34f, 0.42f, 1f), new Vector2(346f, 314f), new Vector2(188f, 58f), 20, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             RequestLobbiesList();
             RequestPlayerRoster();
+            RequestLeaderboard();
         });
         refreshLobbiesBtnLabel = refreshBtn.GetComponentInChildren<TMP_Text>();
 
         hubTablesScrollObj = CreateVerticalScrollList(listCard.transform, "TablesScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out lobbiesListContent);
         hubPlayersScrollObj = CreateVerticalScrollList(listCard.transform, "PlayersScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out playersRosterContent);
-        SelectHubBrowserTab(showPlayers: false);
+
+        // Leaderboard Tab View: Pinned Local Player Banner + Column Header + Scrollable Top Players
+        hubLeaderboardViewObj = new GameObject("LeaderboardView");
+        hubLeaderboardViewObj.transform.SetParent(listCard.transform, false);
+        RectTransform lbRootRect = hubLeaderboardViewObj.AddComponent<RectTransform>();
+        lbRootRect.anchorMin = Vector2.zero;
+        lbRootRect.anchorMax = Vector2.one;
+        lbRootRect.offsetMin = new Vector2(24f, 20f);
+        lbRootRect.offsetMax = new Vector2(-24f, -104f);
+
+        leaderboardSelfBannerCard = CreateCard(hubLeaderboardViewObj.transform, "LeaderboardSelfBanner", new Color(0.09f, 0.31f, 0.36f, 0.98f), Vector2.zero, new Vector2(892f, 92f));
+        RectTransform selfRect = leaderboardSelfBannerCard.GetComponent<RectTransform>();
+        selfRect.anchorMin = new Vector2(0.5f, 1f);
+        selfRect.anchorMax = new Vector2(0.5f, 1f);
+        selfRect.pivot = new Vector2(0.5f, 1f);
+        selfRect.anchoredPosition = new Vector2(0f, 0f);
+
+        leaderboardSelfRankLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfRank", "#—", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-404f, 0f), new Vector2(72f, 54f));
+        GameObject selfAvObj = new GameObject("SelfAvatar");
+        selfAvObj.transform.SetParent(leaderboardSelfBannerCard.transform, false);
+        RectTransform selfAvRect = selfAvObj.AddComponent<RectTransform>();
+        selfAvRect.anchoredPosition = new Vector2(-334f, 0f);
+        selfAvRect.sizeDelta = new Vector2(58f, 58f);
+        leaderboardSelfAvatarImg = selfAvObj.AddComponent<Image>();
+        leaderboardSelfAvatarImg.raycastTarget = false;
+        leaderboardSelfAvatarInitials = CreateText(selfAvObj.transform, "Init", "?", 21, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(50f, 38f));
+        leaderboardSelfAvatarInitials.raycastTarget = false;
+
+        leaderboardSelfNameTierLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfNameTier", "Your Rank", 20, FontStyles.Bold, Color.white, new Vector2(-115f, 0f), new Vector2(360f, 74f));
+        leaderboardSelfNameTierLabel.alignment = TextAlignmentOptions.MidlineLeft;
+        leaderboardSelfStatsLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfStats", "1000  •  0/0  •  —  •  0 Ast", 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(248f, 0f), new Vector2(360f, 64f));
+        leaderboardSelfStatsLabel.alignment = TextAlignmentOptions.MidlineRight;
+
+        GameObject colHdr = CreateCard(hubLeaderboardViewObj.transform, "LeaderboardColumns", new Color(0.04f, 0.13f, 0.18f, 0.90f), Vector2.zero, new Vector2(892f, 34f));
+        RectTransform chRect = colHdr.GetComponent<RectTransform>();
+        chRect.anchorMin = new Vector2(0.5f, 1f);
+        chRect.anchorMax = new Vector2(0.5f, 1f);
+        chRect.pivot = new Vector2(0.5f, 1f);
+        chRect.anchoredPosition = new Vector2(0f, -100f);
+        CreateText(colHdr.transform, "ColRank", "#", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-404f, 0f), new Vector2(64f, 28f));
+        TMP_Text colPlayer = CreateText(colHdr.transform, "ColPlayer", "PLAYER / TIER", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-150f, 0f), new Vector2(320f, 28f));
+        colPlayer.alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(colHdr.transform, "ColElo", "ELO", 16, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(105f, 0f), new Vector2(96f, 28f));
+        CreateText(colHdr.transform, "ColWL", "W/L", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(210f, 0f), new Vector2(94f, 28f));
+        CreateText(colHdr.transform, "ColAcc", "ACC %", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(310f, 0f), new Vector2(96f, 28f));
+        CreateText(colHdr.transform, "ColAst", "AST", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(400f, 0f), new Vector2(74f, 28f));
+
+        CreateVerticalScrollList(hubLeaderboardViewObj.transform, "LeaderboardScroll", new Vector2(0f, 0f), new Vector2(0f, -142f), out leaderboardListContent);
+        SelectHubBrowserTab(HubBrowserTab.Tables);
     }
 
     private void BuildLobbyView(Transform parent)
@@ -3142,25 +3324,31 @@ public class RoatanOnlineController : MonoBehaviour
         orcRect.anchoredPosition = new Vector2(0f, 430f);
         onlineResumeControlBtn.gameObject.SetActive(false);
 
-        // Online Post-Hand / Post-Break Overlay
+        // Online Post-Hand / Post-Break Overlay (with Post-Match Elo & Rank Breakdown)
         onlineEndOverlay = CreateStretchPanel(onlineGameView.transform, "OnlineEndOverlay", new Color(0f, 0f, 0f, 0.74f));
-        GameObject endCard = CreateCard(onlineEndOverlay.transform, "EndCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 700f));
-        onlineEndTitleLabel = CreateText(endCard.transform, "EndTitle", "MATCH COMPLETE", 42, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 255f), new Vector2(800f, 64f));
-        onlineEndBodyLabel = CreateText(endCard.transform, "EndBody", "", 28, FontStyles.Normal, Color.white, new Vector2(0f, 110f), new Vector2(780f, 160f));
+        GameObject endCard = CreateCard(onlineEndOverlay.transform, "EndCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 840f));
+        onlineEndTitleLabel = CreateText(endCard.transform, "EndTitle", "MATCH COMPLETE", 40, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 338f), new Vector2(800f, 60f));
+        onlineEndBodyLabel = CreateText(endCard.transform, "EndBody", "", 25, FontStyles.Normal, Color.white, new Vector2(0f, 232f), new Vector2(780f, 124f));
 
-        onlineEndPrimaryBtn = CreatePillButton(endCard.transform, "BtnOnlinePrimary", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -60f), new Vector2(520f, 92f), 32, () => { });
+        onlineEndEloBreakdownCard = CreateCard(endCard.transform, "EloBreakdownCard", new Color(0.05f, 0.17f, 0.23f, 0.96f), new Vector2(0f, 84f), new Vector2(800f, 148f));
+        onlineEndEloBreakdownTitle = CreateText(onlineEndEloBreakdownCard.transform, "EloTitle", "", 24, FontStyles.Bold, Color.white, new Vector2(0f, 34f), new Vector2(760f, 44f));
+        onlineEndEloBreakdownBody = CreateText(onlineEndEloBreakdownCard.transform, "EloBody", "", 19, FontStyles.Normal, new Color(0.86f, 0.95f, 0.98f), new Vector2(0f, -24f), new Vector2(760f, 72f));
+        onlineEndEloBreakdownCard.SetActive(false);
+
+        onlineEndPrimaryBtn = CreatePillButton(endCard.transform, "BtnOnlinePrimary", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -92f), new Vector2(520f, 88f), 31, () => { });
         onlineEndPrimaryBtnLabel = onlineEndPrimaryBtn.GetComponentInChildren<TMP_Text>();
 
-        onlineEndNewMatchBtn = CreatePillButton(endCard.transform, "BtnOnlineNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -172f), new Vector2(460f, 82f), 28, () =>
+        onlineEndNewMatchBtn = CreatePillButton(endCard.transform, "BtnOnlineNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -200f), new Vector2(460f, 80f), 27, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             onlineEndOverlay.SetActive(false);
             ShowSubView(hubView);
             RequestLobbiesList();
+            RequestLeaderboard();
         });
         onlineEndNewMatchBtn.gameObject.SetActive(false);
 
-        CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -276f), new Vector2(380f, 76f), 28, () =>
+        CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -306f), new Vector2(380f, 74f), 27, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             RoatanMatchSessionStore.ClearSession();
@@ -3169,6 +3357,7 @@ public class RoatanOnlineController : MonoBehaviour
             subscribedClient?.AddToSendQueue(MessageFrameBuilder.LeaveGameFrame());
             ShowSubView(hubView);
             RequestLobbiesList();
+            RequestLeaderboard();
         });
         onlineEndOverlay.SetActive(false);
 
@@ -3320,8 +3509,8 @@ public class RoatanOnlineController : MonoBehaviour
         GameObject badge = CreateCard(card.transform, "ProviderBadge", new Color(0.09f, 0.27f, 0.34f, 0.95f), new Vector2(0f, 76f), new Vector2(460f, 46f));
         profileModalProviderBadge = CreateText(badge.transform, "BadgeTxt", "Signed in with Email", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(430f, 36f));
 
-        GameObject statsCard = CreateCard(card.transform, "StatsCard", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, -8f), new Vector2(790f, 78f));
-        profileModalStatsLabel = CreateText(statsCard.transform, "StatsTxt", "Elo 1000", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(750f, 60f));
+        GameObject statsCard = CreateCard(card.transform, "StatsCard", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, -8f), new Vector2(790f, 102f));
+        profileModalStatsLabel = CreateText(statsCard.transform, "StatsTxt", "[Sailor] • 1000 Elo", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(756f, 88f));
 
         profileModalStatusLabel = CreateText(card.transform, "StatusTxt", "", 20, FontStyles.Italic, RoatanVisualAssets.IslandGold, new Vector2(0f, -74f), new Vector2(780f, 36f));
 
@@ -3532,17 +3721,152 @@ public class RoatanOnlineController : MonoBehaviour
         }
     }
 
-    private void SelectHubBrowserTab(bool showPlayers)
+    private void SelectHubBrowserTab(HubBrowserTab tab)
     {
-        hubShowingPlayersTab = showPlayers;
-        if (hubTablesScrollObj != null) hubTablesScrollObj.SetActive(!showPlayers);
-        if (hubPlayersScrollObj != null) hubPlayersScrollObj.SetActive(showPlayers);
-        if (hubTablesTabImg != null) hubTablesTabImg.color = !showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
-        if (hubPlayersTabImg != null) hubPlayersTabImg.color = showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
-        if (showPlayers)
+        activeHubTab = tab;
+        if (hubTablesScrollObj != null) hubTablesScrollObj.SetActive(tab == HubBrowserTab.Tables);
+        if (hubPlayersScrollObj != null) hubPlayersScrollObj.SetActive(tab == HubBrowserTab.Players);
+        if (hubLeaderboardViewObj != null) hubLeaderboardViewObj.SetActive(tab == HubBrowserTab.Leaderboard);
+
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (hubTablesTabImg != null) hubTablesTabImg.color = tab == HubBrowserTab.Tables ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (hubPlayersTabImg != null) hubPlayersTabImg.color = tab == HubBrowserTab.Players ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (hubLeaderboardTabImg != null) hubLeaderboardTabImg.color = tab == HubBrowserTab.Leaderboard ? RoatanVisualAssets.IslandGold : inactive;
+        if (hubLeaderboardTabLabel != null)
+        {
+            hubLeaderboardTabLabel.color = tab == HubBrowserTab.Leaderboard ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+
+        if (tab == HubBrowserTab.Players)
         {
             RefreshPlayersRosterUI();
         }
+        else if (tab == HubBrowserTab.Leaderboard)
+        {
+            RefreshLeaderboardUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestLeaderboard();
+            }
+        }
+    }
+
+    private void OnGetLeaderboardResponse(ResponseObjectDto<LeaderboardDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        latestLeaderboard = dto.Object;
+        RefreshLeaderboardUI();
+    }
+
+    private void RefreshLeaderboardUI()
+    {
+        RefreshLeaderboardSelfBanner();
+
+        if (leaderboardListContent == null) return;
+        foreach (GameObject row in spawnedLeaderboardRows) Destroy(row);
+        spawnedLeaderboardRows.Clear();
+
+        List<LeaderboardEntryDto> entries = latestLeaderboard?.Entries;
+        if (entries == null || entries.Count == 0)
+        {
+            GameObject emptyRow = CreateCard(leaderboardListContent, "EmptyLeaderboardRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(870f, 84f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No ranked players on the leaderboard yet — complete an online match!", 21, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(830f, 60f));
+            spawnedLeaderboardRows.Add(emptyRow);
+            return;
+        }
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        foreach (LeaderboardEntryDto entry in entries)
+        {
+            SpawnLeaderboardRow(entry, selfId);
+        }
+    }
+
+    private void RefreshLeaderboardSelfBanner()
+    {
+        if (leaderboardSelfBannerCard == null) return;
+
+        LeaderboardEntryDto selfEntry = latestLeaderboard?.LocalPlayerEntry;
+        UserDto localUser = subscribedClient?.User;
+
+        if (selfEntry != null)
+        {
+            string tierHex = string.IsNullOrWhiteSpace(selfEntry.TierColorHex) ? selfEntry.Tier.GetBadgeColorHex() : selfEntry.TierColorHex;
+            string tierName = string.IsNullOrWhiteSpace(selfEntry.TierName) ? selfEntry.Tier.GetDisplayName() : selfEntry.TierName;
+            string accStr = selfEntry.TotalMoves > 0 ? $"{selfEntry.AccuracyPercent:0.#}%" : "—";
+
+            if (leaderboardSelfRankLabel != null) leaderboardSelfRankLabel.text = $"#{selfEntry.Rank}";
+            if (leaderboardSelfNameTierLabel != null)
+            {
+                leaderboardSelfNameTierLabel.text = $"{selfEntry.Username} (You)\n<size=17><color={tierHex}>[{tierName}]</color>  •  Rank #{selfEntry.Rank} of {Math.Max(1, latestLeaderboard.TotalRankedPlayers)}</size>";
+            }
+            if (leaderboardSelfStatsLabel != null)
+            {
+                leaderboardSelfStatsLabel.text = $"<b>{selfEntry.Elo}</b> Elo  •  {selfEntry.Wins}/{selfEntry.Losses}\n<size=16><color=#CBE6EE>Acc {accStr}  •  {selfEntry.WinAssists} Ast</color></size>";
+            }
+            ApplyCircularAvatar(leaderboardSelfAvatarImg, leaderboardSelfAvatarInitials, $"lb_self_{selfEntry.UserId}", selfEntry.AvatarBase64, selfEntry.Username);
+        }
+        else if (localUser != null)
+        {
+            int elo = ResolveDisplayElo(localUser);
+            RoatanRankTierInfo info = RoatanRankTierHelper.GetInfoForElo(elo);
+            string accStr = localUser.TotalMoves > 0 ? $"{localUser.AccuracyPercent:0.#}%" : "—";
+            if (leaderboardSelfRankLabel != null) leaderboardSelfRankLabel.text = "#—";
+            if (leaderboardSelfNameTierLabel != null)
+            {
+                leaderboardSelfNameTierLabel.text = $"{localUser.Login} (You)\n<size=17><color={info.BadgeColorHex}>[{info.DisplayName}]</color>  •  Your Ranking</size>";
+            }
+            if (leaderboardSelfStatsLabel != null)
+            {
+                leaderboardSelfStatsLabel.text = $"<b>{elo}</b> Elo  •  {localUser.Wins}/{localUser.Losses}\n<size=16><color=#CBE6EE>Acc {accStr}  •  {localUser.WinAssists} Ast</color></size>";
+            }
+            ApplyCircularAvatar(leaderboardSelfAvatarImg, leaderboardSelfAvatarInitials, $"lb_self_{localUser.Id}", localUser.AvatarBase64, localUser.Login);
+        }
+    }
+
+    private void SpawnLeaderboardRow(LeaderboardEntryDto entry, long selfId)
+    {
+        bool isSelf = entry.UserId == selfId;
+        Color bg = isSelf
+            ? new Color(0.11f, 0.34f, 0.32f, 0.98f)
+            : new Color(0.07f, 0.21f, 0.27f, 0.94f);
+
+        GameObject row = CreateCard(leaderboardListContent, $"LB_{entry.Rank}_{entry.UserId}", bg, Vector2.zero, new Vector2(870f, 84f));
+        row.AddComponent<LayoutElement>().preferredHeight = 84f;
+
+        Color rankColor = entry.Rank == 1
+            ? RoatanVisualAssets.IslandGold
+            : (entry.Rank == 2
+                ? new Color(0.84f, 0.88f, 0.92f)
+                : (entry.Rank == 3 ? new Color(0.85f, 0.56f, 0.28f) : Color.white));
+        CreateText(row.transform, "RankNum", $"#{entry.Rank}", 22, FontStyles.Bold, rankColor, new Vector2(-404f, 0f), new Vector2(68f, 44f));
+
+        GameObject avObj = new GameObject("Avatar");
+        avObj.transform.SetParent(row.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(-334f, 0f);
+        avRect.sizeDelta = new Vector2(54f, 54f);
+        Image avImg = avObj.AddComponent<Image>();
+        avImg.raycastTarget = false;
+        TMP_Text avInit = CreateText(avObj.transform, "Init", "?", 19, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(46f, 36f));
+        avInit.raycastTarget = false;
+        ApplyCircularAvatar(avImg, avInit, $"lb_{entry.UserId}", entry.AvatarBase64, entry.Username);
+
+        string tierHex = string.IsNullOrWhiteSpace(entry.TierColorHex) ? entry.Tier.GetBadgeColorHex() : entry.TierColorHex;
+        string tierName = string.IsNullOrWhiteSpace(entry.TierName) ? entry.Tier.GetDisplayName() : entry.TierName;
+        string youTag = isSelf ? " <color=#F7C948>(You)</color>" : string.Empty;
+
+        TMP_Text nameTier = CreateText(row.transform, "NameTier", $"{entry.Username}{youTag}\n<size=16><color={tierHex}>[{tierName}]</color></size>", 19, FontStyles.Bold, Color.white, new Vector2(-132f, 0f), new Vector2(336f, 68f));
+        nameTier.alignment = TextAlignmentOptions.MidlineLeft;
+
+        CreateText(row.transform, "EloVal", entry.Elo.ToString(), 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(105f, 0f), new Vector2(96f, 40f));
+        CreateText(row.transform, "WLVal", $"{entry.Wins}/{entry.Losses}", 19, FontStyles.Normal, Color.white, new Vector2(210f, 0f), new Vector2(94f, 40f));
+        string accStr = entry.TotalMoves > 0 ? $"{entry.AccuracyPercent:0}%" : "—";
+        CreateText(row.transform, "AccVal", accStr, 19, FontStyles.Normal, new Color(0.68f, 0.94f, 0.80f), new Vector2(310f, 0f), new Vector2(96f, 40f));
+        CreateText(row.transform, "AstVal", entry.WinAssists.ToString(), 19, FontStyles.Bold, new Color(0.68f, 0.88f, 0.96f), new Vector2(400f, 0f), new Vector2(74f, 40f));
+
+        spawnedLeaderboardRows.Add(row);
     }
 
     private void RefreshPlayersRosterUI()
@@ -3616,7 +3940,8 @@ public class RoatanOnlineController : MonoBehaviour
         ApplyCircularAvatar(avImg, avInit, $"roster_{player.UserId}", player.AvatarBase64, player.Username);
 
         string youSuffix = player.UserId == selfId ? " (You)" : string.Empty;
-        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  •  Elo {player.Elo}", 22, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-78f, 15f), new Vector2(430f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+        string rosterRankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(player.Elo));
+        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  <size=18>{rosterRankBadge}</size>", 21, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-68f, 16f), new Vector2(460f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
 
         string statusText = player.IsOnline
             ? (string.IsNullOrWhiteSpace(player.TableName) ? player.Status : $"{player.Status} • {player.TableName}")
@@ -3875,9 +4200,10 @@ public class RoatanOnlineController : MonoBehaviour
                 string occupantTitle = seat.IsBot
                     ? $"{seat.Player.Name}"
                     : (seat.Player.Id == localUserId ? $"{seat.Player.Name} (You)" : seat.Player.Name);
+                string seatRankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(seat.Player.Elo));
                 string subLine = seat.IsBot
                     ? $"Bot • {seat.BotDifficulty ?? "Pro"}"
-                    : (seat.IsReady ? $"Elo {seat.Player.Elo} • READY" : $"Elo {seat.Player.Elo}");
+                    : (seat.IsReady ? $"{seatRankBadge} • READY" : seatRankBadge);
 
                 // Circular seat avatar thumbnail
                 GameObject seatAvObj = new GameObject("SeatAvatar");
@@ -4060,7 +4386,7 @@ public class RoatanOnlineController : MonoBehaviour
         if (quickRankedLabel != null) quickRankedLabel.text = RoatanLocalization.T("quick_ranked");
         if (createLobbyBtnLabel != null) createLobbyBtnLabel.text = RoatanLocalization.T("create_lobby");
         if (joinCodeBtnLabel != null) joinCodeBtnLabel.text = RoatanLocalization.T("join_code");
-        if (refreshLobbiesBtnLabel != null) refreshLobbiesBtnLabel.text = RoatanLocalization.T("refresh_lobbies");
+        if (refreshLobbiesBtnLabel != null) refreshLobbiesBtnLabel.text = "Refresh";
         if (leaveLobbyBtnLabel != null) leaveLobbyBtnLabel.text = RoatanLocalization.T("leave_lobby");
         RefreshLobbyReadyButton();
         RefreshConnectionBadge();

@@ -12,10 +12,32 @@ public class GamePlayer(User user) : User(user)
     public bool IsBotControlled { get; set; }
     public bool IsDisconnected { get; set; }
     public bool IsPermanentlyBot { get; set; }
+    public bool IsHumanSeat { get; set; } = user.Id > 0;
     public string? BotDifficulty { get; set; }
     public double DisconnectGraceRemainingSeconds { get; set; }
     public string ReconnectToken { get; set; } = string.Empty;
     public DateTime? DisconnectedAtUtc { get; set; }
+
+    // Per-match telemetry for Elo performance modifiers
+    public int MatchMovesCount { get; set; }
+    public int MatchOptimalMovesCount { get; set; }
+    public int MatchForcedPasses { get; set; }
+    public int MatchTrappedDoubles { get; set; }
+    public int MatchWinAssists { get; set; }
+    public double MatchTotalTurnSeconds { get; set; }
+    public int MatchTimedTurns { get; set; }
+    public double MatchAverageTurnSeconds => MatchTimedTurns > 0 ? Math.Round(MatchTotalTurnSeconds / MatchTimedTurns, 2) : 0.0;
+
+    public void ResetMatchTelemetry()
+    {
+        MatchMovesCount = 0;
+        MatchOptimalMovesCount = 0;
+        MatchForcedPasses = 0;
+        MatchTrappedDoubles = 0;
+        MatchWinAssists = 0;
+        MatchTotalTurnSeconds = 0.0;
+        MatchTimedTurns = 0;
+    }
 
     public void AddDominoToHand(Domino domino)
     {

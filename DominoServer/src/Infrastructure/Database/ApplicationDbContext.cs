@@ -348,6 +348,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.AvatarUrl).HasColumnName("avatar_url");
             entity.Property(e => e.AuthProvider).HasColumnName("auth_provider");
             entity.Property(e => e.Score).HasDefaultValue(10000).HasColumnName("score");
+            entity.Property(e => e.Elo).HasDefaultValue(1000).HasColumnName("elo");
+            entity.Property(e => e.Wins).HasDefaultValue(0).HasColumnName("wins");
+            entity.Property(e => e.Losses).HasDefaultValue(0).HasColumnName("losses");
+            entity.Property(e => e.WinAssists).HasDefaultValue(0).HasColumnName("win_assists");
+            entity.Property(e => e.TotalMoves).HasDefaultValue(0).HasColumnName("total_moves");
+            entity.Property(e => e.OptimalMoves).HasDefaultValue(0).HasColumnName("optimal_moves");
+            entity.Property(e => e.AverageTurnSeconds).HasDefaultValue(0.0).HasColumnName("average_turn_seconds");
+            entity.Property(e => e.OnlineMatchesLast7Days).HasDefaultValue(0).HasColumnName("online_matches_last_7_days");
+            entity.Property(e => e.LastOnlineMatchUtc).HasColumnName("last_online_match_utc");
             entity.Property(e => e.Birthdate).HasColumnName("birthday");
             entity.Property(e => e.NationalityId).HasColumnName("nationality");
             entity.Property(e => e.RankId).HasColumnName("rank");

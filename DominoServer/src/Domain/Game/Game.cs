@@ -1,5 +1,6 @@
 using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 
 namespace Domain.Game;
 
@@ -68,12 +69,18 @@ public class Game
     public int TotalBet { get; set; }
     public int ChatId { get; set; }
     public bool HasDealtOpeningHand { get; set; }
+    public bool IsOnlineMatch { get; set; } = true;
+    public DateTime CurrentTurnStartedUtc { get; private set; } = DateTime.UtcNow;
+    public bool EloAppliedForCurrentMatch { get; set; }
+    public MatchEloBreakdownDto? LastMatchEloBreakdown { get; set; }
 
     private GameGridDto gridDto = new(NumberOfRows, NumberOfCols);
     private DominoPlacer placer;
     private int currentPlayerIndex;
     private bool currentHandScored;
     private bool lastDominoOutWasKey;
+    private long? lastSetupPlayerId;
+    private (int End1, int End2)? lastOpenEndsAfterMove;
     public List<GamePlayer> Classement { get; } = [];
 
     /// <summary>
@@ -196,12 +203,15 @@ public class Game
         foreach (GamePlayer player in Players)
         {
             player.MatchScore = 0;
+            player.ResetMatchTelemetry();
             PlayerScores[player.Id] = 0;
         }
 
         IsMatchOver = false;
         MatchWinner = null;
         MatchWinningTeamId = -1;
+        EloAppliedForCurrentMatch = false;
+        LastMatchEloBreakdown = null;
         CutThroatedPlayerIds.Clear();
         LastHandWasDraw = false;
         LastHandWinnerId = null;
@@ -377,6 +387,9 @@ public class Game
         PartnerCandidateId = null;
         ConsecutivePasses = 0;
         Phase = MatchPhase.PLAYING;
+        CurrentTurnStartedUtc = DateTime.UtcNow;
+        lastSetupPlayerId = poser.Id;
+        lastOpenEndsAfterMove = placer.GetOpenEnds();
     }
 
     public long? ConfirmPoserChoice(long chooserId, PoserChoice choice)
@@ -422,11 +435,49 @@ public class Game
         if (move.PlayerId == PlayerPlaying.Id)
         {
             (int End1, int End2)? openEndsBefore = placer.GetOpenEnds();
+            List<GameMove> legalMovesBefore = placer.GetPlayerPossibleMoves(PlayerPlaying);
+            bool isOptimalMove = EvaluateMoveOptimality(move, legalMovesBefore);
+
             bool placed = placer.PlaceDomino(PlayerPlaying, new GameMove(move.Domino, move.Row, move.Col, move.Orientation, move.PlayerId));
             if (placed)
             {
                 ConsecutivePasses = 0;
                 lastDominoOutWasKey = PlayerPlaying.Hand.Count == 0 && IsNaturalKeyWin(move.Domino, openEndsBefore);
+
+                // Track per-match accuracy & turn speed telemetry
+                PlayerPlaying.MatchMovesCount++;
+                if (isOptimalMove)
+                {
+                    PlayerPlaying.MatchOptimalMovesCount++;
+                }
+
+                double elapsedSeconds = isAutomated
+                    ? TurnActionTimeoutSeconds
+                    : Math.Clamp((DateTime.UtcNow - CurrentTurnStartedUtc).TotalSeconds, 0.2, TurnActionTimeoutSeconds);
+                PlayerPlaying.MatchTotalTurnSeconds += elapsedSeconds;
+                PlayerPlaying.MatchTimedTurns++;
+
+                // Track Six-Lov / 2v2 partner setup plays (Win Assists)
+                if (IsTeam2v2 && lastSetupPlayerId.HasValue && lastSetupPlayerId.Value != PlayerPlaying.Id)
+                {
+                    GamePlayer? partner = GetPartner(PlayerPlaying);
+                    if (partner is not null && partner.Id == lastSetupPlayerId.Value && lastOpenEndsAfterMove.HasValue)
+                    {
+                        bool usedPartnerSetupSuit =
+                            move.Domino.Side1 == lastOpenEndsAfterMove.Value.End1 ||
+                            move.Domino.Side2 == lastOpenEndsAfterMove.Value.End1 ||
+                            move.Domino.Side1 == lastOpenEndsAfterMove.Value.End2 ||
+                            move.Domino.Side2 == lastOpenEndsAfterMove.Value.End2;
+                        if (usedPartnerSetupSuit && (PlayerPlaying.Hand.Count == 0 || lastDominoOutWasKey))
+                        {
+                            partner.MatchWinAssists++;
+                        }
+                    }
+                }
+
+                lastSetupPlayerId = PlayerPlaying.Id;
+                lastOpenEndsAfterMove = placer.GetOpenEnds();
+
                 if (!isAutomated)
                 {
                     PlayerPlaying.RecordManualAction();
@@ -435,6 +486,21 @@ public class Game
             return placed;
         }
         return false;
+    }
+
+    private static bool EvaluateMoveOptimality(GameMove chosenMove, List<GameMove> legalMoves)
+    {
+        if (legalMoves.Count <= 1) return true;
+        if (chosenMove.Domino.IsDouble()) return true;
+
+        int maxPipSum = legalMoves.Max(m => m.Domino.SumOfSides());
+        bool hadPlayableDouble = legalMoves.Any(m => m.Domino.IsDouble());
+        if (hadPlayableDouble && chosenMove.Domino.SumOfSides() < maxPipSum - 2)
+        {
+            return false;
+        }
+
+        return chosenMove.Domino.SumOfSides() >= maxPipSum - 2;
     }
 
     /// <summary>
@@ -527,6 +593,7 @@ public class Game
             PlayerPlaying.ReclaimManualControl();
         }
 
+        PlayerPlaying.MatchForcedPasses++;
         ConsecutivePasses++;
         NextTurn();
         return true;
@@ -891,6 +958,22 @@ public class Game
         }
 
         HandResolution finalResolution = ApplyMatchFormatResolution(raw);
+        foreach (GamePlayer player in Players)
+        {
+            int doublesLeft = player.Hand.Count(d => d.IsDouble());
+            if (doublesLeft > 0)
+            {
+                player.MatchTrappedDoubles += doublesLeft;
+            }
+        }
+        if (IsTeam2v2 && !finalResolution.IsDraw && finalResolution.Winner is not null)
+        {
+            GamePlayer? partner = GetPartner(finalResolution.Winner);
+            if (partner is not null && partner.MatchMovesCount > 0 && partner.MatchWinAssists == 0)
+            {
+                partner.MatchWinAssists++;
+            }
+        }
         currentHandScored = true;
         LastHandResolution = finalResolution;
         EndTime = DateTime.Now;
@@ -1294,6 +1377,7 @@ public class Game
         {
             currentPlayerIndex = (currentPlayerIndex - 1 + Players.Count) % Players.Count;
         }
+        CurrentTurnStartedUtc = DateTime.UtcNow;
     }
 
     public GamePlayer PeekNextPlayer()

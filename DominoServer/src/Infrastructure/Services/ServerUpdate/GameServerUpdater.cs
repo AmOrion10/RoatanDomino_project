@@ -132,10 +132,16 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             Game game = await dispatcher.Dispatch(new GameEndingCommand(gameId));
             Chat chat = await dispatcher.Dispatch(new GetChatQuery(game.ChatId));
 
-            NetworkFrame frame = new([
+            List<MessageFrame> expiredEndFrames =
+            [
                 MessageFrameBuilder.LeaveChatFrame(DtoBuilder.GetChatDto(chat)),
                 MessageFrameBuilder.EndGameFrame(DtoBuilder.GetEndGameDto(true, game))
-            ]);
+            ];
+            if (game.LastMatchEloBreakdown is not null)
+            {
+                expiredEndFrames.Add(MessageFrameBuilder.MatchEloBreakdownFrame(game.LastMatchEloBreakdown));
+            }
+            NetworkFrame frame = new(expiredEndFrames);
             foreach (IClient clientInGame in clientsInGame)
             {
                 await clientInGame.SendAsync(frame);
@@ -330,10 +336,16 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         {
             Game endedGame = await dispatcher.Dispatch(new GameEndingCommand(game.Id));
             Chat chat = await dispatcher.Dispatch(new GetChatQuery(endedGame.ChatId));
-            NetworkFrame endFrame = new([
+            List<MessageFrame> endFrames =
+            [
                 MessageFrameBuilder.EndGameFrame(DtoBuilder.GetEndGameDto(true, endedGame)),
                 MessageFrameBuilder.LeaveChatFrame(DtoBuilder.GetChatDto(chat))
-            ]);
+            ];
+            if (endedGame.LastMatchEloBreakdown is not null)
+            {
+                endFrames.Add(MessageFrameBuilder.MatchEloBreakdownFrame(endedGame.LastMatchEloBreakdown));
+            }
+            NetworkFrame endFrame = new(endFrames);
             foreach (IClient clientInGame in clientsInGame)
             {
                 await clientInGame.SendAsync(endFrame);

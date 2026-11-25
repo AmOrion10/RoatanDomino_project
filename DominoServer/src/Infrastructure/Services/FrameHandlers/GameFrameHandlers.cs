@@ -310,11 +310,17 @@ public class GameFrameHandlers(
     {
         Game game = await dispatcher.Dispatch(new GameEndingCommand(gameId));
         Chat chat = await dispatcher.Dispatch(new GetChatQuery(game.ChatId));
-        NetworkFrame networkFrame = new([
+        List<MessageFrame> endFrames =
+        [
             MessageFrameBuilder.EndGameFrame(DtoBuilder.GetEndGameDto(true, game)),
             MessageFrameBuilder.LeaveChatFrame(DtoBuilder.GetChatDto(chat))
-        ]);
+        ];
+        if (game.LastMatchEloBreakdown is not null)
+        {
+            endFrames.Add(MessageFrameBuilder.MatchEloBreakdownFrame(game.LastMatchEloBreakdown));
+        }
 
+        NetworkFrame networkFrame = new(endFrames);
         foreach (IClient clientInGame in clientsInGame)
         {
             await clientInGame.SendAsync(networkFrame);

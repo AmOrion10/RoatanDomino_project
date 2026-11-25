@@ -5,6 +5,7 @@ using Application.Interfaces.Repositories;
 using Domain;
 using Domain.Game;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
@@ -85,63 +86,51 @@ public class PresenceService(
 
     private PlayerPresenceDto CreatePresenceEntry(User user, IClient? activeClient)
     {
+        int resolvedElo = user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
+        PlayerPresenceDto dto = new()
+        {
+            UserId = user.Id,
+            Username = user.Login,
+            Elo = resolvedElo,
+            Wins = user.Wins,
+            Losses = user.Losses,
+            WinAssists = user.WinAssists,
+            TotalMoves = user.TotalMoves,
+            OptimalMoves = user.OptimalMoves,
+            AverageTurnSeconds = user.AverageTurnSeconds,
+            OnlineMatchesLast7Days = user.OnlineMatchesLast7Days,
+            LastOnlineMatchUtc = user.LastOnlineMatchUtc,
+            AvatarUrl = user.AvatarUrl,
+            AvatarBase64 = user.AvatarBase64
+        };
+
         if (activeClient is null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = false,
-                Status = "Offline",
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.IsOnline = false;
+            dto.Status = "Offline";
+            return dto;
         }
 
+        dto.IsOnline = true;
         Game? game = gameManager.GetForClient(activeClient);
         if (game is not null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = true,
-                Status = "In Match",
-                TableId = game.LobbyId > 0 ? game.LobbyId : game.Id,
-                TableName = game.MatchTitle,
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.Status = "In Match";
+            dto.TableId = game.LobbyId > 0 ? game.LobbyId : game.Id;
+            dto.TableName = game.MatchTitle;
+            return dto;
         }
 
         Lobby? lobby = lobbyManager.GetLobbyForClient(activeClient);
         if (lobby is not null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = true,
-                Status = "At Table",
-                TableId = lobby.Id,
-                TableName = lobby.Name,
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.Status = "At Table";
+            dto.TableId = lobby.Id;
+            dto.TableName = lobby.Name;
+            return dto;
         }
 
-        return new PlayerPresenceDto
-        {
-            UserId = user.Id,
-            Username = user.Login,
-            Elo = user.Score,
-            IsOnline = true,
-            Status = "Available",
-            AvatarUrl = user.AvatarUrl,
-            AvatarBase64 = user.AvatarBase64
-        };
+        dto.Status = "Available";
+        return dto;
     }
 }

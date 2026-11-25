@@ -198,5 +198,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame DeleteAccountFrame()
             => new MessageFrame(FrameCommandType.DeleteAccount, string.Empty);
+
+        public static MessageFrame GetLeaderboardFrame()
+            => new MessageFrame(FrameCommandType.GetLeaderboard, string.Empty);
+
+        public static MessageFrame MatchEloBreakdownFrame(MatchEloBreakdownDto dto)
+            => new MessageFrame(FrameCommandType.MatchEloBreakdown, dto.ToJson());
     }
 }
