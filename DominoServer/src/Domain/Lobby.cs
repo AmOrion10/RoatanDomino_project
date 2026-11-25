@@ -37,6 +37,8 @@ public class Lobby(
     public long? TeamBId { get; set; }
     public string? TeamBName { get; set; }
     public string? TeamBTag { get; set; }
+    public bool RequireFullHumanSquad { get; set; }
+    public DateTime? PlayDeadlineUtc { get; set; }
 
     public bool IsEmpty()
     {

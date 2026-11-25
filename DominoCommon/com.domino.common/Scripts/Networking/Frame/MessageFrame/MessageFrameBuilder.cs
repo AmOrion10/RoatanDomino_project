@@ -277,5 +277,20 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame ChatMessageReceivedFrame(ChatMessageDto dto)
             => new MessageFrame(FrameCommandType.ChatMessageReceived, dto.ToJson());
+
+        public static MessageFrame GetOpenTeamChallengesFrame()
+            => new MessageFrame(FrameCommandType.GetOpenTeamChallenges, string.Empty);
+
+        public static MessageFrame PostOpenTeamChallengeFrame(PostOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.PostOpenTeamChallenge, dto.ToJson());
+
+        public static MessageFrame CancelOpenTeamChallengeFrame(CancelOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.CancelOpenTeamChallenge, dto.ToJson());
+
+        public static MessageFrame RequestAcceptTeamChallengeFrame(RequestAcceptTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RequestAcceptTeamChallenge, dto.ToJson());
+
+        public static MessageFrame AcceptOpenTeamChallengeFrame(AcceptOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.AcceptOpenTeamChallenge, dto.ToJson());
     }
 }

@@ -12,4 +12,10 @@ public interface ITeamChallengeEloUpdater
         bool isDraw,
         bool isKeyWin,
         bool isGameBrukWin);
+
+    Task<TeamEloBreakdownDto?> ApplyTeamChallengeAbandonmentPenaltyAsync(
+        long? challengeId,
+        long teamAId,
+        long teamBId,
+        long abandoningTeamId);
 }

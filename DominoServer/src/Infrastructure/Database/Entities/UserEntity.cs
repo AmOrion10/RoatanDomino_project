@@ -45,6 +45,8 @@ public class UserEntity
 
     public DateTime? LastOnlineMatchUtc { get; set; }
 
+    public int AbandonedMatches { get; set; }
+
     public DateOnly Birthdate { get; set; }
 
     public long? NationalityId { get; set; }
@@ -95,6 +97,7 @@ public class UserEntity
             AverageTurnSeconds = AverageTurnSeconds,
             OnlineMatchesLast7Days = OnlineMatchesLast7Days,
             LastOnlineMatchUtc = LastOnlineMatchUtc,
+            AbandonedMatches = AbandonedMatches,
             DateSignup = DateSignup,
             Birthdate = Birthdate,
             Nationality = NationalityId is null ? null : Nationality?.Name,

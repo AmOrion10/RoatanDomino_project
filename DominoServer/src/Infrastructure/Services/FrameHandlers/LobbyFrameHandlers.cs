@@ -74,6 +74,7 @@ public class LobbyFrameHandlers(
         {
             long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
             lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            await teamService.MarkTeamCheckedInAsync(target.TeamChallengeId, userTeamId);
             lobby = target;
         }
         else
@@ -93,6 +94,7 @@ public class LobbyFrameHandlers(
         {
             long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
             lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            await teamService.MarkTeamCheckedInAsync(target.TeamChallengeId, userTeamId);
             lobby = target;
         }
         else
@@ -238,6 +240,14 @@ public class LobbyFrameHandlers(
         {
             await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
                 ResponseDto.Error(ErrorTypes.Unknown, "Only the table host can add bots."),
+                frame.CommandType)));
+            return;
+        }
+
+        if (lobby.IsTeamChallenge && lobby.RequireFullHumanSquad)
+        {
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
+                ResponseDto.Error(ErrorTypes.Unknown, "Bots are disabled for this competitive Team Challenge."),
                 frame.CommandType)));
             return;
         }

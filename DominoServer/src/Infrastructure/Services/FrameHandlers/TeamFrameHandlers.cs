@@ -27,6 +27,50 @@ public class TeamFrameHandlers(TeamService teamService) : BaseFrameHandlers
         handler.RegisterHandler(FrameCommandType.GetTeamLeaderboard, GetTeamLeaderboardCallback);
         handler.RegisterHandler(FrameCommandType.SendTeamChallenge, SendTeamChallengeCallback);
         handler.RegisterHandler(FrameCommandType.RespondTeamChallenge, RespondTeamChallengeCallback);
+        handler.RegisterHandler(FrameCommandType.GetOpenTeamChallenges, GetOpenTeamChallengesCallback);
+        handler.RegisterHandler(FrameCommandType.PostOpenTeamChallenge, PostOpenTeamChallengeCallback);
+        handler.RegisterHandler(FrameCommandType.CancelOpenTeamChallenge, CancelOpenTeamChallengeCallback);
+        handler.RegisterHandler(FrameCommandType.RequestAcceptTeamChallenge, RequestAcceptTeamChallengeCallback);
+        handler.RegisterHandler(FrameCommandType.AcceptOpenTeamChallenge, AcceptOpenTeamChallengeCallback);
+    }
+
+    private async Task GetOpenTeamChallengesCallback(MessageFrame frame, IClient client)
+    {
+        OpenTeamChallengesDto dto = await teamService.GetOpenTeamChallengesAsync(client.User!.Id);
+        ResponseObjectDto<OpenTeamChallengesDto> response = new()
+        {
+            OkResult = true,
+            Object = dto
+        };
+        await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
+    }
+
+    private async Task PostOpenTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        PostOpenTeamChallengeDto dto = frame.GetObjectFromMessage<PostOpenTeamChallengeDto>();
+        TeamActionResult<TeamChallengeDto> result = await teamService.PostOpenTeamChallengeAsync(client, dto);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
+    }
+
+    private async Task CancelOpenTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        CancelOpenTeamChallengeDto dto = frame.GetObjectFromMessage<CancelOpenTeamChallengeDto>();
+        TeamActionResult<TeamChallengeDto> result = await teamService.CancelOpenTeamChallengeAsync(client.User!.Id, dto.ChallengeId);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
+    }
+
+    private async Task RequestAcceptTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        RequestAcceptTeamChallengeDto dto = frame.GetObjectFromMessage<RequestAcceptTeamChallengeDto>();
+        TeamActionResult<TeamChallengeDto> result = await teamService.RequestAcceptTeamChallengeAsync(client.User!.Id, dto.ChallengeId);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
+    }
+
+    private async Task AcceptOpenTeamChallengeCallback(MessageFrame frame, IClient client)
+    {
+        AcceptOpenTeamChallengeDto dto = frame.GetObjectFromMessage<AcceptOpenTeamChallengeDto>();
+        TeamActionResult<TeamChallengeActionResponseDto> result = await teamService.AcceptOpenTeamChallengeAsync(client, dto.ChallengeId);
+        await SendGenericTeamResultAsync(client, frame.CommandType, result);
     }
 
     private async Task GetTeamLeaderboardCallback(MessageFrame frame, IClient client)

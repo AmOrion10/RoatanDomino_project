@@ -117,5 +117,12 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         DirectChallengeNotification,
         GetChatHistory,
         ChatMessageReceived,
+
+        // Open Team Challenge Board & Ask Leaders Flow
+        GetOpenTeamChallenges,
+        PostOpenTeamChallenge,
+        CancelOpenTeamChallenge,
+        RequestAcceptTeamChallenge,
+        AcceptOpenTeamChallenge,
     }
 }

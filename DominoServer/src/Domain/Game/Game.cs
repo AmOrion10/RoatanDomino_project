@@ -80,6 +80,8 @@ public class Game
     public string? TeamBTag { get; set; }
     public DateTime CurrentTurnStartedUtc { get; private set; } = DateTime.UtcNow;
     public bool EloAppliedForCurrentMatch { get; set; }
+    public bool TeamChallengeAbandonmentApplied { get; set; }
+    public HashSet<long> PenalizedAbandonerIds { get; } = [];
     public MatchEloBreakdownDto? LastMatchEloBreakdown { get; set; }
 
     private readonly HashSet<long> spectatorUserIds = [];

@@ -47,6 +47,9 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.User
         [JsonProperty(PropertyName = "lom", NullValueHandling = NullValueHandling.Ignore)]
         public DateTime? LastOnlineMatchUtc { get; set; }
 
+        [JsonProperty(PropertyName = "am")]
+        public int AbandonedMatches { get; set; }
+
         [JsonProperty(PropertyName = "d")]
         public string DateSignup { get; set; }
 

@@ -535,6 +535,29 @@ public class Program
                         )");
                 }
                 catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN abandoned_matches INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges MODIFY COLUMN target_team_id BIGINT NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN is_open_board TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN min_opponent_team_elo INT NOT NULL DEFAULT 100"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN require_full_human_squad TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN expires_utc DATETIME NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN play_deadline_utc DATETIME NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN team_a_checked_in TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN team_b_checked_in TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamChallengeEndorsements (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            challenge_id BIGINT NOT NULL,
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            username VARCHAR(64) NOT NULL,
+                            created_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamChallengeEndorsements_ChUser (challenge_id, user_id)
+                        )");
+                }
+                catch { }
             }
 
             if (!await db.Dominos.AnyAsync())
@@ -584,11 +607,13 @@ public class Program
 internal sealed class GameLoopHostedService(
     ServerUpdater serverUpdater,
     IChronometer chronometer,
+    IServiceProvider serviceProvider,
     ILogger<GameLoopHostedService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("DominoServer game loop started.");
+        DateTime lastChallengeSweepUtc = DateTime.UtcNow;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -598,6 +623,25 @@ internal sealed class GameLoopHostedService(
                 chronometer.StartFrame();
 
                 await serverUpdater.UpdateAsync(deltaTime);
+
+                if ((DateTime.UtcNow - lastChallengeSweepUtc).TotalSeconds >= 60)
+                {
+                    lastChallengeSweepUtc = DateTime.UtcNow;
+                    try
+                    {
+                        using IServiceScope sweepScope = serviceProvider.CreateScope();
+                        TeamService teamService = sweepScope.ServiceProvider.GetRequiredService<TeamService>();
+                        int resolved = await teamService.ResolveExpiredChallengesAsync(DateTime.UtcNow);
+                        if (resolved > 0)
+                        {
+                            logger.LogInformation("Resolved {count} expired team challenge(s).", resolved);
+                        }
+                    }
+                    catch (Exception sweepEx)
+                    {
+                        logger.LogWarning("Error during expired team challenge sweep: {message}", sweepEx.Message);
+                    }
+                }
 
                 chronometer.EndFrame();
                 await Task.Delay(16, stoppingToken);

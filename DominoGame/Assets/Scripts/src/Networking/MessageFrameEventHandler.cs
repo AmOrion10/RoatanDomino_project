@@ -72,6 +72,11 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<DirectChallengeActionResponseDto>> RespondDirectChallengeResponseEvent;
     public event Action<ResponseObjectDto<ChatMessageDto>> SendSocialChatMessageResponseEvent;
     public event Action<ResponseObjectDto<ChatHistoryDto>> GetChatHistoryResponseEvent;
+    public event Action<ResponseObjectDto<OpenTeamChallengesDto>> GetOpenTeamChallengesResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> PostOpenTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> CancelOpenTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> RequestAcceptTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> AcceptOpenTeamChallengeResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -260,6 +265,21 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.GetChatHistory:
                 GetChatHistoryResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ChatHistoryDto>>());
+                break;
+            case FrameCommandType.GetOpenTeamChallenges:
+                GetOpenTeamChallengesResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<OpenTeamChallengesDto>>());
+                break;
+            case FrameCommandType.PostOpenTeamChallenge:
+                PostOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.CancelOpenTeamChallenge:
+                CancelOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.RequestAcceptTeamChallenge:
+                RequestAcceptTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.AcceptOpenTeamChallenge:
+                AcceptOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
                 break;
         }
 

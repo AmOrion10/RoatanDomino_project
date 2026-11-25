@@ -187,6 +187,7 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
         entity.AverageTurnSeconds = Math.Max(0.0, user.AverageTurnSeconds);
         entity.OnlineMatchesLast7Days = Math.Max(0, user.OnlineMatchesLast7Days);
         entity.LastOnlineMatchUtc = user.LastOnlineMatchUtc;
+        entity.AbandonedMatches = Math.Max(0, user.AbandonedMatches);
 
         await dbContext.SaveChangesAsync();
         return entity.ToDomainEntity();

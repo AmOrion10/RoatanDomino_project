@@ -17,6 +17,7 @@ public class User(string email, string login)
     public double AverageTurnSeconds { get; set; }
     public int OnlineMatchesLast7Days { get; set; }
     public DateTime? LastOnlineMatchUtc { get; set; }
+    public int AbandonedMatches { get; set; }
     public DateTime DateSignup { get; set; }
     public DateOnly Birthdate { get; set; }
     public string? Nationality { get; set; }
@@ -41,6 +42,7 @@ public class User(string email, string login)
         AverageTurnSeconds = user.AverageTurnSeconds;
         OnlineMatchesLast7Days = user.OnlineMatchesLast7Days;
         LastOnlineMatchUtc = user.LastOnlineMatchUtc;
+        AbandonedMatches = user.AbandonedMatches;
         DateSignup = user.DateSignup;
         Birthdate = user.Birthdate;
         Nationality = user.Nationality;

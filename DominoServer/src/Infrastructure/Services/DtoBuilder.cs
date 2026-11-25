@@ -54,7 +54,9 @@ public static class DtoBuilder
             TeamAId = lobby.TeamAId,
             TeamAName = lobby.TeamAName,
             TeamBId = lobby.TeamBId,
-            TeamBName = lobby.TeamBName
+            TeamBName = lobby.TeamBName,
+            RequireFullHumanSquad = lobby.RequireFullHumanSquad,
+            PlayDeadlineUtc = lobby.PlayDeadlineUtc
         };
     }
 
@@ -113,6 +115,7 @@ public static class DtoBuilder
             AverageTurnSeconds = user.AverageTurnSeconds,
             OnlineMatchesLast7Days = user.OnlineMatchesLast7Days,
             LastOnlineMatchUtc = user.LastOnlineMatchUtc,
+            AbandonedMatches = user.AbandonedMatches,
             BirthDate = user.Birthdate.ToString(Constants.ShortFormatDate),
             DateSignup = user.DateSignup.ToString(Constants.LongFormatDate),
             Nationality = user.Nationality,
@@ -160,6 +163,8 @@ public static class DtoBuilder
             TeamBName = l.TeamBName,
             IsInProgress = false,
             SpectatorCount = 0,
+            RequireFullHumanSquad = l.RequireFullHumanSquad,
+            PlayDeadlineUtc = l.PlayDeadlineUtc,
             SeatedPlayers = l.GetSeatedPlayersOrdered()
                 .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
                 .ToList()

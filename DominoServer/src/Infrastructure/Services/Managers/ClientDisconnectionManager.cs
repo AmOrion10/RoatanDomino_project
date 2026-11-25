@@ -16,7 +16,8 @@ public class ClientDisconnectionManager(
     IMessageDispatcher dispatcher,
     PresenceService presenceService,
     IGameManager? gameManager = null,
-    IClientManager? clientManager = null)
+    IClientManager? clientManager = null,
+    MatchAbandonmentService? abandonmentService = null)
 {
     public async Task ProcessDisconnection(DisconnectionResult disconnectionResult)
     {
@@ -27,6 +28,14 @@ public class ClientDisconnectionManager(
 
         if (disconnectionResult.LeaveGameResult is not null)
         {
+            if (disconnectionResult.UserConcerned is not null &&
+                disconnectionResult.LeaveGameResult.Game is not null &&
+                abandonmentService is not null)
+            {
+                await abandonmentService.ApplyAbandonmentPenaltyAsync(
+                    disconnectionResult.LeaveGameResult.Game,
+                    disconnectionResult.UserConcerned.Id);
+            }
             await SendPlayerGameLeftToAllClientsInGame(disconnectionResult);
         }
 

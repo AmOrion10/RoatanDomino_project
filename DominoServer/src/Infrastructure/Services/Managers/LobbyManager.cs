@@ -87,12 +87,15 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
         string teamBName,
         string teamBTag,
         MatchFormat matchFormat,
-        TableStyle tableStyle)
+        TableStyle tableStyle,
+        bool requireFullHumanSquad = false,
+        DateTime? playDeadlineUtc = null,
+        bool seatCreatorOnTeamB = false)
     {
         int maxPlayers = matchFormat == MatchFormat.TWO_BEST ? 2 : 4;
         string code = codeGenerator.GenerateCodeForLobby();
         string tableName = $"[{teamATag}] vs [{teamBTag}]";
-        LobbyPlayer lobbyCreator = new(challenger.User!) { SeatIndex = 0 };
+        LobbyPlayer lobbyCreator = new(challenger.User!) { SeatIndex = seatCreatorOnTeamB ? 1 : 0 };
         Lobby lobby = new(
             lobbyIdCounter++,
             lobbyCreator,
@@ -114,7 +117,9 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
             TeamATag = teamATag,
             TeamBId = teamBId,
             TeamBName = teamBName,
-            TeamBTag = teamBTag
+            TeamBTag = teamBTag,
+            RequireFullHumanSquad = requireFullHumanSquad,
+            PlayDeadlineUtc = playDeadlineUtc
         };
 
         lock (lobbies)
@@ -212,7 +217,10 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
             }
 
             List<LobbyPlayer> remainingHumans = lobby.GetHumanPlayers();
-            if (lobby.IsHouseTable)
+            bool keepOpenForPlayWindow = lobby.IsTeamChallenge &&
+                                         lobby.PlayDeadlineUtc.HasValue &&
+                                         lobby.PlayDeadlineUtc.Value > DateTime.UtcNow;
+            if (lobby.IsHouseTable || keepOpenForPlayWindow)
             {
                 if (remainingHumans.Count == 0)
                 {
@@ -277,6 +285,7 @@ public class LobbyManager(ITimerManager timerManager, ICodeGenerator codeGenerat
             Lobby? lobby = lobbies.FirstOrDefault(l => l.Id == lobbyId);
             if (lobby is null || requester.User is null) return null;
             if (!lobby.IsHost(requester.User.Id)) return null;
+            if (lobby.IsTeamChallenge && lobby.RequireFullHumanSquad) return null;
             if (lobby.IsFull()) return null;
 
             int resolvedSeat = seatIndex >= 0 && seatIndex < lobby.MaxNumberOfPlayer && lobby.GetPlayerAtSeat(seatIndex) is null

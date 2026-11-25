@@ -13,7 +13,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
         Pending = 0,
         Accepted = 1,
         Declined = 2,
-        Completed = 3
+        Completed = 3,
+        Cancelled = 4,
+        ForfeitWinA = 5,
+        ForfeitWinB = 6,
+        ExpiredMutualNoShow = 7
     }
 
     public class TeamChallengeDto
@@ -33,13 +37,13 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
         [JsonProperty(PropertyName = "ce")]
         public int ChallengerTeamElo { get; set; } = RoatanRankTierHelper.DefaultElo;
 
-        [JsonProperty(PropertyName = "ti")]
-        public long TargetTeamId { get; set; }
+        [JsonProperty(PropertyName = "ti", NullValueHandling = NullValueHandling.Ignore)]
+        public long? TargetTeamId { get; set; }
 
-        [JsonProperty(PropertyName = "tn")]
+        [JsonProperty(PropertyName = "tn", NullValueHandling = NullValueHandling.Ignore)]
         public string TargetTeamName { get; set; }
 
-        [JsonProperty(PropertyName = "tt")]
+        [JsonProperty(PropertyName = "tt", NullValueHandling = NullValueHandling.Ignore)]
         public string TargetTeamTag { get; set; }
 
         [JsonProperty(PropertyName = "te")]
@@ -65,6 +69,39 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
 
         [JsonProperty(PropertyName = "m", NullValueHandling = NullValueHandling.Ignore)]
         public string Message { get; set; }
+
+        [JsonProperty(PropertyName = "ob")]
+        public bool IsOpenBoardChallenge { get; set; }
+
+        [JsonProperty(PropertyName = "me")]
+        public int MinOpponentTeamElo { get; set; } = RoatanRankTierHelper.MinElo;
+
+        [JsonProperty(PropertyName = "rfh")]
+        public bool RequireFullHumanSquad { get; set; }
+
+        [JsonProperty(PropertyName = "mc")]
+        public bool MeetsConditions { get; set; } = true;
+
+        [JsonProperty(PropertyName = "dr", NullValueHandling = NullValueHandling.Ignore)]
+        public string DisqualifyReason { get; set; }
+
+        [JsonProperty(PropertyName = "ex", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? ExpiresUtc { get; set; }
+
+        [JsonProperty(PropertyName = "pd", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? PlayDeadlineUtc { get; set; }
+
+        [JsonProperty(PropertyName = "ca")]
+        public bool TeamACheckedIn { get; set; }
+
+        [JsonProperty(PropertyName = "cb")]
+        public bool TeamBCheckedIn { get; set; }
+
+        [JsonProperty(PropertyName = "req")]
+        public List<string> RequestedByTeammateUsernames { get; set; } = new List<string>();
+
+        [JsonProperty(PropertyName = "arm")]
+        public bool AlreadyRequestedByMe { get; set; }
     }
 
     public class SendTeamChallengeDto
@@ -77,6 +114,51 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
 
         [JsonProperty(PropertyName = "v")]
         public TableStyle Variant { get; set; } = TableStyle.DRAW;
+
+        [JsonProperty(PropertyName = "rfh")]
+        public bool RequireFullHumanSquad { get; set; }
+    }
+
+    public class PostOpenTeamChallengeDto
+    {
+        [JsonProperty(PropertyName = "gm")]
+        public MatchFormat GameMode { get; set; } = MatchFormat.SIX_LOV;
+
+        [JsonProperty(PropertyName = "v")]
+        public TableStyle Variant { get; set; } = TableStyle.DRAW;
+
+        [JsonProperty(PropertyName = "me")]
+        public int MinOpponentTeamElo { get; set; } = RoatanRankTierHelper.MinElo;
+
+        [JsonProperty(PropertyName = "rfh")]
+        public bool RequireFullHumanSquad { get; set; }
+    }
+
+    public class CancelOpenTeamChallengeDto
+    {
+        [JsonProperty(PropertyName = "ci")]
+        public long ChallengeId { get; set; }
+    }
+
+    public class RequestAcceptTeamChallengeDto
+    {
+        [JsonProperty(PropertyName = "ci")]
+        public long ChallengeId { get; set; }
+    }
+
+    public class AcceptOpenTeamChallengeDto
+    {
+        [JsonProperty(PropertyName = "ci")]
+        public long ChallengeId { get; set; }
+    }
+
+    public class OpenTeamChallengesDto
+    {
+        [JsonProperty(PropertyName = "oc")]
+        public List<TeamChallengeDto> OpenChallenges { get; set; } = new List<TeamChallengeDto>();
+
+        [JsonProperty(PropertyName = "ac")]
+        public List<TeamChallengeDto> ActiveAcceptedChallenges { get; set; } = new List<TeamChallengeDto>();
     }
 
     public class RespondTeamChallengeDto
@@ -113,6 +195,9 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
 
         [JsonProperty(PropertyName = "e")]
         public int TeamElo { get; set; } = RoatanRankTierHelper.DefaultElo;
+
+        [JsonProperty(PropertyName = "ame")]
+        public int AverageMemberElo { get; set; } = RoatanRankTierHelper.DefaultElo;
 
         [JsonProperty(PropertyName = "rt")]
         public RoatanRankTier TeamRankTier { get; set; } = RoatanRankTier.Sailor;

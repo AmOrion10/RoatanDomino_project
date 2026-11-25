@@ -56,6 +56,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<TeamChallengeEntity> TeamChallenges { get; set; }
 
+    public DbSet<TeamChallengeEndorsementEntity> TeamChallengeEndorsements { get; set; }
+
     public DbSet<SocialChatMessageEntity> SocialChatMessages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -369,6 +371,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.AverageTurnSeconds).HasDefaultValue(0.0).HasColumnName("average_turn_seconds");
             entity.Property(e => e.OnlineMatchesLast7Days).HasDefaultValue(0).HasColumnName("online_matches_last_7_days");
             entity.Property(e => e.LastOnlineMatchUtc).HasColumnName("last_online_match_utc");
+            entity.Property(e => e.AbandonedMatches).HasDefaultValue(0).HasColumnName("abandoned_matches");
             entity.Property(e => e.Birthdate).HasColumnName("birthday");
             entity.Property(e => e.NationalityId).HasColumnName("nationality");
             entity.Property(e => e.RankId).HasColumnName("rank");
@@ -563,6 +566,13 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.TableCode).HasColumnName("table_code");
             entity.Property(e => e.Status).HasColumnName("status");
             entity.Property(e => e.CreatedUtc).HasColumnName("created_utc");
+            entity.Property(e => e.IsOpenBoardChallenge).HasDefaultValue(false).HasColumnName("is_open_board");
+            entity.Property(e => e.MinOpponentTeamElo).HasDefaultValue(100).HasColumnName("min_opponent_team_elo");
+            entity.Property(e => e.RequireFullHumanSquad).HasDefaultValue(false).HasColumnName("require_full_human_squad");
+            entity.Property(e => e.ExpiresUtc).HasColumnName("expires_utc");
+            entity.Property(e => e.PlayDeadlineUtc).HasColumnName("play_deadline_utc");
+            entity.Property(e => e.TeamACheckedIn).HasDefaultValue(false).HasColumnName("team_a_checked_in");
+            entity.Property(e => e.TeamBCheckedIn).HasDefaultValue(false).HasColumnName("team_b_checked_in");
 
             entity.HasOne(e => e.ChallengerTeam)
                 .WithMany()
@@ -572,7 +582,29 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(e => e.TargetTeam)
                 .WithMany()
                 .HasForeignKey(e => e.TargetTeamId)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.ClientSetNull);
+
+            entity.HasMany(e => e.Endorsements)
+                .WithOne(en => en.Challenge)
+                .HasForeignKey(en => en.ChallengeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TeamChallengeEndorsementEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("TeamChallengeEndorsements");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ChallengeId).HasColumnName("challenge_id");
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Username).HasMaxLength(64).HasColumnName("username");
+            entity.Property(e => e.CreatedUtc).HasColumnName("created_utc");
+
+            entity.HasIndex(e => new { e.ChallengeId, e.UserId }).IsUnique();
         });
 
         modelBuilder.Entity<SocialChatMessageEntity>(entity =>

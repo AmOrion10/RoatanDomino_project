@@ -27,7 +27,8 @@ public class GameFrameHandlers(
     ITokenManager tokenManager,
     IChatManager chatManager,
     GameServerUpdater gameServerUpdater,
-    IClientManager? clientManager = null) : BaseFrameHandlers
+    IClientManager? clientManager = null,
+    MatchAbandonmentService? abandonmentService = null) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -202,6 +203,12 @@ public class GameFrameHandlers(
         Game? game = gameManager.FindRejoinableGame(req.MatchId, req.PlayerId, req.ReconnectToken, out _);
         if (game is not null)
         {
+            List<GamePlayer> snapshot = game.Players.ToList();
+            if (abandonmentService is not null)
+            {
+                await abandonmentService.ApplyAbandonmentPenaltyAsync(game, req.PlayerId, snapshot);
+            }
+
             game.AbandonDisconnectedSeat(req.PlayerId, req.ReconnectToken);
             if (game.AreAllHumanSeatsTimedOut())
             {
@@ -304,6 +311,15 @@ public class GameFrameHandlers(
 
     private async Task LeaveGameCallback(MessageFrame frame, IClient client)
     {
+        Game? activeGameBeforeLeave = gameManager.GetForClient(client);
+        List<GamePlayer>? rosterSnapshot = activeGameBeforeLeave?.Players.ToList();
+        long leavingUserId = client.User?.Id ?? 0;
+
+        if (activeGameBeforeLeave is not null && leavingUserId > 0 && abandonmentService is not null)
+        {
+            await abandonmentService.ApplyAbandonmentPenaltyAsync(activeGameBeforeLeave, leavingUserId, rosterSnapshot);
+        }
+
         LeaveGameResult result = await dispatcher.Dispatch(new LeaveGameCommand(client));
 
         NetworkFrame nframe = new([

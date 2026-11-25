@@ -23,6 +23,9 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams
         [JsonProperty(PropertyName = "e")]
         public int TeamElo { get; set; } = RoatanRankTierHelper.DefaultElo;
 
+        [JsonProperty(PropertyName = "ame")]
+        public int AverageMemberElo { get; set; } = RoatanRankTierHelper.DefaultElo;
+
         [JsonProperty(PropertyName = "rt")]
         public RoatanRankTier TeamRankTier { get; set; } = RoatanRankTier.Sailor;
 

@@ -384,11 +384,11 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
         }
     }
 
-    private Task CheckForDisconnectGraceTimers()
+    private async Task CheckForDisconnectGraceTimers()
     {
         if (timeElapsedDisconnectGrace.TotalSeconds < 1)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         int wholeSeconds = (int)timeElapsedDisconnectGrace.TotalSeconds;
@@ -396,6 +396,7 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
 
         using IServiceScope scope = serviceProvider.CreateScope();
         IGameManager gameManager = scope.ServiceProvider.GetRequiredService<IGameManager>();
+        MatchAbandonmentService? abandonmentService = scope.ServiceProvider.GetService<MatchAbandonmentService>();
 
         foreach (Game game in gameManager.GetAllActiveGames())
         {
@@ -403,6 +404,10 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
             foreach (long playerId in convertedIds)
             {
                 logger.LogInformation("Game {gameId}: Player {playerId} exceeded 40s disconnect grace window and was permanently converted to a bot", game.Id, playerId);
+                if (abandonmentService is not null)
+                {
+                    await abandonmentService.ApplyAbandonmentPenaltyAsync(game, playerId);
+                }
             }
 
             if (shouldCloseRoom)
@@ -411,8 +416,6 @@ public class GameServerUpdater(IServiceProvider serviceProvider, ILogger<GameSer
                 gameManager.DeleteGame(game.Id);
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private static async Task SendHandsToPlayers(List<IClient> clientsInGame, Game game)

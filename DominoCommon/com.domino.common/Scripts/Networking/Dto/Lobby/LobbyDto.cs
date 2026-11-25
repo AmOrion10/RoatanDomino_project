@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
@@ -67,5 +68,11 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "sc", NullValueHandling = NullValueHandling.Ignore)]
         public int SpectatorCount { get; set; }
+
+        [JsonProperty(PropertyName = "rfh", NullValueHandling = NullValueHandling.Ignore)]
+        public bool RequireFullHumanSquad { get; set; }
+
+        [JsonProperty(PropertyName = "pdl", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? PlayDeadlineUtc { get; set; }
     }
 }
