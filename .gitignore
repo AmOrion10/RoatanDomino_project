@@ -411,3 +411,4 @@ FodyWeavers.xsd
 *.jks
 .roatan-keystore.env
 KEYSTORE_BACKUP_KEEP_SAFE.txt
+.env

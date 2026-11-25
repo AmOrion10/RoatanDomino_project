@@ -18,25 +18,70 @@ using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class SocialAuthService(
-    IUserRepository userRepository,
-    IClientManager clientManager,
-    ITokenManager tokenManager,
-    IChatManager chatManager,
-    OAuthStateStore oauthStateStore,
-    ILogger<SocialAuthService> logger)
+public sealed record OAuthStartResult(
+    bool Configured,
+    bool IdTokenConfigured,
+    string Provider,
+    string? ClientId,
+    string State,
+    string? AuthorizeUrl,
+    string? Message);
+
+public class SocialAuthService
 {
-    private static readonly Regex UsernamePattern = new(@"^[A-Za-z0-9_]{3,16}$", RegexOptions.Compiled);
+    private static readonly Regex GoogleSizeSuffixRegex = new(@"=s\d+(-c)?$", RegexOptions.Compiled);
     private static readonly HttpClient SharedHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(10)
     };
+
+    private readonly IUserRepository userRepository;
+    private readonly IClientManager clientManager;
+    private readonly ITokenManager tokenManager;
+    private readonly IChatManager chatManager;
+    private readonly OAuthStateStore oauthStateStore;
+    private readonly ILogger<SocialAuthService> logger;
+    private readonly HttpClient httpClient;
+
+    public SocialAuthService(
+        IUserRepository userRepository,
+        IClientManager clientManager,
+        ITokenManager tokenManager,
+        IChatManager chatManager,
+        OAuthStateStore oauthStateStore,
+        ILogger<SocialAuthService> logger)
+        : this(userRepository, clientManager, tokenManager, chatManager, oauthStateStore, logger, SharedHttpClient)
+    {
+    }
+
+    internal SocialAuthService(
+        IUserRepository userRepository,
+        IClientManager clientManager,
+        ITokenManager tokenManager,
+        IChatManager chatManager,
+        OAuthStateStore oauthStateStore,
+        ILogger<SocialAuthService> logger,
+        HttpClient httpClient)
+    {
+        this.userRepository = userRepository;
+        this.clientManager = clientManager;
+        this.tokenManager = tokenManager;
+        this.chatManager = chatManager;
+        this.oauthStateStore = oauthStateStore;
+        this.logger = logger;
+        this.httpClient = httpClient;
+    }
 
     public static string NormalizeProvider(string? provider)
     {
         if (string.Equals(provider, "Facebook", StringComparison.OrdinalIgnoreCase)) return "Facebook";
         if (string.Equals(provider, "Google", StringComparison.OrdinalIgnoreCase)) return "Google";
         return string.Empty;
+    }
+
+    public static bool IsGoogleIdTokenConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(GetGoogleClientId());
     }
 
     public static bool IsProviderConfigured(string provider)
@@ -57,27 +102,86 @@ public class SocialAuthService(
         return false;
     }
 
-    private static string? GetGoogleClientId()
+    public static string? GetGoogleClientId()
     {
-        return Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
+        string? raw = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
             ?? Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID");
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        string first = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(first) ? null : first;
     }
 
-    public (bool Configured, string Provider, string State, string? AuthorizeUrl, string? Message) StartOAuthFlow(
+    public static IReadOnlyList<string> GetAllowedGoogleClientIds()
+    {
+        List<string> ids = [];
+        string?[] sources =
+        [
+            Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID"),
+            Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID"),
+            Environment.GetEnvironmentVariable("GOOGLE_ANDROID_CLIENT_ID")
+        ];
+        foreach (string? src in sources)
+        {
+            if (string.IsNullOrWhiteSpace(src)) continue;
+            foreach (string part in src.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!ids.Contains(part, StringComparer.Ordinal))
+                {
+                    ids.Add(part);
+                }
+            }
+        }
+        return ids;
+    }
+
+    public static string GetMissingConfigurationMessage(string provider)
+    {
+        string normalized = NormalizeProvider(provider);
+        if (normalized == "Google")
+        {
+            if (string.IsNullOrWhiteSpace(GetGoogleClientId()))
+            {
+                return "Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env";
+            }
+            return "Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_SECRET to .env";
+        }
+        if (normalized == "Facebook")
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FACEBOOK_APP_ID")))
+            {
+                return "Facebook Sign-In is not configured on this server yet — add FACEBOOK_APP_ID to .env";
+            }
+            return "Facebook Sign-In is not configured on this server yet — add FACEBOOK_APP_SECRET to .env";
+        }
+        return "Unsupported OAuth provider. Use Google or Facebook.";
+    }
+
+    public OAuthStartResult StartOAuthFlow(
         string provider,
         string publicBaseUrl,
-        string? requestedState = null)
+        string? requestedState = null,
+        string? loginHint = null,
+        bool forceReauthenticate = true)
     {
         string normalized = NormalizeProvider(provider);
         if (string.IsNullOrEmpty(normalized))
         {
-            return (false, provider, string.Empty, null, "Unsupported OAuth provider. Use Google or Facebook.");
+            return new OAuthStartResult(false, false, provider, null, string.Empty, null, "Unsupported OAuth provider. Use Google or Facebook.");
         }
+
+        string? googleClientId = normalized == "Google" ? GetGoogleClientId() : null;
+        bool idTokenReady = normalized == "Google" && !string.IsNullOrWhiteSpace(googleClientId);
 
         if (!IsProviderConfigured(normalized))
         {
-            return (false, normalized, string.Empty, null,
-                $"{normalized} OAuth credentials are not configured on this server. Complete your profile directly in the app.");
+            return new OAuthStartResult(
+                Configured: false,
+                IdTokenConfigured: idTokenReady,
+                Provider: normalized,
+                ClientId: googleClientId,
+                State: string.Empty,
+                AuthorizeUrl: null,
+                Message: GetMissingConfigurationMessage(normalized));
         }
 
         OAuthPendingSession pending = oauthStateStore.CreatePending(normalized, requestedState);
@@ -87,7 +191,7 @@ public class SocialAuthService(
         string authorizeUrl;
         if (normalized == "Google")
         {
-            string clientId = GetGoogleClientId()!;
+            string clientId = googleClientId!;
             authorizeUrl =
                 "https://accounts.google.com/o/oauth2/v2/auth" +
                 $"?client_id={Uri.EscapeDataString(clientId)}" +
@@ -96,6 +200,11 @@ public class SocialAuthService(
                 "&scope=" + Uri.EscapeDataString("openid email profile") +
                 $"&state={Uri.EscapeDataString(pending.State)}" +
                 "&prompt=select_account";
+
+            if (!string.IsNullOrWhiteSpace(loginHint))
+            {
+                authorizeUrl += $"&login_hint={Uri.EscapeDataString(loginHint.Trim())}";
+            }
         }
         else
         {
@@ -106,10 +215,23 @@ public class SocialAuthService(
                 $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
                 "&scope=" + Uri.EscapeDataString("email,public_profile") +
                 $"&state={Uri.EscapeDataString(pending.State)}" +
-                "&response_type=code";
+                "&response_type=code" +
+                "&display=popup";
+
+            if (forceReauthenticate)
+            {
+                authorizeUrl += "&auth_type=reauthenticate";
+            }
         }
 
-        return (true, normalized, pending.State, authorizeUrl, null);
+        return new OAuthStartResult(
+            Configured: true,
+            IdTokenConfigured: idTokenReady,
+            Provider: normalized,
+            ClientId: normalized == "Google" ? googleClientId : Environment.GetEnvironmentVariable("FACEBOOK_APP_ID"),
+            State: pending.State,
+            AuthorizeUrl: authorizeUrl,
+            Message: null);
     }
 
     public async Task<(bool Ok, string OneTimeCode, string Provider, string? ErrorMessage)> CompleteOAuthCallbackAsync(
@@ -143,11 +265,11 @@ public class SocialAuthService(
             string cleanBase = publicBaseUrl.TrimEnd('/');
             string redirectUri = $"{cleanBase}/auth/oauth/{normalized.ToLowerInvariant()}/callback";
 
-            (string sub, string? email, string? name, string? pictureUrl) = normalized == "Google"
+            (string sub, string? email, string? name, string? pictureUrl, string? fallbackAccessToken) = normalized == "Google"
                 ? await ExchangeGoogleCodeAsync(code, redirectUri, ct)
                 : await ExchangeFacebookCodeAsync(code, redirectUri, ct);
 
-            string? avatarBase64 = await TryDownloadAvatarThumbnailBase64Async(pictureUrl, ct);
+            string? avatarBase64 = await TryDownloadAndCompressAvatarBase64Async(pictureUrl, normalized, sub, fallbackAccessToken, ct);
 
             if (!oauthStateStore.TryComplete(state, sub, email, name, pictureUrl, avatarBase64, out string oneTimeCode))
             {
@@ -165,6 +287,31 @@ public class SocialAuthService(
         }
     }
 
+    public async Task<(User User, string OneTimeCode)> VerifyGoogleIdTokenAndCreateSessionAsync(
+        string? idToken,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<string> allowedClientIds = GetAllowedGoogleClientIds();
+        if (allowedClientIds.Count == 0)
+        {
+            throw new WrongPasswordException("Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env");
+        }
+
+        if (string.IsNullOrWhiteSpace(idToken))
+        {
+            throw new WrongPasswordException("Missing Google ID token.");
+        }
+
+        (string sub, string? email, string? name, string? pictureUrl) = await VerifyGoogleTokenAsync(idToken.Trim(), allowedClientIds, cancellationToken);
+        string? avatarBase64 = await TryDownloadAndCompressAvatarBase64Async(pictureUrl, "Google", sub, null, cancellationToken);
+
+        User user = await userRepository.FindOrCreateSocialUser("Google", sub, email, name, pictureUrl, avatarBase64);
+
+        OAuthPendingSession pending = oauthStateStore.CreatePending("Google");
+        oauthStateStore.TryComplete(pending.State, sub, user.Email, user.Login, pictureUrl, avatarBase64 ?? user.AvatarBase64, out string oneTimeCode);
+        return (user, oneTimeCode);
+    }
+
     public OAuthPendingSession? PollOAuthSession(string state)
     {
         return oauthStateStore.GetByState(state);
@@ -178,13 +325,7 @@ public class SocialAuthService(
             throw new WrongPasswordException("Unsupported social sign-in provider. Please use Google or Facebook.");
         }
 
-        string? providerUserId = dto.ProviderUserId;
-        string? email = dto.Email;
-        string? displayName = dto.DisplayName;
-        string? avatarUrl = dto.AvatarUrl;
-        string? avatarBase64 = dto.AvatarBase64;
-
-        // 1. Real OAuth browser/deep-link one-time code exchange
+        // 1. Real OAuth browser/deep-link or native ID-token one-time code exchange
         if (!string.IsNullOrWhiteSpace(dto.OneTimeCode))
         {
             OAuthPendingSession? verified = oauthStateStore.RedeemOneTimeCode(dto.OneTimeCode);
@@ -193,61 +334,49 @@ public class SocialAuthService(
                 throw new WrongPasswordException("Your sign-in link has expired. Please sign in again.");
             }
 
-            provider = verified.Provider;
-            providerUserId = verified.ProviderUserId;
-            email = verified.Email;
-            displayName = verified.DisplayName;
-            avatarUrl = verified.AvatarUrl;
-            avatarBase64 = verified.AvatarBase64;
-            return await userRepository.FindOrCreateSocialUser(provider, providerUserId ?? string.Empty, email, displayName, avatarUrl, avatarBase64);
+            return await userRepository.FindOrCreateSocialUser(
+                verified.Provider,
+                verified.ProviderUserId ?? string.Empty,
+                verified.Email,
+                verified.DisplayName,
+                verified.AvatarUrl,
+                verified.AvatarBase64);
         }
 
-        // 2. Direct ID/Access Token verification when OAuth client ID is configured
-        string? googleClientId = GetGoogleClientId();
+        // 2. Direct ID/Access Token verification
+        if (provider == "Google")
+        {
+            IReadOnlyList<string> allowedClientIds = GetAllowedGoogleClientIds();
+            if (allowedClientIds.Count == 0)
+            {
+                throw new WrongPasswordException("Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env");
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.IdToken))
+            {
+                throw new WrongPasswordException("Please sign in by selecting your Google account.");
+            }
+
+            (string sub, string? email, string? name, string? pictureUrl) = await VerifyGoogleTokenAsync(dto.IdToken.Trim(), allowedClientIds, cancellationToken);
+            string? avatarBase64 = dto.AvatarBase64 ?? await TryDownloadAndCompressAvatarBase64Async(pictureUrl, "Google", sub, null, cancellationToken);
+            return await userRepository.FindOrCreateSocialUser("Google", sub, email, name, pictureUrl, avatarBase64);
+        }
+
+        // Facebook
         string? facebookAppId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID");
-
-        if (provider == "Google" && !string.IsNullOrWhiteSpace(googleClientId))
+        if (string.IsNullOrWhiteSpace(facebookAppId))
         {
-            if (string.IsNullOrWhiteSpace(dto.IdToken))
-            {
-                throw new WrongPasswordException("Please complete Google sign-in in your browser.");
-            }
-
-            (providerUserId, email, displayName, avatarUrl) = await VerifyGoogleTokenAsync(dto.IdToken, googleClientId, cancellationToken);
-            avatarBase64 ??= await TryDownloadAvatarThumbnailBase64Async(avatarUrl, cancellationToken);
-            return await userRepository.FindOrCreateSocialUser(provider, providerUserId, email, displayName, avatarUrl, avatarBase64);
+            throw new WrongPasswordException("Facebook Sign-In is not configured on this server yet — add FACEBOOK_APP_ID to .env");
         }
 
-        if (provider == "Facebook" && !string.IsNullOrWhiteSpace(facebookAppId))
+        if (string.IsNullOrWhiteSpace(dto.IdToken))
         {
-            if (string.IsNullOrWhiteSpace(dto.IdToken))
-            {
-                throw new WrongPasswordException("Please complete Facebook sign-in in your browser.");
-            }
-
-            (providerUserId, email, displayName, avatarUrl) = await VerifyFacebookTokenAsync(dto.IdToken, facebookAppId, cancellationToken);
-            avatarBase64 ??= await TryDownloadAvatarThumbnailBase64Async(avatarUrl, cancellationToken);
-            return await userRepository.FindOrCreateSocialUser(provider, providerUserId, email, displayName, avatarUrl, avatarBase64);
+            throw new WrongPasswordException("Please complete Facebook sign-in in your browser.");
         }
 
-        // 3. Local/tunnel profile-completion mode (when OAuth client IDs are not configured on the server):
-        // Never silently create generic "GooglePlayer" / "FacebookPlayer" accounts — require a real email & chosen username!
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            throw new InvalidEmailFormatException("Please enter your email address to complete sign-in.");
-        }
-
-        User? existingByEmail = await userRepository.GetByEmail(email.Trim());
-        if (existingByEmail is null)
-        {
-            if (string.IsNullOrWhiteSpace(displayName) || !UsernamePattern.IsMatch(displayName.Trim()))
-            {
-                throw new LoginTooLongException("Username must be 3–16 letters or numbers.");
-            }
-        }
-
-        logger.LogInformation("Social auth ({provider}) completing user-supplied profile for {email} (OAuth env vars not configured).", provider, email);
-        return await userRepository.FindOrCreateSocialUser(provider, string.Empty, email, displayName, avatarUrl, avatarBase64);
+        (string fbId, string? fbEmail, string? fbName, string? fbPictureUrl) = await VerifyFacebookTokenAsync(dto.IdToken.Trim(), facebookAppId, cancellationToken);
+        string? fbAvatarBase64 = dto.AvatarBase64 ?? await TryDownloadAndCompressAvatarBase64Async(fbPictureUrl, "Facebook", fbId, dto.IdToken.Trim(), cancellationToken);
+        return await userRepository.FindOrCreateSocialUser("Facebook", fbId, fbEmail, fbName, fbPictureUrl, fbAvatarBase64);
     }
 
     public async Task<Tuple<User, Guid>> SignInClientAsync(SocialAuthDto dto, IClient client, CancellationToken cancellationToken = default)
@@ -274,7 +403,10 @@ public class SocialAuthService(
         return new Tuple<User, Guid>(user, token);
     }
 
-    private static async Task<(string Sub, string? Email, string? Name, string? PictureUrl)> ExchangeGoogleCodeAsync(string code, string redirectUri, CancellationToken ct)
+    private async Task<(string Sub, string? Email, string? Name, string? PictureUrl, string? AccessToken)> ExchangeGoogleCodeAsync(
+        string code,
+        string redirectUri,
+        CancellationToken ct)
     {
         string clientId = GetGoogleClientId() ?? string.Empty;
         string clientSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET") ?? string.Empty;
@@ -288,7 +420,7 @@ public class SocialAuthService(
             ["grant_type"] = "authorization_code"
         });
 
-        using HttpResponseMessage tokenResp = await SharedHttpClient.PostAsync("https://oauth2.googleapis.com/token", form, ct);
+        using HttpResponseMessage tokenResp = await httpClient.PostAsync("https://oauth2.googleapis.com/token", form, ct);
         if (!tokenResp.IsSuccessStatusCode)
         {
             throw new WrongPasswordException("Google authorization code exchange failed.");
@@ -297,37 +429,44 @@ public class SocialAuthService(
         using JsonDocument tokenDoc = await tokenResp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct)
             ?? throw new WrongPasswordException("Empty Google token response.");
         string accessToken = tokenDoc.RootElement.TryGetProperty("access_token", out JsonElement atEl) ? atEl.GetString() ?? string.Empty : string.Empty;
-        if (string.IsNullOrWhiteSpace(accessToken))
+        string? idToken = tokenDoc.RootElement.TryGetProperty("id_token", out JsonElement idEl) ? idEl.GetString() : null;
+
+        if (!string.IsNullOrWhiteSpace(accessToken))
         {
-            throw new WrongPasswordException("Google did not return an access token.");
+            using HttpRequestMessage userReq = new(HttpMethod.Get, "https://www.googleapis.com/oauth2/v3/userinfo");
+            userReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using HttpResponseMessage userResp = await httpClient.SendAsync(userReq, ct);
+            if (userResp.IsSuccessStatusCode)
+            {
+                using JsonDocument userDoc = await userResp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct)
+                    ?? throw new WrongPasswordException("Empty Google user profile response.");
+                JsonElement root = userDoc.RootElement;
+
+                string sub = root.TryGetProperty("sub", out JsonElement subEl) ? subEl.GetString() ?? string.Empty : string.Empty;
+                string? email = root.TryGetProperty("email", out JsonElement emailEl) ? emailEl.GetString() : null;
+                string? name = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
+                string? picture = root.TryGetProperty("picture", out JsonElement picEl) ? picEl.GetString() : null;
+
+                if (!string.IsNullOrWhiteSpace(sub) && !string.IsNullOrWhiteSpace(email))
+                {
+                    return (sub, email, name, picture, accessToken);
+                }
+            }
         }
 
-        using HttpRequestMessage userReq = new(HttpMethod.Get, "https://www.googleapis.com/oauth2/v3/userinfo");
-        userReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using HttpResponseMessage userResp = await SharedHttpClient.SendAsync(userReq, ct);
-        if (!userResp.IsSuccessStatusCode)
+        if (!string.IsNullOrWhiteSpace(idToken))
         {
-            throw new WrongPasswordException("Failed to fetch Google user profile.");
+            (string sub, string? email, string? name, string? picture) = await VerifyGoogleTokenAsync(idToken, GetAllowedGoogleClientIds(), ct);
+            return (sub, email, name, picture, accessToken);
         }
 
-        using JsonDocument userDoc = await userResp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct)
-            ?? throw new WrongPasswordException("Empty Google user profile response.");
-        JsonElement root = userDoc.RootElement;
-
-        string sub = root.TryGetProperty("sub", out JsonElement subEl) ? subEl.GetString() ?? string.Empty : string.Empty;
-        string? email = root.TryGetProperty("email", out JsonElement emailEl) ? emailEl.GetString() : null;
-        string? name = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
-        string? picture = root.TryGetProperty("picture", out JsonElement picEl) ? picEl.GetString() : null;
-
-        if (string.IsNullOrWhiteSpace(sub) || string.IsNullOrWhiteSpace(email))
-        {
-            throw new WrongPasswordException("Google profile did not include an email address.");
-        }
-
-        return (sub, email, name, picture);
+        throw new WrongPasswordException("Google profile did not include an email address.");
     }
 
-    private static async Task<(string Id, string? Email, string? Name, string? PictureUrl)> ExchangeFacebookCodeAsync(string code, string redirectUri, CancellationToken ct)
+    private async Task<(string Id, string? Email, string? Name, string? PictureUrl, string? AccessToken)> ExchangeFacebookCodeAsync(
+        string code,
+        string redirectUri,
+        CancellationToken ct)
     {
         string appId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID") ?? string.Empty;
         string appSecret = Environment.GetEnvironmentVariable("FACEBOOK_APP_SECRET") ?? string.Empty;
@@ -339,7 +478,7 @@ public class SocialAuthService(
             $"&client_secret={Uri.EscapeDataString(appSecret)}" +
             $"&code={Uri.EscapeDataString(code)}";
 
-        using HttpResponseMessage tokenResp = await SharedHttpClient.GetAsync(tokenUrl, ct);
+        using HttpResponseMessage tokenResp = await httpClient.GetAsync(tokenUrl, ct);
         if (!tokenResp.IsSuccessStatusCode)
         {
             throw new WrongPasswordException("Facebook authorization code exchange failed.");
@@ -353,15 +492,19 @@ public class SocialAuthService(
             throw new WrongPasswordException("Facebook did not return an access token.");
         }
 
-        return await VerifyFacebookTokenAsync(accessToken, appId, ct);
+        (string id, string? email, string? name, string? picture) = await VerifyFacebookTokenAsync(accessToken, appId, ct);
+        return (id, email, name, picture, accessToken);
     }
 
-    private static async Task<(string Sub, string? Email, string? Name, string? PictureUrl)> VerifyGoogleTokenAsync(string idToken, string expectedClientId, CancellationToken ct)
+    private async Task<(string Sub, string? Email, string? Name, string? PictureUrl)> VerifyGoogleTokenAsync(
+        string idToken,
+        IReadOnlyList<string> allowedClientIds,
+        CancellationToken ct)
     {
         try
         {
             string url = $"https://oauth2.googleapis.com/tokeninfo?id_token={Uri.EscapeDataString(idToken)}";
-            using HttpResponseMessage resp = await SharedHttpClient.GetAsync(url, ct);
+            using HttpResponseMessage resp = await httpClient.GetAsync(url, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 throw new WrongPasswordException("Google sign-in token could not be verified.");
@@ -372,9 +515,18 @@ public class SocialAuthService(
 
             JsonElement root = doc.RootElement;
             string aud = root.TryGetProperty("aud", out JsonElement audEl) ? audEl.GetString() ?? string.Empty : string.Empty;
-            if (!string.Equals(aud, expectedClientId, StringComparison.Ordinal))
+            if (!allowedClientIds.Any(id => string.Equals(aud, id, StringComparison.Ordinal)))
             {
                 throw new WrongPasswordException("Google sign-in token audience mismatch.");
+            }
+
+            if (root.TryGetProperty("exp", out JsonElement expEl))
+            {
+                string? expStr = expEl.ValueKind == JsonValueKind.Number ? expEl.GetInt64().ToString() : expEl.GetString();
+                if (long.TryParse(expStr, out long expUnix) && DateTimeOffset.FromUnixTimeSeconds(expUnix) < DateTimeOffset.UtcNow.AddMinutes(-1))
+                {
+                    throw new WrongPasswordException("Google sign-in token has expired. Please try again.");
+                }
             }
 
             string sub = root.TryGetProperty("sub", out JsonElement subEl) ? subEl.GetString() ?? string.Empty : string.Empty;
@@ -384,6 +536,10 @@ public class SocialAuthService(
             if (string.IsNullOrWhiteSpace(sub))
             {
                 throw new WrongPasswordException("Google sign-in token is missing subject identifier.");
+            }
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                throw new WrongPasswordException("Google account did not include an email address.");
             }
 
             return (sub, email, name, picture);
@@ -398,15 +554,18 @@ public class SocialAuthService(
         }
     }
 
-    private static async Task<(string Id, string? Email, string? Name, string? PictureUrl)> VerifyFacebookTokenAsync(string accessToken, string expectedAppId, CancellationToken ct)
+    private async Task<(string Id, string? Email, string? Name, string? PictureUrl)> VerifyFacebookTokenAsync(
+        string accessToken,
+        string expectedAppId,
+        CancellationToken ct)
     {
         try
         {
             string? appSecret = Environment.GetEnvironmentVariable("FACEBOOK_APP_SECRET");
             if (!string.IsNullOrWhiteSpace(appSecret))
             {
-                string debugUrl = $"https://graph.facebook.com/debug_token?input_token={Uri.EscapeDataString(accessToken)}&access_token={Uri.EscapeDataString($"{expectedAppId}|{appSecret}")}";
-                using HttpResponseMessage debugResp = await SharedHttpClient.GetAsync(debugUrl, ct);
+                string debugUrl = $"https://graph.facebook.com/v19.0/debug_token?input_token={Uri.EscapeDataString(accessToken)}&access_token={Uri.EscapeDataString($"{expectedAppId}|{appSecret}")}";
+                using HttpResponseMessage debugResp = await httpClient.GetAsync(debugUrl, ct);
                 if (!debugResp.IsSuccessStatusCode)
                 {
                     throw new WrongPasswordException("Facebook sign-in token could not be verified.");
@@ -421,8 +580,8 @@ public class SocialAuthService(
                 }
             }
 
-            string meUrl = $"https://graph.facebook.com/me?fields=id,name,email,picture.type(normal)&access_token={Uri.EscapeDataString(accessToken)}";
-            using HttpResponseMessage meResp = await SharedHttpClient.GetAsync(meUrl, ct);
+            string meUrl = $"https://graph.facebook.com/v19.0/me?fields=id,name,email,picture.type(large)&access_token={Uri.EscapeDataString(accessToken)}";
+            using HttpResponseMessage meResp = await httpClient.GetAsync(meUrl, ct);
             if (!meResp.IsSuccessStatusCode)
             {
                 throw new WrongPasswordException("Facebook profile could not be loaded.");
@@ -447,6 +606,11 @@ public class SocialAuthService(
                 throw new WrongPasswordException("Facebook profile is missing user ID.");
             }
 
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                email = $"fb_{id}@facebook.roatandomino.local";
+            }
+
             return (id, email, name, picture);
         }
         catch (WrongPasswordException)
@@ -459,20 +623,144 @@ public class SocialAuthService(
         }
     }
 
-    private static async Task<string?> TryDownloadAvatarThumbnailBase64Async(string? pictureUrl, CancellationToken ct)
+    private async Task<string?> TryDownloadAndCompressAvatarBase64Async(
+        string? pictureUrl,
+        string provider,
+        string providerUserId,
+        string? accessToken,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(pictureUrl)) return null;
-        try
+        List<string> candidateUrls = [];
+
+        if (!string.IsNullOrWhiteSpace(pictureUrl))
         {
-            using HttpResponseMessage resp = await SharedHttpClient.GetAsync(pictureUrl, ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
-            if (bytes.Length == 0 || bytes.Length > UserRepository.MaxAvatarBytes) return null;
-            return Convert.ToBase64String(bytes);
+            if (provider == "Google")
+            {
+                candidateUrls.Add(NormalizeGoogleAvatarUrl(pictureUrl, 128));
+                candidateUrls.Add(NormalizeGoogleAvatarUrl(pictureUrl, 96));
+                if (!candidateUrls.Contains(pictureUrl, StringComparer.Ordinal))
+                {
+                    candidateUrls.Add(pictureUrl);
+                }
+            }
+            else
+            {
+                candidateUrls.Add(pictureUrl);
+                if (!string.IsNullOrWhiteSpace(providerUserId) && !string.IsNullOrWhiteSpace(accessToken))
+                {
+                    candidateUrls.Add($"https://graph.facebook.com/v19.0/{Uri.EscapeDataString(providerUserId)}/picture?width=128&height=128&redirect=true&access_token={Uri.EscapeDataString(accessToken)}");
+                }
+            }
         }
-        catch
+
+        foreach (string url in candidateUrls.Distinct(StringComparer.Ordinal))
         {
-            return null;
+            try
+            {
+                using HttpResponseMessage resp = await httpClient.GetAsync(url, ct);
+                if (!resp.IsSuccessStatusCode) continue;
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                if (bytes.Length == 0) continue;
+
+                if (bytes.Length > UserRepository.MaxAvatarBytes)
+                {
+                    bytes = StripJpegMetadata(bytes);
+                }
+
+                if (bytes.Length > 0 && bytes.Length <= UserRepository.MaxAvatarBytes)
+                {
+                    return Convert.ToBase64String(bytes);
+                }
+            }
+            catch
+            {
+                // Try next smaller avatar candidate
+            }
         }
+
+        return null;
+    }
+
+    internal static string NormalizeGoogleAvatarUrl(string pictureUrl, int sizePx)
+    {
+        if (string.IsNullOrWhiteSpace(pictureUrl)) return string.Empty;
+        if (!pictureUrl.Contains("googleusercontent.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return pictureUrl;
+        }
+
+        if (GoogleSizeSuffixRegex.IsMatch(pictureUrl))
+        {
+            return GoogleSizeSuffixRegex.Replace(pictureUrl, $"=s{sizePx}-c");
+        }
+
+        return $"{pictureUrl}=s{sizePx}-c";
+    }
+
+    internal static byte[] StripJpegMetadata(byte[] raw)
+    {
+        // Only operate on valid JPEG SOI (0xFF 0xD8)
+        if (raw.Length < 4 || raw[0] != 0xFF || raw[1] != 0xD8)
+        {
+            return raw;
+        }
+
+        using MemoryStream output = new(raw.Length);
+        output.WriteByte(0xFF);
+        output.WriteByte(0xD8);
+
+        int idx = 2;
+        while (idx + 1 < raw.Length)
+        {
+            if (raw[idx] != 0xFF)
+            {
+                return raw;
+            }
+
+            while (idx < raw.Length && raw[idx] == 0xFF)
+            {
+                idx++;
+            }
+
+            if (idx >= raw.Length) break;
+            byte marker = raw[idx++];
+
+            // Start of Scan (SOS) or End of Image (EOI): copy remaining image entropy stream untouched
+            if (marker == 0xDA || marker == 0xD9)
+            {
+                output.WriteByte(0xFF);
+                output.WriteByte(marker);
+                output.Write(raw, idx, raw.Length - idx);
+                return output.ToArray();
+            }
+
+            // Standalone markers without length
+            if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7))
+            {
+                output.WriteByte(0xFF);
+                output.WriteByte(marker);
+                continue;
+            }
+
+            if (idx + 1 >= raw.Length) break;
+            int segLen = (raw[idx] << 8) | raw[idx + 1];
+            if (segLen < 2 || idx + segLen > raw.Length)
+            {
+                return raw;
+            }
+
+            // Strip APP1..APP15 (EXIF/XMP/ICC profiles) and COM (0xFE) comments; keep APP0 (JFIF) and all DQT/DHT/SOF markers
+            bool isRemovableMetadata = (marker >= 0xE1 && marker <= 0xEF) || marker == 0xFE;
+            if (!isRemovableMetadata)
+            {
+                output.WriteByte(0xFF);
+                output.WriteByte(marker);
+                output.Write(raw, idx, segLen);
+            }
+
+            idx += segLen;
+        }
+
+        return output.ToArray();
     }
 }

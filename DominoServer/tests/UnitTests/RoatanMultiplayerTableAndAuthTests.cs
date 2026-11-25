@@ -218,64 +218,66 @@ public class RoatanMultiplayerTableAndAuthTests
         LobbyManager lobbyManager = CreateLobbyManager();
         GameManager gameManager = new(chatManager);
 
-        // Ensure no OAuth env vars interfere with local/tunnel test mode
-        string? prevGoogle = Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID");
-        string? prevFb = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID");
-        Environment.SetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID", null);
-        Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", null);
+        OAuthStateStore oauthStore = new();
+        SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
 
-        try
+        // Create one offline registered user
+        await userRepo.Create(new User("offline@roatan.com", "OfflineUser"), "ValidPass!1", new DateOnly(1998, 4, 10));
+
+        // Sign in via Google OAuth one-time code
+        OAuthPendingSession pending1 = oauthStore.CreatePending("Google");
+        Assert.True(oauthStore.TryComplete(
+            pending1.State,
+            providerUserId: "goog_abc123",
+            email: "island.google@example.com",
+            displayName: "IslandGoogle",
+            avatarUrl: "https://lh3.googleusercontent.com/island-avatar=s128-c",
+            avatarBase64: null,
+            out string code1));
+
+        ClientMock googleClient = new() { Id = 50 };
+        clientManager.HandleNewClient(googleClient);
+        var (gUser, gToken) = await socialAuth.SignInClientAsync(new SocialAuthDto
         {
-            OAuthStateStore oauthStore = new();
-            SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
+            Provider = "Google",
+            OneTimeCode = code1
+        }, googleClient);
 
-            // Create one offline registered user
-            await userRepo.Create(new User("offline@roatan.com", "OfflineUser"), "ValidPass!1", new DateOnly(1998, 4, 10));
+        Assert.NotEqual(Guid.Empty, gToken);
+        Assert.True(googleClient.IsLoggedIn);
+        Assert.Equal("IslandGoogle", gUser.Login);
 
-            // Sign in via Google social auth
-            ClientMock googleClient = new() { Id = 50 };
-            clientManager.HandleNewClient(googleClient);
-            var (gUser, gToken) = await socialAuth.SignInClientAsync(new SocialAuthDto
-            {
-                Provider = "Google",
-                ProviderUserId = "goog_abc123",
-                Email = "island.google@example.com",
-                DisplayName = "IslandGoogle"
-            }, googleClient);
-
-            Assert.NotEqual(Guid.Empty, gToken);
-            Assert.True(googleClient.IsLoggedIn);
-            Assert.Equal("IslandGoogle", gUser.Login);
-
-            // Repeat lookup links same user cleanly
-            User linkedAgain = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto
-            {
-                Provider = "Google",
-                ProviderUserId = "goog_abc123",
-                Email = "island.google@example.com"
-            });
-            Assert.Equal(gUser.Id, linkedAgain.Id);
-
-            // Put Google user at a table and verify PresenceService reports Online (At Table) & Offline user!
-            Lobby table = lobbyManager.CreateLobby(googleClient, 4, true, "West Bay Table", tableStyle: TableStyle.DRAW, matchFormat: MatchFormat.SIX_LOV);
-            PresenceService presence = new(userRepo, clientManager, lobbyManager, gameManager);
-            PlayerRosterDto roster = await presence.BuildRosterAsync();
-
-            PlayerPresenceDto onlineEntry = roster.Players.Single(p => p.Username == "IslandGoogle");
-            PlayerPresenceDto offlineEntry = roster.Players.Single(p => p.Username == "OfflineUser");
-
-            Assert.True(onlineEntry.IsOnline);
-            Assert.Equal("At Table", onlineEntry.Status);
-            Assert.Equal(table.Name, onlineEntry.TableName);
-
-            Assert.False(offlineEntry.IsOnline);
-            Assert.Equal("Offline", offlineEntry.Status);
-        }
-        finally
+        // Repeat OAuth lookup links same user cleanly
+        OAuthPendingSession pending2 = oauthStore.CreatePending("Google");
+        Assert.True(oauthStore.TryComplete(
+            pending2.State,
+            providerUserId: "goog_abc123",
+            email: "island.google@example.com",
+            displayName: "IslandGoogle",
+            avatarUrl: null,
+            avatarBase64: null,
+            out string code2));
+        User linkedAgain = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto
         {
-            Environment.SetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID", prevGoogle);
-            Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", prevFb);
-        }
+            Provider = "Google",
+            OneTimeCode = code2
+        });
+        Assert.Equal(gUser.Id, linkedAgain.Id);
+
+        // Put Google user at a table and verify PresenceService reports Online (At Table) & Offline user!
+        Lobby table = lobbyManager.CreateLobby(googleClient, 4, true, "West Bay Table", tableStyle: TableStyle.DRAW, matchFormat: MatchFormat.SIX_LOV);
+        PresenceService presence = new(userRepo, clientManager, lobbyManager, gameManager);
+        PlayerRosterDto roster = await presence.BuildRosterAsync();
+
+        PlayerPresenceDto onlineEntry = roster.Players.Single(p => p.Username == "IslandGoogle");
+        PlayerPresenceDto offlineEntry = roster.Players.Single(p => p.Username == "OfflineUser");
+
+        Assert.True(onlineEntry.IsOnline);
+        Assert.Equal("At Table", onlineEntry.Status);
+        Assert.Equal(table.Name, onlineEntry.TableName);
+
+        Assert.False(offlineEntry.IsOnline);
+        Assert.Equal("Offline", offlineEntry.Status);
     }
 
     [Fact]
@@ -401,55 +403,242 @@ public class RoatanMultiplayerTableAndAuthTests
     }
 
     [Fact]
-    public async Task OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsGenericStubLogin()
+    public async Task OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsUnconfiguredManualStubLogin()
     {
-        await using ApplicationDbContext db = CreateInMemoryDb(nameof(OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsGenericStubLogin));
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(OAuthOneTimeCode_RedeemsRealProfileWithAvatar_AndRejectsUnconfiguredManualStubLogin));
         UserRepository userRepo = new(db, new NationalityRepository(db));
         ClientManagerMock clientManager = new();
         TokenManager tokenManager = new();
         ChatManager chatManager = new();
         OAuthStateStore oauthStore = new();
 
-        SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
+        string? prevGoogleId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID");
+        string? prevGoogleLegacy = Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID");
+        string? prevGoogleSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
+        string? prevFbId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID");
+        string? prevFbSecret = Environment.GetEnvironmentVariable("FACEBOOK_APP_SECRET");
 
-        // Generic stub without email must be rejected (no more GooglePlayer/FacebookPlayer)
-        await Assert.ThrowsAsync<InvalidEmailFormatException>(() =>
-            socialAuth.AuthenticateProfileAsync(new SocialAuthDto
-            {
-                Provider = "Google",
-                DisplayName = "GooglePlayer"
-            }));
+        Environment.SetEnvironmentVariable("GOOGLE_CLIENT_ID", null);
+        Environment.SetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID", null);
+        Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", null);
+        Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", null);
+        Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", null);
 
-        // Real OAuth one-time code flow creates user with real email, username, AuthProvider, and AvatarUrl
-        OAuthPendingSession pending = oauthStore.CreatePending("Google");
-        bool completedOk = oauthStore.TryComplete(
-            pending.State,
-            providerUserId: "google-sub-999",
-            email: "real.player@gmail.com",
-            displayName: "RealIslandStar",
-            avatarUrl: "https://lh3.googleusercontent.com/real-avatar.jpg",
-            avatarBase64: null,
-            out string oneTimeCode);
-        Assert.True(completedOk);
-        Assert.False(string.IsNullOrWhiteSpace(oneTimeCode));
-
-        User authed = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+        try
         {
-            Provider = "Google",
-            OneTimeCode = oneTimeCode
-        });
-        Assert.Equal("real.player@gmail.com", authed.Email);
-        Assert.Equal("RealIslandStar", authed.Login);
-        Assert.Equal("Google", authed.AuthProvider);
-        Assert.Equal("https://lh3.googleusercontent.com/real-avatar.jpg", authed.AvatarUrl);
+            SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance);
 
-        // Reusing a single-use OAuth code must fail
-        await Assert.ThrowsAnyAsync<BaseApplicationException>(() =>
-            socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+            // Unconfigured OAuth start returns clear setup guidance (no manual email fallback)
+            OAuthStartResult missingGoogle = socialAuth.StartOAuthFlow("Google", "https://domino.roatandomino.com");
+            Assert.False(missingGoogle.Configured);
+            Assert.Equal("Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env", missingGoogle.Message);
+
+            OAuthStartResult missingFb = socialAuth.StartOAuthFlow("Facebook", "https://domino.roatandomino.com");
+            Assert.False(missingFb.Configured);
+            Assert.Equal("Facebook Sign-In is not configured on this server yet — add FACEBOOK_APP_ID to .env", missingFb.Message);
+
+            // Unverified manual email/stub social login must be rejected with clear setup error
+            WrongPasswordException stubEx = await Assert.ThrowsAsync<WrongPasswordException>(() =>
+                socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+                {
+                    Provider = "Google",
+                    Email = "typed@gmail.com",
+                    DisplayName = "GooglePlayer"
+                }));
+            Assert.Equal("Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env", stubEx.Message);
+
+            // Real OAuth one-time code flow creates user with real email, username, AuthProvider, and AvatarUrl
+            OAuthPendingSession pending = oauthStore.CreatePending("Google");
+            bool completedOk = oauthStore.TryComplete(
+                pending.State,
+                providerUserId: "google-sub-999",
+                email: "real.player@gmail.com",
+                displayName: "RealIslandStar",
+                avatarUrl: "https://lh3.googleusercontent.com/real-avatar.jpg",
+                avatarBase64: null,
+                out string oneTimeCode);
+            Assert.True(completedOk);
+            Assert.False(string.IsNullOrWhiteSpace(oneTimeCode));
+
+            User authed = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto
             {
                 Provider = "Google",
                 OneTimeCode = oneTimeCode
+            });
+            Assert.Equal("real.player@gmail.com", authed.Email);
+            Assert.Equal("RealIslandStar", authed.Login);
+            Assert.Equal("Google", authed.AuthProvider);
+            Assert.Equal("https://lh3.googleusercontent.com/real-avatar.jpg", authed.AvatarUrl);
+
+            // Reusing a single-use OAuth code must fail
+            await Assert.ThrowsAnyAsync<BaseApplicationException>(() =>
+                socialAuth.AuthenticateProfileAsync(new SocialAuthDto
+                {
+                    Provider = "Google",
+                    OneTimeCode = oneTimeCode
+                }));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GOOGLE_CLIENT_ID", prevGoogleId);
+            Environment.SetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID", prevGoogleLegacy);
+            Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", prevGoogleSecret);
+            Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", prevFbId);
+            Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", prevFbSecret);
+        }
+    }
+
+    private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(responder(request));
+        }
+    }
+
+    [Fact]
+    public async Task GoogleIdToken_AndFacebookOAuthCallback_VerifyProfile_AndAutoImportCompressedAvatar()
+    {
+        await using ApplicationDbContext db = CreateInMemoryDb(nameof(GoogleIdToken_AndFacebookOAuthCallback_VerifyProfile_AndAutoImportCompressedAvatar));
+        UserRepository userRepo = new(db, new NationalityRepository(db));
+        ClientManagerMock clientManager = new();
+        TokenManager tokenManager = new();
+        ChatManager chatManager = new();
+        OAuthStateStore oauthStore = new();
+
+        string? prevGoogleId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID");
+        string? prevGoogleSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
+        string? prevFbId = Environment.GetEnvironmentVariable("FACEBOOK_APP_ID");
+        string? prevFbSecret = Environment.GetEnvironmentVariable("FACEBOOK_APP_SECRET");
+
+        Environment.SetEnvironmentVariable("GOOGLE_CLIENT_ID", "test-google-client.apps.googleusercontent.com");
+        Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", "test-google-secret");
+        Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", "1234567890");
+        Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", "fb-secret-xyz");
+
+        try
+        {
+            // Synthetic JPEG with oversized 36 KB EXIF APP1 block + tiny 64-byte image scan -> strips cleanly under 32 KB!
+            List<byte> fakeJpeg = [0xFF, 0xD8, 0xFF, 0xE1, 0x90, 0x02]; // SOI + APP1 length 0x9002 (36,866 bytes)
+            fakeJpeg.AddRange(new byte[0x9000]);
+            fakeJpeg.AddRange([0xFF, 0xDA, 0x00, 0x08, 0x01, 0x02, 0x03, 0x04, 0xFF, 0xD9]);
+            byte[] oversizedExifJpeg = fakeJpeg.ToArray();
+            Assert.True(oversizedExifJpeg.Length > UserRepository.MaxAvatarBytes);
+
+            byte[] smallFbPng = Enumerable.Range(0, 1500).Select(i => (byte)(i % 251)).ToArray();
+
+            using HttpClient mockHttp = new(new StubHttpMessageHandler(req =>
+            {
+                string url = req.RequestUri!.ToString();
+                if (url.StartsWith("https://oauth2.googleapis.com/tokeninfo", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("""
+                        {
+                          "aud": "test-google-client.apps.googleusercontent.com",
+                          "sub": "google-uid-42",
+                          "email": "island.queen@gmail.com",
+                          "name": "IslandQueen",
+                          "picture": "https://lh3.googleusercontent.com/a/avatar-photo=s400-c",
+                          "exp": "4102444800"
+                        }
+                        """, System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+                if (url.Contains("lh3.googleusercontent.com/a/avatar-photo=s128-c", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(oversizedExifJpeg)
+                    };
+                }
+                if (url.StartsWith("https://graph.facebook.com/v19.0/oauth/access_token", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("""{"access_token":"fb-live-token-77"}""", System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+                if (url.StartsWith("https://graph.facebook.com/v19.0/debug_token", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("""{"data":{"is_valid":true}}""", System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+                if (url.Contains("graph.facebook.com/v19.0/me?fields=id,name,email,picture.type(large)", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("""
+                        {
+                          "id": "fb-uid-99",
+                          "name": "Roatan Captain",
+                          "email": "captain@facebook.com",
+                          "picture": { "data": { "url": "https://platform-lookaside.fbsbx.com/fb-large.jpg" } }
+                        }
+                        """, System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+                if (url == "https://platform-lookaside.fbsbx.com/fb-large.jpg")
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(smallFbPng)
+                    };
+                }
+                return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
             }));
+
+            SocialAuthService socialAuth = new(userRepo, clientManager, tokenManager, chatManager, oauthStore, NullLogger<SocialAuthService>.Instance, mockHttp);
+
+            // 1. Google Start URL includes prompt=select_account and optional login_hint
+            OAuthStartResult googleStart = socialAuth.StartOAuthFlow("Google", "https://domino.roatandomino.com", loginHint: "island.queen@gmail.com");
+            Assert.True(googleStart.Configured);
+            Assert.Contains("prompt=select_account", googleStart.AuthorizeUrl);
+            Assert.Contains("login_hint=island.queen%40gmail.com", googleStart.AuthorizeUrl);
+
+            // 2. Google native ID token endpoint verifies token, strips EXIF to fit <= 32KB, persists user & issues one-time code
+            var (googleUser, googleCode) = await socialAuth.VerifyGoogleIdTokenAndCreateSessionAsync("valid-google-id-token");
+            Assert.Equal("island.queen@gmail.com", googleUser.Email);
+            Assert.Equal("IslandQueen", googleUser.Login);
+            Assert.Equal("Google", googleUser.AuthProvider);
+            Assert.False(string.IsNullOrWhiteSpace(googleUser.AvatarBase64));
+            Assert.True(Convert.FromBase64String(googleUser.AvatarBase64!).Length <= UserRepository.MaxAvatarBytes);
+            Assert.False(string.IsNullOrWhiteSpace(googleCode));
+
+            ClientMock gClient = new() { Id = 601 };
+            clientManager.HandleNewClient(gClient);
+            var (signedInGoogle, gTok) = await socialAuth.SignInClientAsync(new SocialAuthDto { Provider = "Google", OneTimeCode = googleCode }, gClient);
+            Assert.NotEqual(Guid.Empty, gTok);
+            Assert.Equal(googleUser.Id, signedInGoogle.Id);
+
+            // 3. Facebook Start URL includes display=popup and auth_type=reauthenticate
+            OAuthStartResult fbStart = socialAuth.StartOAuthFlow("Facebook", "https://domino.roatandomino.com");
+            Assert.True(fbStart.Configured);
+            Assert.Contains("display=popup", fbStart.AuthorizeUrl);
+            Assert.Contains("auth_type=reauthenticate", fbStart.AuthorizeUrl);
+
+            // 4. Facebook Callback exchanges code, loads picture.type(large), imports AvatarBase64, and completes login
+            var (fbOk, fbCode, fbProvider, fbErr) = await socialAuth.CompleteOAuthCallbackAsync("Facebook", "fb-auth-code", fbStart.State, "https://domino.roatandomino.com");
+            Assert.True(fbOk, fbErr);
+            Assert.Equal("Facebook", fbProvider);
+            Assert.False(string.IsNullOrWhiteSpace(fbCode));
+
+            User fbUser = await socialAuth.AuthenticateProfileAsync(new SocialAuthDto { Provider = "Facebook", OneTimeCode = fbCode });
+            Assert.Equal("captain@facebook.com", fbUser.Email);
+            Assert.Equal("RoatanCaptain", fbUser.Login);
+            Assert.Equal("Facebook", fbUser.AuthProvider);
+            Assert.Equal(Convert.ToBase64String(smallFbPng), fbUser.AvatarBase64);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GOOGLE_CLIENT_ID", prevGoogleId);
+            Environment.SetEnvironmentVariable("GOOGLE_CLIENT_SECRET", prevGoogleSecret);
+            Environment.SetEnvironmentVariable("FACEBOOK_APP_ID", prevFbId);
+            Environment.SetEnvironmentVariable("FACEBOOK_APP_SECRET", prevFbSecret);
+        }
     }
 
     [Fact]

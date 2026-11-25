@@ -254,7 +254,7 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
         if (existing is not null)
         {
             bool changed = false;
-            if (!string.IsNullOrWhiteSpace(avatarUrl) && string.IsNullOrWhiteSpace(existing.AvatarUrl))
+            if (!string.IsNullOrWhiteSpace(avatarUrl) && !string.Equals(existing.AvatarUrl, avatarUrl.Trim(), StringComparison.Ordinal))
             {
                 existing.AvatarUrl = avatarUrl.Trim();
                 changed = true;

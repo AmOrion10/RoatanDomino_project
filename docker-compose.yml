@@ -5,6 +5,9 @@ services:
       dockerfile: DominoServer/Dockerfile
     container_name: roatan-domino-server
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:5000
       DOTNET_ENVIRONMENT: Production

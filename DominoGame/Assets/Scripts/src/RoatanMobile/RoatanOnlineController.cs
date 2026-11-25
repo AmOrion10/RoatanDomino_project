@@ -114,24 +114,13 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text signOutBtnLabel;
     private TMP_Text quickRankedLabel;
 
-    // OAuth Browser Wait + Local Social Profile Completion Modal
+    // OAuth Account Chooser & Browser Wait Modal
     private Coroutine oauthFlowCoroutine;
     private string pendingOAuthProvider;
     private string pendingOAuthState;
     private bool oauthCodeSubmitted;
     private GameObject oauthWaitingModal;
     private TMP_Text oauthWaitingLabel;
-
-    private GameObject socialProfileModal;
-    private TMP_Text socialProfileTitleLabel;
-    private TMP_Text socialProfileSubLabel;
-    private Image socialProfileAvatarImg;
-    private TMP_Text socialProfileAvatarInitials;
-    private TMP_InputField socialProfileEmailInput;
-    private TMP_InputField socialProfileUserInput;
-    private TMP_Text socialProfileErrorLabel;
-    private string socialProfileProvider;
-    private string socialProfileAvatarBase64;
 
     // Player Profile & Delete Account Modals
     private GameObject profileModal;
@@ -267,7 +256,6 @@ public class RoatanOnlineController : MonoBehaviour
         BuildIncomingInviteModal(safeRoot);
         BuildInvitePlayersModal(safeRoot);
         BuildOAuthWaitingModal(safeRoot);
-        BuildSocialProfileModal(safeRoot);
         BuildProfileModal(safeRoot);
         BuildDeleteAccountModal(safeRoot);
         RoatanLocalization.LanguageChanged += RefreshLocalizedTexts;
@@ -679,7 +667,7 @@ public class RoatanOnlineController : MonoBehaviour
     {
         string httpBase = GetHttpBaseUrl();
         string startUrl = $"{httpBase}/auth/oauth/{provider.ToLowerInvariant()}/start?mode=json";
-        SetFeedback($"Checking {provider} sign-in...", RoatanVisualAssets.IslandGold);
+        SetFeedback($"Opening {provider} sign-in...", RoatanVisualAssets.IslandGold);
 
         using (UnityWebRequest req = UnityWebRequest.Get(startUrl))
         {
@@ -689,11 +677,15 @@ public class RoatanOnlineController : MonoBehaviour
             if (req.result != UnityWebRequest.Result.Success)
             {
                 oauthFlowCoroutine = null;
-                OpenSocialProfileCompletionModal(provider, $"Enter your {provider} email and choose a username to sign in.");
+                string unreachableMsg = $"Unable to reach server for {provider} Sign-In. Check your Server URL and try again.";
+                ShowAuthError(unreachableMsg);
+                SetFeedback(unreachableMsg, RoatanVisualAssets.SunsetCoral);
                 yield break;
             }
 
             bool configured = false;
+            bool idTokenConfigured = false;
+            string clientId = string.Empty;
             string authorizeUrl = string.Empty;
             string state = string.Empty;
             string serverMsg = string.Empty;
@@ -701,6 +693,8 @@ public class RoatanOnlineController : MonoBehaviour
             {
                 JObject json = JObject.Parse(req.downloadHandler.text);
                 configured = json["configured"] != null && json["configured"].Value<bool>();
+                idTokenConfigured = json["idTokenConfigured"] != null && json["idTokenConfigured"].Value<bool>();
+                clientId = json["clientId"]?.ToString() ?? string.Empty;
                 authorizeUrl = json["authorizeUrl"]?.ToString() ?? string.Empty;
                 state = json["state"]?.ToString() ?? string.Empty;
                 serverMsg = json["message"]?.ToString() ?? string.Empty;
@@ -710,29 +704,162 @@ public class RoatanOnlineController : MonoBehaviour
                 configured = false;
             }
 
-            if (!configured || string.IsNullOrWhiteSpace(authorizeUrl) || string.IsNullOrWhiteSpace(state))
+            string defaultSetupMsg = string.Equals(provider, "Google", StringComparison.OrdinalIgnoreCase)
+                ? "Google Sign-In is not configured on this server yet — add GOOGLE_CLIENT_ID to .env"
+                : "Facebook Sign-In is not configured on this server yet — add FACEBOOK_APP_ID to .env";
+            string effectiveSetupMsg = string.IsNullOrWhiteSpace(serverMsg) ? defaultSetupMsg : serverMsg;
+
+            bool isGoogle = string.Equals(provider, "Google", StringComparison.OrdinalIgnoreCase);
+
+            // Native Android Google Account Chooser (Credential Manager ID Token or AccountManager -> Chrome Custom Tab)
+            if (isGoogle && RoatanGoogleSignIn.IsNativeAndroidChooserAvailable)
             {
+                if (!configured && !idTokenConfigured)
+                {
+                    oauthFlowCoroutine = null;
+                    ShowAuthError(effectiveSetupMsg);
+                    SetFeedback(effectiveSetupMsg, RoatanVisualAssets.SunsetCoral);
+                    yield break;
+                }
+
                 oauthFlowCoroutine = null;
-                string hint = string.IsNullOrWhiteSpace(serverMsg)
-                    ? $"Enter your real {provider} email and choose your username to continue."
-                    : $"Local test server mode — enter your real {provider} email and choose a username:";
-                OpenSocialProfileCompletionModal(provider, hint);
+                SetFeedback("Choose your Google account...", RoatanVisualAssets.IslandGold);
+
+                RoatanGoogleSignIn.LaunchGoogleAccountChooser(
+                    clientId,
+                    onIdToken: idToken =>
+                    {
+                        oauthFlowCoroutine = StartCoroutine(SubmitGoogleIdTokenCoroutine(httpBase, idToken));
+                    },
+                    onAccountEmailSelected: selectedEmail =>
+                    {
+                        if (!configured || string.IsNullOrWhiteSpace(authorizeUrl) || string.IsNullOrWhiteSpace(state))
+                        {
+                            ShowAuthError(effectiveSetupMsg);
+                            SetFeedback(effectiveSetupMsg, RoatanVisualAssets.SunsetCoral);
+                            return;
+                        }
+
+                        string hintedUrl = authorizeUrl.IndexOf("login_hint=", StringComparison.OrdinalIgnoreCase) >= 0
+                            ? authorizeUrl
+                            : $"{authorizeUrl}&login_hint={Uri.EscapeDataString(selectedEmail)}";
+                        LaunchOAuthBrowserAndPoll("Google", state, httpBase, hintedUrl);
+                    },
+                    onFallbackBrowser: () =>
+                    {
+                        if (!configured || string.IsNullOrWhiteSpace(authorizeUrl) || string.IsNullOrWhiteSpace(state))
+                        {
+                            ShowAuthError(effectiveSetupMsg);
+                            SetFeedback(effectiveSetupMsg, RoatanVisualAssets.SunsetCoral);
+                            return;
+                        }
+
+                        LaunchOAuthBrowserAndPoll("Google", state, httpBase, authorizeUrl);
+                    },
+                    onCancelOrError: reason =>
+                    {
+                        CancelPendingOAuthFlow();
+                        if (string.Equals(reason, "CANCELLED", StringComparison.OrdinalIgnoreCase))
+                        {
+                            SetFeedback("Google sign-in cancelled.", RoatanVisualAssets.IslandGold);
+                        }
+                        else
+                        {
+                            ShowAuthError(reason);
+                            SetFeedback(reason, RoatanVisualAssets.SunsetCoral);
+                        }
+                    });
                 yield break;
             }
 
-            pendingOAuthProvider = provider;
-            pendingOAuthState = state;
-            oauthCodeSubmitted = false;
-
-            if (oauthWaitingModal != null && oauthWaitingLabel != null)
+            if (!configured || string.IsNullOrWhiteSpace(authorizeUrl) || string.IsNullOrWhiteSpace(state))
             {
-                oauthWaitingLabel.text = $"Complete {provider} sign-in in your browser.\nYou will return to Roatan Domino automatically once approved.";
-                oauthWaitingModal.transform.SetAsLastSibling();
-                oauthWaitingModal.SetActive(true);
+                oauthFlowCoroutine = null;
+                ShowAuthError(effectiveSetupMsg);
+                SetFeedback(effectiveSetupMsg, RoatanVisualAssets.SunsetCoral);
+                yield break;
             }
 
-            Application.OpenURL(authorizeUrl);
-            oauthFlowCoroutine = StartCoroutine(PollOAuthSessionCoroutine(provider, state, httpBase));
+            LaunchOAuthBrowserAndPoll(provider, state, httpBase, authorizeUrl);
+        }
+    }
+
+    private void LaunchOAuthBrowserAndPoll(string provider, string state, string httpBase, string authorizeUrl)
+    {
+        pendingOAuthProvider = provider;
+        pendingOAuthState = state;
+        oauthCodeSubmitted = false;
+
+        if (oauthWaitingModal != null && oauthWaitingLabel != null)
+        {
+            oauthWaitingLabel.text = $"Choose your {provider} account in the browser window.\nYou will return to Roatan Domino automatically once signed in.";
+            oauthWaitingModal.transform.SetAsLastSibling();
+            oauthWaitingModal.SetActive(true);
+        }
+
+        RoatanGoogleSignIn.OpenAuthBrowser(authorizeUrl);
+        oauthFlowCoroutine = StartCoroutine(PollOAuthSessionCoroutine(provider, state, httpBase));
+    }
+
+    private IEnumerator SubmitGoogleIdTokenCoroutine(string httpBase, string idToken)
+    {
+        string verifyUrl = $"{httpBase}/auth/oauth/google/id-token";
+        SetFeedback("Verifying Google account...", RoatanVisualAssets.IslandGold);
+
+        JObject payload = new JObject
+        {
+            ["idToken"] = idToken
+        };
+        byte[] bodyBytes = System.Text.Encoding.UTF8.GetBytes(payload.ToString());
+
+        using (UnityWebRequest req = new UnityWebRequest(verifyUrl, UnityWebRequest.kHttpVerbPOST))
+        {
+            req.uploadHandler = new UploadHandlerRaw(bodyBytes);
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.timeout = 12;
+
+            yield return req.SendWebRequest();
+            oauthFlowCoroutine = null;
+
+            string responseText = req.downloadHandler != null ? req.downloadHandler.text : string.Empty;
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                string errMsg = "Google sign-in verification failed. Please try again.";
+                try
+                {
+                    JObject errJson = JObject.Parse(responseText);
+                    string serverErr = errJson["error"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(serverErr)) errMsg = serverErr;
+                }
+                catch
+                {
+                }
+                ShowAuthError(errMsg);
+                SetFeedback(errMsg, RoatanVisualAssets.SunsetCoral);
+                yield break;
+            }
+
+            try
+            {
+                JObject json = JObject.Parse(responseText);
+                bool ok = json["ok"] != null && json["ok"].Value<bool>();
+                string oneTimeCode = json["oneTimeCode"]?.ToString() ?? string.Empty;
+                if (ok && !string.IsNullOrWhiteSpace(oneTimeCode))
+                {
+                    RedeemOAuthOneTimeCode("Google", oneTimeCode);
+                    yield break;
+                }
+
+                string err = json["error"]?.ToString() ?? "Google sign-in could not be completed.";
+                ShowAuthError(err);
+                SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            }
+            catch
+            {
+                ShowAuthError("Unexpected response from server during Google sign-in.");
+                SetFeedback("Unexpected response from server during Google sign-in.", RoatanVisualAssets.SunsetCoral);
+            }
         }
     }
 
@@ -865,80 +992,6 @@ public class RoatanOnlineController : MonoBehaviour
             OneTimeCode = oneTimeCode
         }));
         SetFeedback($"Finishing {provider} sign-in...", RoatanVisualAssets.IslandGold);
-    }
-
-    private void OpenSocialProfileCompletionModal(string provider, string subtitle)
-    {
-        socialProfileProvider = provider;
-        socialProfileAvatarBase64 = null;
-
-        if (socialProfileTitleLabel != null)
-        {
-            socialProfileTitleLabel.text = $"Complete {provider} Profile";
-        }
-        if (socialProfileSubLabel != null)
-        {
-            socialProfileSubLabel.text = subtitle;
-        }
-        if (socialProfileEmailInput != null)
-        {
-            string prefillEmail = regEmailInput != null && !string.IsNullOrWhiteSpace(regEmailInput.text)
-                ? regEmailInput.text.Trim()
-                : (loginUserInput != null && loginUserInput.text.Contains("@") ? loginUserInput.text.Trim() : string.Empty);
-            socialProfileEmailInput.text = prefillEmail;
-        }
-        if (socialProfileUserInput != null)
-        {
-            string prefillUser = regUserInput != null && !string.IsNullOrWhiteSpace(regUserInput.text)
-                ? regUserInput.text.Trim()
-                : (loginUserInput != null && !loginUserInput.text.Contains("@") ? loginUserInput.text.Trim() : string.Empty);
-            socialProfileUserInput.text = prefillUser;
-        }
-        if (socialProfileErrorLabel != null)
-        {
-            socialProfileErrorLabel.text = string.Empty;
-        }
-
-        ApplyCircularAvatar(socialProfileAvatarImg, socialProfileAvatarInitials, "social_preview", null, provider);
-        if (socialProfileModal != null)
-        {
-            socialProfileModal.transform.SetAsLastSibling();
-            socialProfileModal.SetActive(true);
-        }
-    }
-
-    private void SubmitSocialProfileCompletion()
-    {
-        RoatanSoundFX.Instance?.PlayTap();
-        string email = socialProfileEmailInput != null ? socialProfileEmailInput.text.Trim() : string.Empty;
-        string username = socialProfileUserInput != null ? socialProfileUserInput.text.Trim() : string.Empty;
-
-        if (string.IsNullOrWhiteSpace(email) || !EmailValidationRegex.IsMatch(email))
-        {
-            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Please enter a valid email address.";
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(username) || !UsernameValidationRegex.IsMatch(username))
-        {
-            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Username must be 3–16 letters or numbers.";
-            return;
-        }
-
-        if (!EnsureConnectedForRequest())
-        {
-            if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = "Unable to reach server. Please check connection.";
-            return;
-        }
-
-        if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = string.Empty;
-        subscribedClient.AddToSendQueue(MessageFrameBuilder.SocialAuthFrame(new SocialAuthDto
-        {
-            Provider = socialProfileProvider ?? "Google",
-            Email = email,
-            DisplayName = username,
-            AvatarBase64 = socialProfileAvatarBase64
-        }));
-        SetFeedback($"Signing in with {socialProfileProvider}...", RoatanVisualAssets.IslandGold);
     }
 
     public static bool ValidateRegistrationInputs(string email, string username, string password, string birthdate, out string error)
@@ -1163,16 +1216,11 @@ public class RoatanOnlineController : MonoBehaviour
         CancelPendingOAuthFlow();
         if (dto.OkResult)
         {
-            if (socialProfileModal != null) socialProfileModal.SetActive(false);
             CompleteSignInSuccess("Player");
         }
         else
         {
             string err = FormatFriendlyError(dto, "Social sign-in failed. Please try again.");
-            if (socialProfileModal != null && socialProfileModal.activeSelf && socialProfileErrorLabel != null)
-            {
-                socialProfileErrorLabel.text = err;
-            }
             ShowAuthError(err);
             SetFeedback(err, RoatanVisualAssets.SunsetCoral);
         }
@@ -1183,7 +1231,6 @@ public class RoatanOnlineController : MonoBehaviour
         isSignedIn = true;
         ClearAuthError();
         SetServerSettingsExpanded(false);
-        if (socialProfileModal != null) socialProfileModal.SetActive(false);
         if (oauthWaitingModal != null) oauthWaitingModal.SetActive(false);
         SetFeedback("Welcome back!", RoatanVisualAssets.PalmGreen);
         subscribedClient.AddToSendQueue(new List<MessageFrame>
@@ -3243,57 +3290,6 @@ public class RoatanOnlineController : MonoBehaviour
             CancelPendingOAuthFlow();
         });
         oauthWaitingModal.SetActive(false);
-    }
-
-    private void BuildSocialProfileModal(Transform safeRoot)
-    {
-        socialProfileModal = CreateStretchPanel(safeRoot, "SocialProfileModal", new Color(0f, 0f, 0f, 0.80f));
-        GameObject card = CreateCard(socialProfileModal.transform, "SocialProfileCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 920f));
-        socialProfileTitleLabel = CreateText(card.transform, "Title", "Complete Profile", 36, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 395f), new Vector2(800f, 54f));
-        socialProfileSubLabel = CreateText(card.transform, "Sub", "Enter your real email and choose a username:", 21, FontStyles.Normal, new Color(0.84f, 0.94f, 0.97f), new Vector2(0f, 330f), new Vector2(800f, 56f));
-
-        // Optional circular avatar preview + Choose Photo button
-        GameObject avObj = new GameObject("SocialAvatarPreview");
-        avObj.transform.SetParent(card.transform, false);
-        RectTransform avRect = avObj.AddComponent<RectTransform>();
-        avRect.anchoredPosition = new Vector2(-190f, 205f);
-        avRect.sizeDelta = new Vector2(124f, 124f);
-        socialProfileAvatarImg = avObj.AddComponent<Image>();
-        socialProfileAvatarInitials = CreateText(avObj.transform, "Init", "?", 42, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(110f, 80f));
-        socialProfileAvatarInitials.raycastTarget = false;
-
-        CreatePillButton(card.transform, "BtnPickSocialPhoto", "Choose Photo (Optional)", RoatanVisualAssets.BrightLagoon, new Vector2(115f, 205f), new Vector2(400f, 68f), 22, () =>
-        {
-            RoatanSoundFX.Instance?.PlayTap();
-            RoatanAndroidPhotoPicker.PickPhoto(
-                b64 =>
-                {
-                    socialProfileAvatarBase64 = b64;
-                    string previewName = !string.IsNullOrWhiteSpace(socialProfileUserInput?.text) ? socialProfileUserInput.text : socialProfileProvider;
-                    ApplyCircularAvatar(socialProfileAvatarImg, socialProfileAvatarInitials, "social_preview", b64, previewName);
-                },
-                err =>
-                {
-                    if (socialProfileErrorLabel != null) socialProfileErrorLabel.text = err;
-                });
-        });
-
-        CreateFieldTitle(card.transform, "SocEmailLbl", "Email Address", new Vector2(0f, 96f));
-        socialProfileEmailInput = CreateInputField(card.transform, "SocEmailInput", "you@gmail.com", "", new Vector2(0f, 40f), new Vector2(780f, 70f));
-
-        CreateFieldTitle(card.transform, "SocUserLbl", "Username (3–16 letters or numbers)", new Vector2(0f, -38f));
-        socialProfileUserInput = CreateInputField(card.transform, "SocUserInput", "Choose your player name", "", new Vector2(0f, -94f), new Vector2(780f, 70f));
-
-        socialProfileErrorLabel = CreateText(card.transform, "SocErr", "", 20, FontStyles.Bold, RoatanVisualAssets.SunsetCoral, new Vector2(0f, -172f), new Vector2(780f, 56f));
-
-        CreatePillButton(card.transform, "BtnSocialContinue", "Continue", RoatanVisualAssets.PalmGreen, new Vector2(0f, -264f), new Vector2(620f, 86f), 30, SubmitSocialProfileCompletion);
-        CreatePillButton(card.transform, "BtnSocialCancel", "Cancel", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(0f, -370f), new Vector2(360f, 72f), 25, () =>
-        {
-            RoatanSoundFX.Instance?.PlayTap();
-            socialProfileModal.SetActive(false);
-        });
-
-        socialProfileModal.SetActive(false);
     }
 
     private void BuildProfileModal(Transform safeRoot)

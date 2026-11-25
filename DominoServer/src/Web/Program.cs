@@ -105,6 +105,7 @@ public class Program
             maxClients,
             openTables = lm.GetAllPublicLobbies().Count,
             googleOAuthConfigured = SocialAuthService.IsProviderConfigured("Google"),
+            googleIdTokenConfigured = SocialAuthService.IsGoogleIdTokenConfigured(),
             facebookOAuthConfigured = SocialAuthService.IsProviderConfigured("Facebook"),
             utc = DateTime.UtcNow
         }));
@@ -113,16 +114,22 @@ public class Program
         {
             string baseUrl = ResolvePublicBaseUrl(context);
             string? requestedState = context.Request.Query["state"].FirstOrDefault();
+            string? loginHint = context.Request.Query["login_hint"].FirstOrDefault();
+            string? reauthParam = context.Request.Query["reauth"].FirstOrDefault();
+            bool forceReauth = !string.Equals(reauthParam, "false", StringComparison.OrdinalIgnoreCase) &&
+                               !string.Equals(reauthParam, "0", StringComparison.OrdinalIgnoreCase);
             bool jsonMode = string.Equals(context.Request.Query["mode"].FirstOrDefault(), "json", StringComparison.OrdinalIgnoreCase);
 
-            var (configured, normalizedProvider, state, authorizeUrl, message) = socialAuth.StartOAuthFlow(provider, baseUrl, requestedState);
-            if (!configured || string.IsNullOrWhiteSpace(authorizeUrl))
+            OAuthStartResult result = socialAuth.StartOAuthFlow(provider, baseUrl, requestedState, loginHint, forceReauth);
+            if (!result.Configured || string.IsNullOrWhiteSpace(result.AuthorizeUrl))
             {
                 return Results.Ok(new
                 {
                     configured = false,
-                    provider = normalizedProvider,
-                    message = message ?? "OAuth client IDs are not configured on this server."
+                    idTokenConfigured = result.IdTokenConfigured,
+                    provider = result.Provider,
+                    clientId = result.ClientId,
+                    message = result.Message ?? SocialAuthService.GetMissingConfigurationMessage(provider)
                 });
             }
 
@@ -131,13 +138,57 @@ public class Program
                 return Results.Ok(new
                 {
                     configured = true,
-                    provider = normalizedProvider,
-                    state,
-                    authorizeUrl
+                    idTokenConfigured = result.IdTokenConfigured,
+                    provider = result.Provider,
+                    clientId = result.ClientId,
+                    state = result.State,
+                    authorizeUrl = result.AuthorizeUrl
                 });
             }
 
-            return Results.Redirect(authorizeUrl);
+            return Results.Redirect(result.AuthorizeUrl);
+        });
+
+        app.MapPost("/auth/oauth/google/id-token", async (HttpContext context, SocialAuthService socialAuth, CancellationToken ct) =>
+        {
+            try
+            {
+                string? idToken = null;
+                using System.Text.Json.JsonDocument body = await System.Text.Json.JsonDocument.ParseAsync(context.Request.Body, cancellationToken: ct);
+                if (body.RootElement.TryGetProperty("idToken", out System.Text.Json.JsonElement tkEl))
+                {
+                    idToken = tkEl.GetString();
+                }
+                else if (body.RootElement.TryGetProperty("id_token", out System.Text.Json.JsonElement snakeEl))
+                {
+                    idToken = snakeEl.GetString();
+                }
+
+                (Domain.User user, string oneTimeCode) = await socialAuth.VerifyGoogleIdTokenAndCreateSessionAsync(idToken, ct);
+                return Results.Ok(new
+                {
+                    ok = true,
+                    provider = "Google",
+                    oneTimeCode,
+                    user = DtoBuilder.GetUserDto(user)
+                });
+            }
+            catch (BaseApplicationException ex)
+            {
+                return Results.BadRequest(new
+                {
+                    ok = false,
+                    error = ex.Message
+                });
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return Results.BadRequest(new
+                {
+                    ok = false,
+                    error = "Invalid JSON payload. Expected { \"idToken\": \"...\" }."
+                });
+            }
         });
 
         app.MapGet("/auth/oauth/{provider}/callback", async (HttpContext context, string provider, SocialAuthService socialAuth, CancellationToken ct) =>
