@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 using DominoCommon.com.domino.common.Scripts.Enums;
@@ -40,5 +41,32 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby
 
         [JsonProperty(PropertyName = "ht", NullValueHandling = NullValueHandling.Ignore)]
         public bool IsHouseTable { get; set; }
+
+        [JsonProperty(PropertyName = "tc", NullValueHandling = NullValueHandling.Ignore)]
+        public bool IsTeamChallenge { get; set; }
+
+        [JsonProperty(PropertyName = "tai", NullValueHandling = NullValueHandling.Ignore)]
+        public long? TeamAId { get; set; }
+
+        [JsonProperty(PropertyName = "tan", NullValueHandling = NullValueHandling.Ignore)]
+        public string TeamAName { get; set; }
+
+        [JsonProperty(PropertyName = "tbi", NullValueHandling = NullValueHandling.Ignore)]
+        public long? TeamBId { get; set; }
+
+        [JsonProperty(PropertyName = "tbn", NullValueHandling = NullValueHandling.Ignore)]
+        public string TeamBName { get; set; }
+
+        [JsonProperty(PropertyName = "inpg", NullValueHandling = NullValueHandling.Ignore)]
+        public bool IsInProgress { get; set; }
+
+        [JsonProperty(PropertyName = "sc", NullValueHandling = NullValueHandling.Ignore)]
+        public int SpectatorCount { get; set; }
+
+        [JsonProperty(PropertyName = "rfh", NullValueHandling = NullValueHandling.Ignore)]
+        public bool RequireFullHumanSquad { get; set; }
+
+        [JsonProperty(PropertyName = "pdl", NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? PlayDeadlineUtc { get; set; }
     }
 }

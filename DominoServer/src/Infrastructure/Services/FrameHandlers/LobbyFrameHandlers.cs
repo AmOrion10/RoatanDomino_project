@@ -22,7 +22,9 @@ public class LobbyFrameHandlers(
     ILobbyManager lobbyManager,
     IClientManager clientManager,
     ISeedGenerator seedGenerator,
-    PresenceService presenceService) : BaseFrameHandlers
+    PresenceService presenceService,
+    TeamService teamService,
+    IGameManager? gameManager = null) : BaseFrameHandlers
 {
     public override void RegisterHandlers(IMessageFrameHandler handler)
     {
@@ -66,7 +68,19 @@ public class LobbyFrameHandlers(
     private async Task JoinLobbyCallback(MessageFrame frame, IClient client)
     {
         JoinLobbyDto dto = frame.GetObjectFromMessage<JoinLobbyDto>();
-        Lobby lobby = await dispatcher.Dispatch(new JoinLobbyCommand(client, dto.LobbyIdToJoin));
+        Lobby? target = lobbyManager.GetLobbyById(dto.LobbyIdToJoin);
+        Lobby lobby;
+        if (target is not null && target.IsTeamChallenge)
+        {
+            long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
+            lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            await teamService.MarkTeamCheckedInAsync(target.TeamChallengeId, userTeamId);
+            lobby = target;
+        }
+        else
+        {
+            lobby = await dispatcher.Dispatch(new JoinLobbyCommand(client, dto.LobbyIdToJoin));
+        }
         await SendLobbyToClientAndInformOtherClientsInLobby(client, lobby);
         await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
     }
@@ -74,7 +88,19 @@ public class LobbyFrameHandlers(
     private async Task JoinLobbyWithCodeCallback(MessageFrame frame, IClient client)
     {
         LobbyCodeDto dto = frame.GetObjectFromMessage<LobbyCodeDto>();
-        Lobby lobby = await dispatcher.Dispatch(new JoinLobbyWithCodeCommand(client, dto.Code));
+        Lobby? target = lobbyManager.GetLobbyByCode(dto.Code);
+        Lobby lobby;
+        if (target is not null && target.IsTeamChallenge)
+        {
+            long? userTeamId = await teamService.GetUserTeamIdAsync(client.User!.Id);
+            lobbyManager.AddPlayerToTeamChallengeLobby(client, target.Id, userTeamId);
+            await teamService.MarkTeamCheckedInAsync(target.TeamChallengeId, userTeamId);
+            lobby = target;
+        }
+        else
+        {
+            lobby = await dispatcher.Dispatch(new JoinLobbyWithCodeCommand(client, dto.Code));
+        }
         await SendLobbyToClientAndInformOtherClientsInLobby(client, lobby);
         await presenceService.BroadcastRosterAsync(excludeClientId: client.Id);
     }
@@ -113,7 +139,8 @@ public class LobbyFrameHandlers(
     private async Task GetAllLobbiesCallback(MessageFrame frame, IClient client)
     {
         List<Lobby> lobbies = await dispatcher.Dispatch(new GetAllLobbiesQuery());
-        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies);
+        List<Domain.Game.Game>? activeGames = gameManager?.GetAllActiveGames();
+        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies, activeGames);
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 
@@ -121,7 +148,10 @@ public class LobbyFrameHandlers(
     {
         LobbyNameDto dto = frame.GetObjectFromMessage<LobbyNameDto>();
         List<Lobby> lobbies = await dispatcher.Dispatch(new GetLobbiesWithNameQuery(dto.Name));
-        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies);
+        List<Domain.Game.Game>? activeGames = gameManager?.GetAllActiveGames()
+            .Where(g => (g.MatchTitle ?? string.Empty).Contains(dto.Name ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        ResponseObjectDto<LobbiesInfoDto> response = DtoBuilder.GetLobbiesInfoDto(lobbies, activeGames);
         await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(response, frame.CommandType)));
     }
 
@@ -210,6 +240,14 @@ public class LobbyFrameHandlers(
         {
             await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
                 ResponseDto.Error(ErrorTypes.Unknown, "Only the table host can add bots."),
+                frame.CommandType)));
+            return;
+        }
+
+        if (lobby.IsTeamChallenge && lobby.RequireFullHumanSquad)
+        {
+            await client.SendAsync(new NetworkFrame(MessageFrameBuilder.ResponseFrame(
+                ResponseDto.Error(ErrorTypes.Unknown, "Bots are disabled for this competitive Team Challenge."),
                 frame.CommandType)));
             return;
         }

@@ -28,5 +28,8 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Dto.Game
 
         [JsonProperty(PropertyName = "pts", NullValueHandling = NullValueHandling.Ignore)]
         public int? PointsAwarded { get; set; }
+
+        [JsonProperty(PropertyName = "elo", NullValueHandling = NullValueHandling.Ignore)]
+        public MatchEloBreakdownDto EloBreakdown { get; set; }
     }
 }

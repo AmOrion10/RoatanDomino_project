@@ -9,8 +9,10 @@ using System.Threading.Tasks;
 using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 
@@ -143,18 +145,102 @@ public class RoatanOnlineController : MonoBehaviour
     private TMP_Text refreshLobbiesBtnLabel;
     private TMP_InputField createLobbyNameInput;
     private TMP_InputField joinCodeInput;
+    private enum HubBrowserTab
+    {
+        Tables = 0,
+        Players = 1,
+        Leaderboard = 2,
+        Teams = 3,
+        Chat = 4
+    }
+
+    private sealed class PlayerActionProfileData
+    {
+        public long UserId;
+        public string Username;
+        public string AvatarBase64;
+        public int Elo;
+        public int Wins;
+        public int Losses;
+        public int WinAssists;
+        public int TotalMoves;
+        public int OptimalMoves;
+        public double AverageTurnSeconds;
+        public bool IsOnline;
+        public long? TeamId;
+        public string TeamTag;
+    }
+
+    private static readonly int[] TeamMinEloOptions = { 100, 500, 900, 1200, 1500, 1800, 2100 };
+    private static readonly int[] OpenChallengeMinEloOptions = { 100, 900, 1200, 1500 };
+
+    private OpenTeamChallengesDto latestOpenChallenges;
+    private MatchFormat openChSelectedMode = MatchFormat.SIX_LOV;
+    private TableStyle openChSelectedVariant = TableStyle.DRAW;
+    private int openChMinEloIndex = 0;
+    private bool openChRequireHumansOnly = false;
+
     private Image hubTablesTabImg;
     private Image hubPlayersTabImg;
+    private Image hubLeaderboardTabImg;
+    private Image hubTeamsTabImg;
+    private Image hubChatTabImg;
     private TMP_Text hubTablesTabLabel;
     private TMP_Text hubPlayersTabLabel;
+    private TMP_Text hubLeaderboardTabLabel;
+    private TMP_Text hubTeamsTabLabel;
+    private TMP_Text hubChatTabLabel;
     private GameObject hubTablesScrollObj;
     private GameObject hubPlayersScrollObj;
-    private bool hubShowingPlayersTab;
+    private GameObject hubLeaderboardViewObj;
+    private GameObject hubTeamsScrollObj;
+    private GameObject hubChatViewObj;
+    private HubBrowserTab activeHubTab = HubBrowserTab.Tables;
     private RectTransform lobbiesListContent;
     private RectTransform playersRosterContent;
+    private RectTransform leaderboardListContent;
+    private RectTransform teamsContentRoot;
+    private GameObject leaderboardSelfBannerCard;
+    private Image leaderboardSelfAvatarImg;
+    private TMP_Text leaderboardSelfAvatarInitials;
+    private TMP_Text leaderboardSelfRankLabel;
+    private TMP_Text leaderboardSelfNameTierLabel;
+    private TMP_Text leaderboardSelfStatsLabel;
+    private bool leaderboardShowingTeams;
+    private Image lbPlayersSubTabImg;
+    private Image lbTeamsSubTabImg;
+    private TMP_Text lbPlayersSubTabLabel;
+    private TMP_Text lbTeamsSubTabLabel;
+    private GameObject lbPlayersSubViewObj;
+    private GameObject lbTeamsSubViewObj;
+    private GameObject teamLeaderboardSelfCard;
+    private TMP_Text teamLeaderboardSelfRankLabel;
+    private TMP_Text teamLeaderboardSelfNameTierLabel;
+    private TMP_Text teamLeaderboardSelfStatsLabel;
+    private RectTransform teamLeaderboardListContent;
     private readonly List<GameObject> spawnedLobbyRows = new List<GameObject>();
     private readonly List<GameObject> spawnedRosterRows = new List<GameObject>();
+    private readonly List<GameObject> spawnedLeaderboardRows = new List<GameObject>();
+    private readonly List<GameObject> spawnedTeamLeaderboardRows = new List<GameObject>();
+    private readonly List<GameObject> spawnedTeamSectionObjs = new List<GameObject>();
     private readonly List<PlayerPresenceDto> latestRoster = new List<PlayerPresenceDto>();
+    private LeaderboardDto latestLeaderboard;
+    private TeamLeaderboardDto latestTeamLeaderboard;
+    private MyTeamDetailsDto myTeamDetails;
+    private TeamsListDto latestTeamsList;
+    private string createTeamNameDraft = string.Empty;
+    private string createTeamTagDraft = string.Empty;
+    private TeamJoinPolicy createTeamJoinPolicy = TeamJoinPolicy.Open;
+    private int createTeamMinEloIndex = 0;
+    private TeamActivityRequirement createTeamActivityReq = TeamActivityRequirement.Any;
+    private string teamSearchQuery = string.Empty;
+    private string editTeamNameDraft = string.Empty;
+    private string editTeamTagDraft = string.Empty;
+    private TeamJoinPolicy editTeamJoinPolicy = TeamJoinPolicy.Open;
+    private int editTeamMinEloIndex = 0;
+    private TeamActivityRequirement editTeamActivityReq = TeamActivityRequirement.Any;
+    private long editTeamDraftTeamId = -1;
+    private string teamInviteUsernameDraft = string.Empty;
     private int createLobbyMaxPlayers = 4;
     private TableStyle createTableStyle = TableStyle.BLOCK;
     private MatchFormat createMatchFormat = MatchFormat.SIX_LOV;
@@ -195,6 +281,80 @@ public class RoatanOnlineController : MonoBehaviour
     private RectTransform invitePlayersListContent;
     private readonly List<GameObject> spawnedInviteModalRows = new List<GameObject>();
 
+    // Team Challenge Modals (Send Challenge + Incoming Crew Challenge)
+    private GameObject challengeTeamModal;
+    private TMP_Text challengeTeamModalTitle;
+    private TeamLeaderboardEntryDto challengeTargetTeam;
+    private MatchFormat challengeSelectedMode = MatchFormat.SIX_LOV;
+    private TableStyle challengeSelectedVariant = TableStyle.DRAW;
+    private Image challengeModeSixLovImg;
+    private Image challengeModeTwoBestImg;
+    private Image challengeVariantDrawImg;
+    private Image challengeVariantBlockImg;
+    private GameObject incomingTeamChallengeModal;
+    private TMP_Text incomingTeamChallengeTitle;
+    private TMP_Text incomingTeamChallengeBody;
+    private Button incomingTeamChallengeAcceptBtn;
+    private TMP_Text incomingTeamChallengeAcceptLabel;
+    private Button incomingTeamChallengeDeclineBtn;
+    private TMP_Text incomingTeamChallengeDeclineLabel;
+    private TeamChallengeDto pendingTeamChallenge;
+
+    // Live Match Spectating State & HUD
+    private bool isSpectatingMatch;
+    private int spectatingGameId;
+    private int liveSpectatorCount;
+    private string spectatingMatchTitle = string.Empty;
+    private readonly List<PlayerDto> spectatingPlayers = new List<PlayerDto>();
+    private GameObject onlineSpectatorBadgeObj;
+    private TMP_Text onlineSpectatorBadgeLabel;
+    private Button onlineLeaveSpectateBtn;
+
+    // Player Action Card & Direct Player Challenge Modals
+    private GameObject playerActionModal;
+    private Image playerActionAvatarImg;
+    private TMP_Text playerActionAvatarInitials;
+    private TMP_Text playerActionNameTierLabel;
+    private TMP_Text playerActionStatsLabel;
+    private Button playerActionChallengeBtn;
+    private Button playerActionMessageBtn;
+    private Button playerActionInviteTeamBtn;
+    private PlayerActionProfileData selectedActionPlayer;
+
+    private GameObject directChallengeModal;
+    private TMP_Text directChallengeModalTitle;
+    private MatchFormat directChallengeMode = MatchFormat.TWO_BEST;
+    private TableStyle directChallengeVariant = TableStyle.DRAW;
+    private Image directChallengeTwoBestImg;
+    private Image directChallengeCutThroatImg;
+    private Image directChallengeDrawImg;
+    private Image directChallengeBlockImg;
+
+    private GameObject incomingDirectChallengeModal;
+    private TMP_Text incomingDirectChallengeBody;
+    private DirectChallengeDto pendingDirectChallenge;
+
+    // Team Chat & Direct Messages UI & State
+    private bool chatShowingDirectMessages;
+    private long activeDmPartnerUserId;
+    private string activeDmPartnerUsername = string.Empty;
+    private Image chatTeamSubTabImg;
+    private Image chatDmSubTabImg;
+    private TMP_Text chatTeamSubTabLabel;
+    private TMP_Text chatDmSubTabLabel;
+    private TMP_Text chatActiveChannelHeader;
+    private RectTransform chatDmPartnersContent;
+    private GameObject chatDmPartnersStripObj;
+    private RectTransform chatMessagesListContent;
+    private TMP_InputField chatComposeInput;
+    private readonly List<GameObject> spawnedChatPartnerChips = new List<GameObject>();
+    private readonly List<GameObject> spawnedChatMessageRows = new List<GameObject>();
+    private readonly List<ChatMessageDto> teamChatMessages = new List<ChatMessageDto>();
+    private readonly Dictionary<long, List<ChatMessageDto>> dmThreadsByUserId = new Dictionary<long, List<ChatMessageDto>>();
+    private readonly Dictionary<long, string> dmPartnerNamesByUserId = new Dictionary<long, string>();
+    private int unreadTeamChatCount;
+    private readonly Dictionary<long, int> unreadDmCountByUserId = new Dictionary<long, int>();
+
     // Online Match View (Roatan Tropical Tabletop!)
     private TMP_Text onlineMatchHeader;
     private TMP_Text onlineMatchStatus;
@@ -212,6 +372,10 @@ public class RoatanOnlineController : MonoBehaviour
     private GameObject onlineEndOverlay;
     private TMP_Text onlineEndTitleLabel;
     private TMP_Text onlineEndBodyLabel;
+    private GameObject onlineEndEloBreakdownCard;
+    private TMP_Text onlineEndEloBreakdownTitle;
+    private TMP_Text onlineEndEloBreakdownBody;
+    private MatchEloBreakdownDto latestMatchEloBreakdown;
     private Button onlineEndPrimaryBtn;
     private TMP_Text onlineEndPrimaryBtnLabel;
     private Button onlineEndNewMatchBtn;
@@ -255,6 +419,11 @@ public class RoatanOnlineController : MonoBehaviour
         BuildRejoinModal(safeRoot);
         BuildIncomingInviteModal(safeRoot);
         BuildInvitePlayersModal(safeRoot);
+        BuildChallengeTeamModal(safeRoot);
+        BuildIncomingTeamChallengeModal(safeRoot);
+        BuildPlayerActionModal(safeRoot);
+        BuildDirectChallengeModal(safeRoot);
+        BuildIncomingDirectChallengeModal(safeRoot);
         BuildOAuthWaitingModal(safeRoot);
         BuildProfileModal(safeRoot);
         BuildDeleteAccountModal(safeRoot);
@@ -346,6 +515,11 @@ public class RoatanOnlineController : MonoBehaviour
             ShowSubView(hubView);
             RequestLobbiesList();
             RequestPlayerRoster();
+            RequestLeaderboard();
+            RequestTeamLeaderboard();
+            RequestMyTeam();
+            RequestTeamsList();
+            RequestOpenTeamChallenges();
         }
         else
         {
@@ -429,6 +603,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.PossiblesMovesEvent += OnOnlinePossibleMoves;
         eh.NumberOfDominoPerPlayerEvent += OnOnlineCountsUpdated;
         eh.EndGameEvent += OnOnlineEndGame;
+        eh.MatchEloBreakdownEvent += OnMatchEloBreakdown;
         eh.LeaveGameResponseEvent += OnOnlineLeaveGameResponse;
         eh.CheckActiveMatchResponseEvent += OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent += OnRejoinMatchResponse;
@@ -446,6 +621,36 @@ public class RoatanOnlineController : MonoBehaviour
         eh.GetInfoProfileResponseEvent += OnGetInfoProfileResponse;
         eh.UpdateProfileAvatarResponseEvent += OnUpdateProfileAvatarResponse;
         eh.DeleteAccountResponseEvent += OnDeleteAccountResponse;
+        eh.GetLeaderboardResponseEvent += OnGetLeaderboardResponse;
+        eh.GetTeamsResponseEvent += OnGetTeamsResponse;
+        eh.GetMyTeamResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.CreateTeamResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.UpdateTeamSettingsResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.JoinOrRequestTeamResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.RespondTeamJoinRequestResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.InviteToTeamResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.RespondTeamInviteResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.PromoteOrDemoteMemberResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.KickTeamMemberResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.LeaveTeamResponseEvent += OnTeamMutationOrDetailsResponse;
+        eh.GetTeamLeaderboardResponseEvent += OnGetTeamLeaderboardResponse;
+        eh.SendTeamChallengeResponseEvent += OnSendTeamChallengeResponse;
+        eh.RespondTeamChallengeResponseEvent += OnRespondTeamChallengeResponse;
+        eh.TeamChallengeNotificationEvent += OnTeamChallengeNotification;
+        eh.JoinAsSpectatorResponseEvent += OnJoinAsSpectatorResponse;
+        eh.LeaveSpectatorResponseEvent += OnLeaveSpectatorResponse;
+        eh.SpectatorCountUpdatedEvent += OnSpectatorCountUpdated;
+        eh.SendDirectChallengeResponseEvent += OnSendDirectChallengeResponse;
+        eh.RespondDirectChallengeResponseEvent += OnRespondDirectChallengeResponse;
+        eh.DirectChallengeNotificationEvent += OnDirectChallengeNotification;
+        eh.SendSocialChatMessageResponseEvent += OnSendSocialChatMessageResponse;
+        eh.GetChatHistoryResponseEvent += OnGetChatHistoryResponse;
+        eh.ChatMessageReceivedEvent += OnChatMessageReceived;
+        eh.GetOpenTeamChallengesResponseEvent += OnGetOpenTeamChallengesResponse;
+        eh.PostOpenTeamChallengeResponseEvent += OnPostOpenTeamChallengeResponse;
+        eh.CancelOpenTeamChallengeResponseEvent += OnCancelOpenTeamChallengeResponse;
+        eh.RequestAcceptTeamChallengeResponseEvent += OnRequestAcceptTeamChallengeResponse;
+        eh.AcceptOpenTeamChallengeResponseEvent += OnAcceptOpenTeamChallengeResponse;
     }
 
     private void UnsubscribeClient()
@@ -471,6 +676,7 @@ public class RoatanOnlineController : MonoBehaviour
         eh.PossiblesMovesEvent -= OnOnlinePossibleMoves;
         eh.NumberOfDominoPerPlayerEvent -= OnOnlineCountsUpdated;
         eh.EndGameEvent -= OnOnlineEndGame;
+        eh.MatchEloBreakdownEvent -= OnMatchEloBreakdown;
         eh.LeaveGameResponseEvent -= OnOnlineLeaveGameResponse;
         eh.CheckActiveMatchResponseEvent -= OnCheckActiveMatchResponse;
         eh.RejoinMatchResponseEvent -= OnRejoinMatchResponse;
@@ -488,6 +694,36 @@ public class RoatanOnlineController : MonoBehaviour
         eh.GetInfoProfileResponseEvent -= OnGetInfoProfileResponse;
         eh.UpdateProfileAvatarResponseEvent -= OnUpdateProfileAvatarResponse;
         eh.DeleteAccountResponseEvent -= OnDeleteAccountResponse;
+        eh.GetLeaderboardResponseEvent -= OnGetLeaderboardResponse;
+        eh.GetTeamsResponseEvent -= OnGetTeamsResponse;
+        eh.GetMyTeamResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.CreateTeamResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.UpdateTeamSettingsResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.JoinOrRequestTeamResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.RespondTeamJoinRequestResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.InviteToTeamResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.RespondTeamInviteResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.PromoteOrDemoteMemberResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.KickTeamMemberResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.LeaveTeamResponseEvent -= OnTeamMutationOrDetailsResponse;
+        eh.GetTeamLeaderboardResponseEvent -= OnGetTeamLeaderboardResponse;
+        eh.SendTeamChallengeResponseEvent -= OnSendTeamChallengeResponse;
+        eh.RespondTeamChallengeResponseEvent -= OnRespondTeamChallengeResponse;
+        eh.TeamChallengeNotificationEvent -= OnTeamChallengeNotification;
+        eh.JoinAsSpectatorResponseEvent -= OnJoinAsSpectatorResponse;
+        eh.LeaveSpectatorResponseEvent -= OnLeaveSpectatorResponse;
+        eh.SpectatorCountUpdatedEvent -= OnSpectatorCountUpdated;
+        eh.SendDirectChallengeResponseEvent -= OnSendDirectChallengeResponse;
+        eh.RespondDirectChallengeResponseEvent -= OnRespondDirectChallengeResponse;
+        eh.DirectChallengeNotificationEvent -= OnDirectChallengeNotification;
+        eh.SendSocialChatMessageResponseEvent -= OnSendSocialChatMessageResponse;
+        eh.GetChatHistoryResponseEvent -= OnGetChatHistoryResponse;
+        eh.ChatMessageReceivedEvent -= OnChatMessageReceived;
+        eh.GetOpenTeamChallengesResponseEvent -= OnGetOpenTeamChallengesResponse;
+        eh.PostOpenTeamChallengeResponseEvent -= OnPostOpenTeamChallengeResponse;
+        eh.CancelOpenTeamChallengeResponseEvent -= OnCancelOpenTeamChallengeResponse;
+        eh.RequestAcceptTeamChallengeResponseEvent -= OnRequestAcceptTeamChallengeResponse;
+        eh.AcceptOpenTeamChallengeResponseEvent -= OnAcceptOpenTeamChallengeResponse;
         subscribedClient = null;
     }
 
@@ -1034,7 +1270,47 @@ public class RoatanOnlineController : MonoBehaviour
         }
         isSignedIn = false;
         currentLobby = null;
+        myTeamDetails = null;
+        latestTeamsList = null;
+        latestTeamLeaderboard = null;
+        latestOpenChallenges = null;
+        pendingTeamChallenge = null;
+        pendingDirectChallenge = null;
+        selectedActionPlayer = null;
+        isSpectatingMatch = false;
+        spectatingGameId = 0;
+        liveSpectatorCount = 0;
+        spectatingPlayers.Clear();
+        teamChatMessages.Clear();
+        dmThreadsByUserId.Clear();
+        dmPartnerNamesByUserId.Clear();
+        unreadTeamChatCount = 0;
+        unreadDmCountByUserId.Clear();
+        activeDmPartnerUserId = 0;
+        activeDmPartnerUsername = string.Empty;
+        editTeamDraftTeamId = -1;
+        if (challengeTeamModal != null) challengeTeamModal.SetActive(false);
+        if (incomingTeamChallengeModal != null) incomingTeamChallengeModal.SetActive(false);
+        if (playerActionModal != null) playerActionModal.SetActive(false);
+        if (directChallengeModal != null) directChallengeModal.SetActive(false);
+        if (incomingDirectChallengeModal != null) incomingDirectChallengeModal.SetActive(false);
         ShowSubView(authView);
+    }
+
+    private void RequestChatHistories()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetChatHistoryFrame(new GetChatHistoryDto
+        {
+            ChannelType = SocialChatChannelType.Team,
+            Limit = 60
+        }));
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetChatHistoryFrame(new GetChatHistoryDto
+        {
+            ChannelType = SocialChatChannelType.Direct,
+            OtherUserId = null,
+            Limit = 100
+        }));
     }
 
     private void RequestLobbiesList()
@@ -1047,6 +1323,37 @@ public class RoatanOnlineController : MonoBehaviour
     {
         if (!EnsureConnectedForRequest()) return;
         subscribedClient.AddToSendQueue(MessageFrameBuilder.GetPlayerRosterFrame());
+    }
+
+    private void RequestLeaderboard()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetLeaderboardFrame());
+    }
+
+    private void RequestTeamLeaderboard()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetTeamLeaderboardFrame());
+    }
+
+    private void RequestMyTeam()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetMyTeamFrame());
+    }
+
+    private void RequestTeamsList(string query = null)
+    {
+        if (!EnsureConnectedForRequest()) return;
+        string q = query ?? teamSearchQuery;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetTeamsFrame(new GetTeamsRequestDto { SearchQuery = q }));
+    }
+
+    private void RequestOpenTeamChallenges()
+    {
+        if (!EnsureConnectedForRequest()) return;
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.GetOpenTeamChallengesFrame());
     }
 
     private void RequestQuickRanked()
@@ -1237,7 +1544,14 @@ public class RoatanOnlineController : MonoBehaviour
         {
             MessageFrameBuilder.ReadyConnectedFrame(),
             MessageFrameBuilder.GetAllLobbyFrame(),
-            MessageFrameBuilder.GetPlayerRosterFrame()
+            MessageFrameBuilder.GetPlayerRosterFrame(),
+            MessageFrameBuilder.GetLeaderboardFrame(),
+            MessageFrameBuilder.GetTeamLeaderboardFrame(),
+            MessageFrameBuilder.GetMyTeamFrame(),
+            MessageFrameBuilder.GetTeamsFrame(new GetTeamsRequestDto()),
+            MessageFrameBuilder.GetOpenTeamChallengesFrame(),
+            MessageFrameBuilder.GetChatHistoryFrame(new GetChatHistoryDto { ChannelType = SocialChatChannelType.Team, Limit = 60 }),
+            MessageFrameBuilder.GetChatHistoryFrame(new GetChatHistoryDto { ChannelType = SocialChatChannelType.Direct, Limit = 100 })
         });
         RefreshHubProfileHeader(fallbackName);
         ShowSubView(hubView);
@@ -1250,14 +1564,26 @@ public class RoatanOnlineController : MonoBehaviour
         }
     }
 
+    private static int ResolveDisplayElo(UserDto user)
+    {
+        if (user == null) return RoatanRankTierHelper.DefaultElo;
+        return user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
+    }
+
+    private static int ResolveDisplayElo(int rawElo)
+    {
+        return rawElo >= RoatanRankTierHelper.MinElo ? rawElo : RoatanRankTierHelper.DefaultElo;
+    }
+
     private void RefreshHubProfileHeader(string fallbackName = "Online Player")
     {
         UserDto user = subscribedClient?.User;
         string loginName = user != null && !string.IsNullOrWhiteSpace(user.Login) ? user.Login : fallbackName;
-        int elo = user != null ? user.Score : 1000;
+        int elo = ResolveDisplayElo(user);
+        string rankBadge = RoatanRankTierHelper.FormatRichBadge(elo);
         if (hubWelcomeLabel != null)
         {
-            hubWelcomeLabel.text = $"{loginName}  •  Elo {elo}";
+            hubWelcomeLabel.text = $"{loginName}\n<size=19>{rankBadge}</size>";
         }
         ApplyCircularAvatar(
             hubAvatarImg,
@@ -1270,6 +1596,7 @@ public class RoatanOnlineController : MonoBehaviour
     private void OnGetInfoProfileResponse(ResponseObjectDto<InfoProfileDto> dto)
     {
         if (dto == null || !dto.OkResult || dto.Object == null) return;
+        RefreshHubProfileHeader();
         if (profileModal != null && profileModal.activeSelf)
         {
             RefreshProfileModalUI(dto.Object.Statistic);
@@ -1405,14 +1732,13 @@ public class RoatanOnlineController : MonoBehaviour
 
         if (profileModalStatsLabel != null)
         {
-            if (stats != null)
-            {
-                profileModalStatsLabel.text = $"Elo {user.Score}  •  Played: {stats.NumberOfGamePlayed}  •  Wins: {stats.NumberOfGameWon}  •  Losses: {stats.NumberOfGameLost}";
-            }
-            else
-            {
-                profileModalStatsLabel.text = $"Elo {user.Score}  •  Online Profile";
-            }
+            int elo = ResolveDisplayElo(user);
+            string rankBadge = RoatanRankTierHelper.FormatRichBadge(elo);
+            int wins = user.Wins > 0 || user.Losses > 0 ? user.Wins : (stats != null ? stats.NumberOfGameWon : 0);
+            int losses = user.Wins > 0 || user.Losses > 0 ? user.Losses : (stats != null ? stats.NumberOfGameLost : 0);
+            string accStr = user.TotalMoves > 0 ? $"{user.AccuracyPercent:0.#}%" : "—";
+            string speedStr = user.AverageTurnSeconds > 0.01 ? $"{user.AverageTurnSeconds:0.0}s" : "—";
+            profileModalStatsLabel.text = $"{rankBadge} Elo\n<size=19>W/L: {wins}-{losses}  •  Acc: {accStr}  •  Assists: {user.WinAssists}  •  Avg: {speedStr}</size>";
         }
 
         if (profileAdoptSocialBtn != null)
@@ -1510,6 +1836,9 @@ public class RoatanOnlineController : MonoBehaviour
     {
         isSignedIn = false;
         currentLobby = null;
+        myTeamDetails = null;
+        latestTeamsList = null;
+        editTeamDraftTeamId = -1;
         ShowSubView(authView);
     }
 
@@ -1530,38 +1859,56 @@ public class RoatanOnlineController : MonoBehaviour
         foreach (LobbyInfoDto table in dto.Object.Lobbies)
         {
             LobbyInfoDto captured = table;
+            bool isLive = table.IsInProgress;
             bool isFull = table.NumberOfPlayer >= table.MaxNumberOfPlayer;
-            Color cardColor = table.IsHouseTable
-                ? new Color(0.09f, 0.27f, 0.30f, 0.97f)
-                : new Color(0.08f, 0.23f, 0.29f, 0.95f);
+            Color cardColor = isLive
+                ? new Color(0.11f, 0.21f, 0.30f, 0.97f)
+                : (table.IsHouseTable
+                    ? new Color(0.09f, 0.27f, 0.30f, 0.97f)
+                    : new Color(0.08f, 0.23f, 0.29f, 0.95f));
 
-            GameObject row = CreateCard(lobbiesListContent, $"Table_{table.Id}", cardColor, Vector2.zero, new Vector2(860f, 146f));
+            GameObject row = CreateCard(lobbiesListContent, $"Table_{table.Id}_{(isLive ? "Live" : "Open")}", cardColor, Vector2.zero, new Vector2(860f, 146f));
             row.AddComponent<LayoutElement>().preferredHeight = 146f;
 
-            string houseTag = table.IsHouseTable ? "  <color=#F7C948>[HOUSE]</color>" : string.Empty;
+            string liveTag = isLive
+                ? $"  <color=#FF6B6B>[LIVE • {table.SpectatorCount} Watching]</color>"
+                : (table.IsHouseTable ? "  <color=#F7C948>[HOUSE]</color>" : string.Empty);
             string hostName = string.IsNullOrWhiteSpace(table.Creator) ? "House" : table.Creator;
             string modeBadge = FormatLobbyRulesBadge(table.MatchFormat, table.TableStyle, table.OneOnePlayoff);
             string seatedSummary = (table.SeatedPlayers != null && table.SeatedPlayers.Count > 0)
                 ? string.Join(", ", table.SeatedPlayers)
                 : "Open — tap Join to sit!";
 
-            CreateText(row.transform, "TTitle", $"{table.Name}{houseTag}  ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})", 25, FontStyles.Bold, Color.white, new Vector2(-125f, 42f), new Vector2(580f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
-            CreateText(row.transform, "TMeta", $"Host: {hostName}  •  {modeBadge}", 19, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-125f, 4f), new Vector2(580f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
-            CreateText(row.transform, "TSeated", $"Seated: {seatedSummary}", 18, FontStyles.Italic, new Color(0.80f, 0.93f, 0.96f), new Vector2(-125f, -36f), new Vector2(580f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TTitle", $"{table.Name}{liveTag}  ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})", 23, FontStyles.Bold, Color.white, new Vector2(-125f, 42f), new Vector2(580f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TMeta", isLive ? $"In Progress  •  {modeBadge}" : $"Host: {hostName}  •  {modeBadge}", 19, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-125f, 4f), new Vector2(580f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TSeated", $"Players: {seatedSummary}", 18, FontStyles.Italic, new Color(0.80f, 0.93f, 0.96f), new Vector2(-125f, -36f), new Vector2(580f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
 
-            string joinLabel = isFull ? $"FULL ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})" : "Join";
-            Color joinColor = isFull ? new Color(0.38f, 0.24f, 0.25f, 0.95f) : RoatanVisualAssets.PalmGreen;
-            Button joinBtn = CreatePillButton(row.transform, "BtnJoinTable", joinLabel, joinColor, new Vector2(315f, 0f), new Vector2(190f, 74f), isFull ? 21 : 26, () =>
+            if (isLive)
             {
-                if (captured.NumberOfPlayer >= captured.MaxNumberOfPlayer)
+                CreatePillButton(row.transform, "BtnWatchLive", "Watch Live", RoatanVisualAssets.BrightLagoon, new Vector2(315f, 0f), new Vector2(190f, 74f), 22, () =>
                 {
-                    SetFeedback($"This table is full ({captured.NumberOfPlayer}/{captured.MaxNumberOfPlayer} players).", RoatanVisualAssets.SunsetCoral);
-                    return;
-                }
-                RoatanSoundFX.Instance?.PlayTap();
-                subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = captured.Id }));
-            });
-            joinBtn.interactable = !isFull;
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinAsSpectatorFrame(new JoinSpectatorDto { GameId = captured.Id }));
+                    SetFeedback($"Joining {captured.Name} as spectator...", RoatanVisualAssets.IslandGold);
+                });
+            }
+            else
+            {
+                string joinLabel = isFull ? $"FULL ({table.NumberOfPlayer}/{table.MaxNumberOfPlayer})" : "Join";
+                Color joinColor = isFull ? new Color(0.38f, 0.24f, 0.25f, 0.95f) : RoatanVisualAssets.PalmGreen;
+                Button joinBtn = CreatePillButton(row.transform, "BtnJoinTable", joinLabel, joinColor, new Vector2(315f, 0f), new Vector2(190f, 74f), isFull ? 21 : 26, () =>
+                {
+                    if (captured.NumberOfPlayer >= captured.MaxNumberOfPlayer)
+                    {
+                        SetFeedback($"This table is full ({captured.NumberOfPlayer}/{captured.MaxNumberOfPlayer} players).", RoatanVisualAssets.SunsetCoral);
+                        return;
+                    }
+                    RoatanSoundFX.Instance?.PlayTap();
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = captured.Id }));
+                });
+                joinBtn.interactable = !isFull;
+            }
 
             spawnedLobbyRows.Add(row);
         }
@@ -1650,7 +1997,7 @@ public class RoatanOnlineController : MonoBehaviour
         int onlineCount = latestRoster.Count(p => p.IsOnline);
         if (hubPlayersTabLabel != null)
         {
-            hubPlayersTabLabel.text = $"Players ({onlineCount} Online)";
+            hubPlayersTabLabel.text = $"Players ({onlineCount})";
         }
 
         RefreshPlayersRosterUI();
@@ -1738,8 +2085,10 @@ public class RoatanOnlineController : MonoBehaviour
         onlineIsBotControlled = false;
         onlineBotPacingRemaining = 0f;
         onlineTurnActionDispatched = false;
+        latestMatchEloBreakdown = null;
         if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
         if (onlineEndOverlay != null) onlineEndOverlay.SetActive(false);
+        if (onlineEndEloBreakdownCard != null) onlineEndEloBreakdownCard.SetActive(false);
         RefreshOnlineTakeoverIndicators();
 
         for (int r = 0; r < 60; r++)
@@ -1824,6 +2173,11 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineHandDistributed(HandDto dto)
     {
+        isSpectatingMatch = false;
+        spectatingGameId = 0;
+        liveSpectatorCount = 0;
+        spectatingPlayers.Clear();
+        RefreshOnlineSpectatorHUD();
         CancelOnlineShuffle();
         ClearOnlineBoardVisuals();
         onlineHand.Clear();
@@ -1999,9 +2353,12 @@ public class RoatanOnlineController : MonoBehaviour
             if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
             onlineDrawBtn.gameObject.SetActive(false);
 
-            string playerName = currentLobby?.Players.FirstOrDefault(p => p.Id == dto.IdUserPlaying)?.Name ?? $"Player {dto.IdUserPlaying}";
+            string playerName = (isSpectatingMatch ? spectatingPlayers : currentLobby?.Players)?
+                .FirstOrDefault(p => p.Id == dto.IdUserPlaying)?.Name ?? $"Player {dto.IdUserPlaying}";
             string botSuffix = dto.IsBotControlled == true ? " [Bot Auto-Playing]" : "";
-            onlineMatchStatus.text = $"{playerName}{botSuffix}'s turn...";
+            onlineMatchStatus.text = isSpectatingMatch
+                ? $"SPECTATING  •  {playerName}{botSuffix}'s turn..."
+                : $"{playerName}{botSuffix}'s turn...";
         }
     }
 
@@ -2162,16 +2519,19 @@ public class RoatanOnlineController : MonoBehaviour
 
     private void OnOnlineCountsUpdated(NumberOfDominoPerPlayerDto dto)
     {
-        if (dto?.NumberOfDomino == null || currentLobby == null) return;
+        List<PlayerDto> roster = isSpectatingMatch ? spectatingPlayers : currentLobby?.Players;
+        if (dto?.NumberOfDomino == null || roster == null) return;
         List<string> parts = new List<string>();
-        foreach (PlayerDto p in currentLobby.Players)
+        foreach (PlayerDto p in roster)
         {
             if (dto.NumberOfDomino.TryGetValue(p.Id, out int count))
             {
-                parts.Add($"{p.Name}: {count}");
+                parts.Add($"{p.Name}: {count} tiles");
             }
         }
-        onlineMatchHeader.text = string.Join("  •  ", parts);
+        onlineMatchHeader.text = isSpectatingMatch
+            ? $"[LIVE] {spectatingMatchTitle}  •  {string.Join("  |  ", parts)}"
+            : string.Join("  •  ", parts);
     }
 
     private void OnOnlineEndGame(EndGameDto dto)
@@ -2246,7 +2606,18 @@ public class RoatanOnlineController : MonoBehaviour
 
             bool showRematchLayout = breakTriggered || matchOver;
             onlineEndPrimaryBtn.onClick.RemoveAllListeners();
-            if (showRematchLayout)
+            if (isSpectatingMatch)
+            {
+                onlineEndPrimaryBtnLabel.text = "Leave Spectating";
+                onlineEndPrimaryBtn.onClick.AddListener(() =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    onlineEndOverlay.SetActive(false);
+                    LeaveSpectatingMatch();
+                });
+                onlineEndNewMatchBtn.gameObject.SetActive(false);
+            }
+            else if (showRematchLayout)
             {
                 onlineEndPrimaryBtnLabel.text = "Rematch";
                 onlineEndPrimaryBtn.onClick.AddListener(() =>
@@ -2281,6 +2652,110 @@ public class RoatanOnlineController : MonoBehaviour
             onlineEndOverlay.transform.SetAsLastSibling();
             onlineEndOverlay.SetActive(true);
         }
+
+        if (dto?.EloBreakdown != null)
+        {
+            OnMatchEloBreakdown(dto.EloBreakdown);
+        }
+        else if (latestMatchEloBreakdown != null)
+        {
+            RefreshOnlineEndEloBreakdownUI(latestMatchEloBreakdown);
+        }
+    }
+
+    private void OnMatchEloBreakdown(MatchEloBreakdownDto breakdown)
+    {
+        if (breakdown == null) return;
+        latestMatchEloBreakdown = breakdown;
+
+        if (subscribedClient?.User != null && breakdown.Players != null)
+        {
+            PlayerEloBreakdownDto local = breakdown.Players.FirstOrDefault(p => p.PlayerId == subscribedClient.User.Id);
+            if (local != null && local.IsRankedApplied)
+            {
+                subscribedClient.User.Elo = local.NewElo;
+                RefreshHubProfileHeader();
+            }
+        }
+
+        RefreshOnlineEndEloBreakdownUI(breakdown);
+        if (EnsureConnectedForRequest())
+        {
+            RequestLeaderboard();
+            RequestTeamLeaderboard();
+            RequestMyTeam();
+        }
+    }
+
+    private void RefreshOnlineEndEloBreakdownUI(MatchEloBreakdownDto breakdown)
+    {
+        if (onlineEndEloBreakdownCard == null || onlineEndEloBreakdownTitle == null || onlineEndEloBreakdownBody == null)
+        {
+            return;
+        }
+
+        long localUserId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        PlayerEloBreakdownDto local = breakdown?.Players?.FirstOrDefault(p => p.PlayerId == localUserId)
+            ?? breakdown?.Players?.FirstOrDefault();
+
+        if (local == null)
+        {
+            onlineEndEloBreakdownCard.SetActive(false);
+            return;
+        }
+
+        string tierHex = string.IsNullOrWhiteSpace(local.TierColorHex)
+            ? local.NewTier.GetBadgeColorHex()
+            : local.TierColorHex;
+        string tierName = string.IsNullOrWhiteSpace(local.TierName)
+            ? local.NewTier.GetDisplayName()
+            : local.TierName;
+
+        string teamLine = FormatTeamBreakdownLine(breakdown?.TeamBreakdown);
+
+        if (!local.IsRankedApplied)
+        {
+            onlineEndEloBreakdownTitle.text = $"<color={tierHex}>[{tierName}]</color>  •  {local.NewElo} Elo (Unranked)";
+            onlineEndEloBreakdownBody.text = string.IsNullOrEmpty(teamLine)
+                ? "Online matches with 2+ real players update Elo ratings."
+                : $"Online matches with 2+ real players update Elo ratings.\n{teamLine}";
+            onlineEndEloBreakdownCard.SetActive(true);
+            return;
+        }
+
+        string deltaColor = local.Delta > 0 ? "#4BE38D" : (local.Delta < 0 ? "#F26D5B" : "#B8D8E0");
+        string signedDelta = local.Delta >= 0 ? $"+{local.Delta}" : local.Delta.ToString();
+        string promoTag = local.NewTier > local.PreviousTier ? "  <color=#F7C948>▲ RANK UP!</color>" : string.Empty;
+
+        onlineEndEloBreakdownTitle.text = $"<color={tierHex}>[{tierName}]</color>  •  {local.PreviousElo} → <b>{local.NewElo}</b>  (<color={deltaColor}><b>{signedDelta}</b></color>){promoTag}";
+
+        string speedStr = local.AverageTurnSeconds > 0.01 ? $"{local.AverageTurnSeconds:0.0}s" : "—";
+        string bonusPart = local.SpecialWinBonus > 0 ? $"  |  Bonus +{local.SpecialWinBonus}" : string.Empty;
+        string perfSign = local.PerformanceModifier >= 0 ? $"+{local.PerformanceModifier}" : local.PerformanceModifier.ToString();
+        string baseSign = local.BaseEloDelta >= 0 ? $"+{local.BaseEloDelta}" : local.BaseEloDelta.ToString();
+
+        string bodyText =
+            $"Result: <b>{local.ResultLabel}</b>  •  Assists: <b>{local.WinAssists}</b>  •  Accuracy: <b>{local.AccuracyPercent:0.#}%</b>  •  Avg Speed: <b>{speedStr}</b>\n" +
+            $"<size=17><color=#9FC5D0>Base {baseSign}{bonusPart}  |  Performance {perfSign}</color></size>";
+        if (!string.IsNullOrEmpty(teamLine))
+        {
+            bodyText += $"\n{teamLine}";
+        }
+
+        onlineEndEloBreakdownBody.text = bodyText;
+        onlineEndEloBreakdownCard.SetActive(true);
+    }
+
+    private static string FormatTeamBreakdownLine(TeamEloBreakdownDto teamBreakdown)
+    {
+        if (teamBreakdown?.TeamA == null || teamBreakdown.TeamB == null) return string.Empty;
+        TeamEloChangeDto a = teamBreakdown.TeamA;
+        TeamEloChangeDto b = teamBreakdown.TeamB;
+        string aDelta = a.Delta >= 0 ? $"+{a.Delta}" : a.Delta.ToString();
+        string bDelta = b.Delta >= 0 ? $"+{b.Delta}" : b.Delta.ToString();
+        string aColor = a.Delta >= 0 ? "#4BE38D" : "#F26D5B";
+        string bColor = b.Delta >= 0 ? "#4BE38D" : "#F26D5B";
+        return $"<size=17><color=#F7C948>Crew Elo:</color> [{a.TeamTag}] {a.NewElo} (<color={aColor}>{aDelta}</color>)  vs  [{b.TeamTag}] {b.NewElo} (<color={bColor}>{bDelta}</color>)</size>";
     }
 
     private void OnOnlineLeaveGameResponse(ResponseDto dto)
@@ -2859,7 +3334,7 @@ public class RoatanOnlineController : MonoBehaviour
         hubAvatarInitialsLabel = CreateText(hubAvObj.transform, "Init", "?", 24, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(56f, 44f));
         hubAvatarInitialsLabel.raycastTarget = false;
 
-        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 24, FontStyles.Bold, Color.white, new Vector2(-150f, 0f), new Vector2(440f, 54f));
+        hubWelcomeLabel = CreateText(profileBar.transform, "HubWelcome", "Online Player", 22, FontStyles.Bold, Color.white, new Vector2(-150f, 0f), new Vector2(440f, 70f));
         hubWelcomeLabel.alignment = TextAlignmentOptions.MidlineLeft;
         CreatePillButton(profileBar.transform, "BtnOpenProfile", "Profile", RoatanVisualAssets.BrightLagoon, new Vector2(168f, 0f), new Vector2(160f, 58f), 22, OpenProfileModal);
         Button outBtn = CreatePillButton(profileBar.transform, "BtnSignOut", "Sign Out", RoatanVisualAssets.SunsetCoral, new Vector2(356f, 0f), new Vector2(184f, 58f), 22, SubmitLogout);
@@ -2941,28 +3416,222 @@ public class RoatanOnlineController : MonoBehaviour
         Button codeBtn = CreatePillButton(codeCard.transform, "BtnJoinCode", "Join Code", RoatanVisualAssets.BrightLagoon, new Vector2(290f, 0f), new Vector2(280f, 60f), 24, RequestJoinByCode);
         joinCodeBtnLabel = codeBtn.GetComponentInChildren<TMP_Text>();
 
-        // Public Tables + Online/Offline Players Browser Card
+        // Public Tables + Online/Offline Players + Leaderboard + Teams + Chat Browser Card
         GameObject listCard = CreateCard(hubView.transform, "TablesBrowserCard", new Color(0.06f, 0.18f, 0.24f, 0.94f), new Vector2(0f, -412f), new Vector2(940f, 730f));
 
-        Button tablesTabBtn = CreatePillButton(listCard.transform, "TabPublicTables", "Tables", RoatanVisualAssets.BrightLagoon, new Vector2(-285f, 314f), new Vector2(280f, 58f), 23, () => SelectHubBrowserTab(showPlayers: false));
+        Button tablesTabBtn = CreatePillButton(listCard.transform, "TabPublicTables", "Tables", RoatanVisualAssets.BrightLagoon, new Vector2(-384f, 314f), new Vector2(126f, 56f), 17, () => SelectHubBrowserTab(HubBrowserTab.Tables));
         hubTablesTabImg = tablesTabBtn.GetComponent<Image>();
         hubTablesTabLabel = tablesTabBtn.GetComponentInChildren<TMP_Text>();
 
-        Button playersTabBtn = CreatePillButton(listCard.transform, "TabPlayersRoster", "Players (0 Online)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(25f, 314f), new Vector2(310f, 58f), 22, () => SelectHubBrowserTab(showPlayers: true));
+        Button playersTabBtn = CreatePillButton(listCard.transform, "TabPlayersRoster", "Players (0)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(-232f, 314f), new Vector2(162f, 56f), 16, () => SelectHubBrowserTab(HubBrowserTab.Players));
         hubPlayersTabImg = playersTabBtn.GetComponent<Image>();
         hubPlayersTabLabel = playersTabBtn.GetComponentInChildren<TMP_Text>();
 
-        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshTables", "Refresh Tables", new Color(0.10f, 0.34f, 0.42f, 1f), new Vector2(325f, 314f), new Vector2(246f, 58f), 20, () =>
+        Button leaderboardTabBtn = CreatePillButton(listCard.transform, "TabLeaderboard", "Ranks", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(-78f, 314f), new Vector2(130f, 56f), 17, () => SelectHubBrowserTab(HubBrowserTab.Leaderboard));
+        hubLeaderboardTabImg = leaderboardTabBtn.GetComponent<Image>();
+        hubLeaderboardTabLabel = leaderboardTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button teamsTabBtn = CreatePillButton(listCard.transform, "TabTeams", "Teams", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(72f, 314f), new Vector2(154f, 56f), 17, () => SelectHubBrowserTab(HubBrowserTab.Teams));
+        hubTeamsTabImg = teamsTabBtn.GetComponent<Image>();
+        hubTeamsTabLabel = teamsTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button chatTabBtn = CreatePillButton(listCard.transform, "TabSocialChat", "Chat", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(228f, 314f), new Vector2(142f, 56f), 17, () => SelectHubBrowserTab(HubBrowserTab.Chat));
+        hubChatTabImg = chatTabBtn.GetComponent<Image>();
+        hubChatTabLabel = chatTabBtn.GetComponentInChildren<TMP_Text>();
+
+        Button refreshBtn = CreatePillButton(listCard.transform, "BtnRefreshTables", "Refresh", new Color(0.10f, 0.34f, 0.42f, 1f), new Vector2(382f, 314f), new Vector2(124f, 56f), 16, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             RequestLobbiesList();
             RequestPlayerRoster();
+            RequestLeaderboard();
+            RequestTeamLeaderboard();
+            RequestMyTeam();
+            RequestTeamsList();
+            RequestOpenTeamChallenges();
+            RequestChatHistories();
         });
         refreshLobbiesBtnLabel = refreshBtn.GetComponentInChildren<TMP_Text>();
 
         hubTablesScrollObj = CreateVerticalScrollList(listCard.transform, "TablesScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out lobbiesListContent);
         hubPlayersScrollObj = CreateVerticalScrollList(listCard.transform, "PlayersScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out playersRosterContent);
-        SelectHubBrowserTab(showPlayers: false);
+        hubTeamsScrollObj = CreateVerticalScrollList(listCard.transform, "TeamsScroll", new Vector2(24f, 20f), new Vector2(-24f, -104f), out teamsContentRoot);
+
+        // Chat Tab View: Team Chat | Direct Messages + Thread Chips + Scrollable Messages + Compose Bar
+        hubChatViewObj = new GameObject("SocialChatView");
+        hubChatViewObj.transform.SetParent(listCard.transform, false);
+        RectTransform chatRootRect = hubChatViewObj.AddComponent<RectTransform>();
+        chatRootRect.anchorMin = Vector2.zero;
+        chatRootRect.anchorMax = Vector2.one;
+        chatRootRect.offsetMin = new Vector2(24f, 20f);
+        chatRootRect.offsetMax = new Vector2(-24f, -104f);
+
+        Button chatTeamBtn = CreatePillButton(hubChatViewObj.transform, "BtnChatTeamChannel", "Team Chat", RoatanVisualAssets.PalmGreen, new Vector2(-224f, 276f), new Vector2(436f, 44f), 19, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SelectChatChannel(showDirectMessages: false);
+        });
+        chatTeamSubTabImg = chatTeamBtn.GetComponent<Image>();
+        chatTeamSubTabLabel = chatTeamBtn.GetComponentInChildren<TMP_Text>();
+
+        Button chatDmBtn = CreatePillButton(hubChatViewObj.transform, "BtnChatDmChannel", "Direct Messages", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(224f, 276f), new Vector2(436f, 44f), 19, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SelectChatChannel(showDirectMessages: true);
+        });
+        chatDmSubTabImg = chatDmBtn.GetComponent<Image>();
+        chatDmSubTabLabel = chatDmBtn.GetComponentInChildren<TMP_Text>();
+
+        GameObject chatHdrBar = CreateCard(hubChatViewObj.transform, "ChatChannelHeader", new Color(0.04f, 0.13f, 0.18f, 0.92f), new Vector2(0f, 224f), new Vector2(892f, 40f));
+        chatActiveChannelHeader = CreateText(chatHdrBar.transform, "HeaderTxt", "TEAM CHAT", 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(856f, 32f));
+        chatActiveChannelHeader.alignment = TextAlignmentOptions.MidlineLeft;
+
+        // Horizontal DM Partners Strip (visible only in Direct Messages mode)
+        chatDmPartnersStripObj = CreateCard(hubChatViewObj.transform, "ChatDmPartnersStrip", new Color(0.05f, 0.15f, 0.20f, 0.92f), new Vector2(0f, 168f), new Vector2(892f, 58f));
+        GameObject dmStripContentObj = new GameObject("DmPartnersContent");
+        dmStripContentObj.transform.SetParent(chatDmPartnersStripObj.transform, false);
+        chatDmPartnersContent = dmStripContentObj.AddComponent<RectTransform>();
+        chatDmPartnersContent.anchorMin = Vector2.zero;
+        chatDmPartnersContent.anchorMax = Vector2.one;
+        chatDmPartnersContent.offsetMin = new Vector2(10f, 6f);
+        chatDmPartnersContent.offsetMax = new Vector2(-10f, -6f);
+        HorizontalLayoutGroup dmHlg = dmStripContentObj.AddComponent<HorizontalLayoutGroup>();
+        dmHlg.spacing = 10f;
+        dmHlg.childAlignment = TextAnchor.MiddleLeft;
+        dmHlg.childControlWidth = false;
+        dmHlg.childControlHeight = false;
+        dmHlg.childForceExpandWidth = false;
+        dmHlg.childForceExpandHeight = false;
+        chatDmPartnersStripObj.SetActive(false);
+
+        CreateVerticalScrollList(hubChatViewObj.transform, "ChatMessagesScroll", new Vector2(0f, 76f), new Vector2(0f, -158f), out chatMessagesListContent);
+
+        GameObject composeBar = CreateCard(hubChatViewObj.transform, "ChatComposeBar", new Color(0.04f, 0.13f, 0.18f, 0.96f), new Vector2(0f, -268f), new Vector2(892f, 68f));
+        chatComposeInput = CreateInputField(composeBar.transform, "ChatComposeInput", "Type a message...", "", new Vector2(-92f, 0f), new Vector2(680f, 52f));
+        CreatePillButton(composeBar.transform, "BtnSendSocialChat", "Send", RoatanVisualAssets.PalmGreen, new Vector2(348f, 0f), new Vector2(172f, 52f), 20, SubmitSocialChatMessage);
+
+        // Leaderboard Tab View: Players | Teams sub-toggle + Pinned Banner + Column Headers + Scrollable List
+        hubLeaderboardViewObj = new GameObject("LeaderboardView");
+        hubLeaderboardViewObj.transform.SetParent(listCard.transform, false);
+        RectTransform lbRootRect = hubLeaderboardViewObj.AddComponent<RectTransform>();
+        lbRootRect.anchorMin = Vector2.zero;
+        lbRootRect.anchorMax = Vector2.one;
+        lbRootRect.offsetMin = new Vector2(24f, 20f);
+        lbRootRect.offsetMax = new Vector2(-24f, -104f);
+
+        GameObject lbToggleRow = new GameObject("LeaderboardSubToggle");
+        lbToggleRow.transform.SetParent(hubLeaderboardViewObj.transform, false);
+        RectTransform lbToggleRect = lbToggleRow.AddComponent<RectTransform>();
+        lbToggleRect.anchorMin = new Vector2(0.5f, 1f);
+        lbToggleRect.anchorMax = new Vector2(0.5f, 1f);
+        lbToggleRect.pivot = new Vector2(0.5f, 1f);
+        lbToggleRect.anchoredPosition = new Vector2(0f, 0f);
+        lbToggleRect.sizeDelta = new Vector2(892f, 48f);
+
+        Button lbPlayersBtn = CreatePillButton(lbToggleRow.transform, "BtnLbPlayers", "Players", RoatanVisualAssets.IslandGold, new Vector2(-224f, -24f), new Vector2(436f, 44f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SelectLeaderboardSubTab(showTeams: false);
+        });
+        lbPlayersSubTabImg = lbPlayersBtn.GetComponent<Image>();
+        lbPlayersSubTabLabel = lbPlayersBtn.GetComponentInChildren<TMP_Text>();
+
+        Button lbTeamsBtn = CreatePillButton(lbToggleRow.transform, "BtnLbTeams", "Teams", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(224f, -24f), new Vector2(436f, 44f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            SelectLeaderboardSubTab(showTeams: true);
+        });
+        lbTeamsSubTabImg = lbTeamsBtn.GetComponent<Image>();
+        lbTeamsSubTabLabel = lbTeamsBtn.GetComponentInChildren<TMP_Text>();
+
+        // --- Players Sub-View ---
+        lbPlayersSubViewObj = new GameObject("PlayersLeaderboardSubView");
+        lbPlayersSubViewObj.transform.SetParent(hubLeaderboardViewObj.transform, false);
+        RectTransform lbpRect = lbPlayersSubViewObj.AddComponent<RectTransform>();
+        lbpRect.anchorMin = Vector2.zero;
+        lbpRect.anchorMax = Vector2.one;
+        lbpRect.offsetMin = new Vector2(0f, 0f);
+        lbpRect.offsetMax = new Vector2(0f, -54f);
+
+        leaderboardSelfBannerCard = CreateCard(lbPlayersSubViewObj.transform, "LeaderboardSelfBanner", new Color(0.09f, 0.31f, 0.36f, 0.98f), Vector2.zero, new Vector2(892f, 92f));
+        RectTransform selfRect = leaderboardSelfBannerCard.GetComponent<RectTransform>();
+        selfRect.anchorMin = new Vector2(0.5f, 1f);
+        selfRect.anchorMax = new Vector2(0.5f, 1f);
+        selfRect.pivot = new Vector2(0.5f, 1f);
+        selfRect.anchoredPosition = new Vector2(0f, 0f);
+
+        leaderboardSelfRankLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfRank", "#—", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-404f, 0f), new Vector2(72f, 54f));
+        GameObject selfAvObj = new GameObject("SelfAvatar");
+        selfAvObj.transform.SetParent(leaderboardSelfBannerCard.transform, false);
+        RectTransform selfAvRect = selfAvObj.AddComponent<RectTransform>();
+        selfAvRect.anchoredPosition = new Vector2(-334f, 0f);
+        selfAvRect.sizeDelta = new Vector2(58f, 58f);
+        leaderboardSelfAvatarImg = selfAvObj.AddComponent<Image>();
+        leaderboardSelfAvatarImg.raycastTarget = false;
+        leaderboardSelfAvatarInitials = CreateText(selfAvObj.transform, "Init", "?", 21, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(50f, 38f));
+        leaderboardSelfAvatarInitials.raycastTarget = false;
+
+        leaderboardSelfNameTierLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfNameTier", "Your Rank", 20, FontStyles.Bold, Color.white, new Vector2(-115f, 0f), new Vector2(360f, 74f));
+        leaderboardSelfNameTierLabel.alignment = TextAlignmentOptions.MidlineLeft;
+        leaderboardSelfStatsLabel = CreateText(leaderboardSelfBannerCard.transform, "SelfStats", "1000  •  0/0  •  —  •  0 Ast", 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(248f, 0f), new Vector2(360f, 64f));
+        leaderboardSelfStatsLabel.alignment = TextAlignmentOptions.MidlineRight;
+
+        GameObject colHdr = CreateCard(lbPlayersSubViewObj.transform, "LeaderboardColumns", new Color(0.04f, 0.13f, 0.18f, 0.90f), Vector2.zero, new Vector2(892f, 34f));
+        RectTransform chRect = colHdr.GetComponent<RectTransform>();
+        chRect.anchorMin = new Vector2(0.5f, 1f);
+        chRect.anchorMax = new Vector2(0.5f, 1f);
+        chRect.pivot = new Vector2(0.5f, 1f);
+        chRect.anchoredPosition = new Vector2(0f, -100f);
+        CreateText(colHdr.transform, "ColRank", "#", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-404f, 0f), new Vector2(64f, 28f));
+        TMP_Text colPlayer = CreateText(colHdr.transform, "ColPlayer", "PLAYER / TIER", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-150f, 0f), new Vector2(320f, 28f));
+        colPlayer.alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(colHdr.transform, "ColElo", "ELO", 16, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(105f, 0f), new Vector2(96f, 28f));
+        CreateText(colHdr.transform, "ColWL", "W/L", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(210f, 0f), new Vector2(94f, 28f));
+        CreateText(colHdr.transform, "ColAcc", "ACC %", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(310f, 0f), new Vector2(96f, 28f));
+        CreateText(colHdr.transform, "ColAst", "AST", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(400f, 0f), new Vector2(74f, 28f));
+
+        CreateVerticalScrollList(lbPlayersSubViewObj.transform, "LeaderboardScroll", new Vector2(0f, 0f), new Vector2(0f, -142f), out leaderboardListContent);
+
+        // --- Teams Sub-View ---
+        lbTeamsSubViewObj = new GameObject("TeamsLeaderboardSubView");
+        lbTeamsSubViewObj.transform.SetParent(hubLeaderboardViewObj.transform, false);
+        RectTransform lbtRect = lbTeamsSubViewObj.AddComponent<RectTransform>();
+        lbtRect.anchorMin = Vector2.zero;
+        lbtRect.anchorMax = Vector2.one;
+        lbtRect.offsetMin = new Vector2(0f, 0f);
+        lbtRect.offsetMax = new Vector2(0f, -54f);
+
+        teamLeaderboardSelfCard = CreateCard(lbTeamsSubViewObj.transform, "TeamLeaderboardSelfBanner", new Color(0.08f, 0.29f, 0.30f, 0.98f), Vector2.zero, new Vector2(892f, 88f));
+        RectTransform tSelfRect = teamLeaderboardSelfCard.GetComponent<RectTransform>();
+        tSelfRect.anchorMin = new Vector2(0.5f, 1f);
+        tSelfRect.anchorMax = new Vector2(0.5f, 1f);
+        tSelfRect.pivot = new Vector2(0.5f, 1f);
+        tSelfRect.anchoredPosition = new Vector2(0f, 0f);
+
+        teamLeaderboardSelfRankLabel = CreateText(teamLeaderboardSelfCard.transform, "MyTeamRank", "#—", 24, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-404f, 0f), new Vector2(72f, 52f));
+        teamLeaderboardSelfNameTierLabel = CreateText(teamLeaderboardSelfCard.transform, "MyTeamNameTier", "Join or create a team to climb the Crew Leaderboard!", 19, FontStyles.Bold, Color.white, new Vector2(-112f, 0f), new Vector2(480f, 70f));
+        teamLeaderboardSelfNameTierLabel.alignment = TextAlignmentOptions.MidlineLeft;
+        teamLeaderboardSelfStatsLabel = CreateText(teamLeaderboardSelfCard.transform, "MyTeamStats", "—", 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(280f, 0f), new Vector2(290f, 64f));
+        teamLeaderboardSelfStatsLabel.alignment = TextAlignmentOptions.MidlineRight;
+
+        GameObject tColHdr = CreateCard(lbTeamsSubViewObj.transform, "TeamLeaderboardColumns", new Color(0.04f, 0.13f, 0.18f, 0.90f), Vector2.zero, new Vector2(892f, 34f));
+        RectTransform tchRect = tColHdr.GetComponent<RectTransform>();
+        tchRect.anchorMin = new Vector2(0.5f, 1f);
+        tchRect.anchorMax = new Vector2(0.5f, 1f);
+        tchRect.pivot = new Vector2(0.5f, 1f);
+        tchRect.anchoredPosition = new Vector2(0f, -96f);
+        CreateText(tColHdr.transform, "TColRank", "#", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-404f, 0f), new Vector2(60f, 28f));
+        TMP_Text tColTeam = CreateText(tColHdr.transform, "TColTeam", "TEAM / TIER / CAPTAIN", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(-180f, 0f), new Vector2(360f, 28f));
+        tColTeam.alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(tColHdr.transform, "TColElo", "ELO", 16, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(60f, 0f), new Vector2(88f, 28f));
+        CreateText(tColHdr.transform, "TColWL", "W/L", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(150f, 0f), new Vector2(84f, 28f));
+        CreateText(tColHdr.transform, "TColCrew", "CREW", 16, FontStyles.Bold, new Color(0.70f, 0.85f, 0.90f), new Vector2(236f, 0f), new Vector2(78f, 28f));
+        CreateText(tColHdr.transform, "TColAction", "CHALLENGE", 15, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(358f, 0f), new Vector2(148f, 28f));
+
+        CreateVerticalScrollList(lbTeamsSubViewObj.transform, "TeamLeaderboardScroll", new Vector2(0f, 0f), new Vector2(0f, -138f), out teamLeaderboardListContent);
+
+        SelectLeaderboardSubTab(showTeams: false);
+        SelectHubBrowserTab(HubBrowserTab.Tables);
     }
 
     private void BuildLobbyView(Transform parent)
@@ -3051,6 +3720,24 @@ public class RoatanOnlineController : MonoBehaviour
         hdrRect.pivot = new Vector2(0.5f, 1f);
         hdrRect.anchoredPosition = new Vector2(0f, -200f);
         onlineMatchHeader = CreateText(hdr.transform, "Text", "ONLINE MATCH", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(900f, 54f));
+
+        // Live Spectator Viewer Count Badge + Leave Spectating Button
+        onlineSpectatorBadgeObj = CreateCard(onlineGameView.transform, "OnlineSpectatorBadge", new Color(0.10f, 0.25f, 0.35f, 0.96f), Vector2.zero, new Vector2(236f, 48f));
+        RectTransform spBadgeRect = onlineSpectatorBadgeObj.GetComponent<RectTransform>();
+        spBadgeRect.anchorMin = new Vector2(1f, 1f);
+        spBadgeRect.anchorMax = new Vector2(1f, 1f);
+        spBadgeRect.pivot = new Vector2(1f, 1f);
+        spBadgeRect.anchoredPosition = new Vector2(-24f, -276f);
+        onlineSpectatorBadgeLabel = CreateText(onlineSpectatorBadgeObj.transform, "SpectatorCountTxt", "Watching: 0", 19, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(220f, 38f));
+        onlineSpectatorBadgeObj.SetActive(false);
+
+        onlineLeaveSpectateBtn = CreatePillButton(onlineGameView.transform, "BtnLeaveSpectating", "Leave Spectating", RoatanVisualAssets.SunsetCoral, Vector2.zero, new Vector2(360f, 76f), 25, LeaveSpectatingMatch);
+        RectTransform lsRect = onlineLeaveSpectateBtn.GetComponent<RectTransform>();
+        lsRect.anchorMin = new Vector2(0.5f, 0f);
+        lsRect.anchorMax = new Vector2(0.5f, 0f);
+        lsRect.pivot = new Vector2(0.5f, 0f);
+        lsRect.anchoredPosition = new Vector2(0f, 110f);
+        onlineLeaveSpectateBtn.gameObject.SetActive(false);
 
         // Board area
         GameObject boardVp = new GameObject("OnlineBoardVP");
@@ -3142,25 +3829,31 @@ public class RoatanOnlineController : MonoBehaviour
         orcRect.anchoredPosition = new Vector2(0f, 430f);
         onlineResumeControlBtn.gameObject.SetActive(false);
 
-        // Online Post-Hand / Post-Break Overlay
+        // Online Post-Hand / Post-Break Overlay (with Post-Match Elo & Rank Breakdown)
         onlineEndOverlay = CreateStretchPanel(onlineGameView.transform, "OnlineEndOverlay", new Color(0f, 0f, 0f, 0.74f));
-        GameObject endCard = CreateCard(onlineEndOverlay.transform, "EndCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 700f));
-        onlineEndTitleLabel = CreateText(endCard.transform, "EndTitle", "MATCH COMPLETE", 42, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 255f), new Vector2(800f, 64f));
-        onlineEndBodyLabel = CreateText(endCard.transform, "EndBody", "", 28, FontStyles.Normal, Color.white, new Vector2(0f, 110f), new Vector2(780f, 160f));
+        GameObject endCard = CreateCard(onlineEndOverlay.transform, "EndCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(880f, 840f));
+        onlineEndTitleLabel = CreateText(endCard.transform, "EndTitle", "MATCH COMPLETE", 40, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 338f), new Vector2(800f, 60f));
+        onlineEndBodyLabel = CreateText(endCard.transform, "EndBody", "", 25, FontStyles.Normal, Color.white, new Vector2(0f, 232f), new Vector2(780f, 124f));
 
-        onlineEndPrimaryBtn = CreatePillButton(endCard.transform, "BtnOnlinePrimary", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -60f), new Vector2(520f, 92f), 32, () => { });
+        onlineEndEloBreakdownCard = CreateCard(endCard.transform, "EloBreakdownCard", new Color(0.05f, 0.17f, 0.23f, 0.96f), new Vector2(0f, 84f), new Vector2(800f, 148f));
+        onlineEndEloBreakdownTitle = CreateText(onlineEndEloBreakdownCard.transform, "EloTitle", "", 24, FontStyles.Bold, Color.white, new Vector2(0f, 34f), new Vector2(760f, 44f));
+        onlineEndEloBreakdownBody = CreateText(onlineEndEloBreakdownCard.transform, "EloBody", "", 19, FontStyles.Normal, new Color(0.86f, 0.95f, 0.98f), new Vector2(0f, -24f), new Vector2(760f, 72f));
+        onlineEndEloBreakdownCard.SetActive(false);
+
+        onlineEndPrimaryBtn = CreatePillButton(endCard.transform, "BtnOnlinePrimary", "Next Round", RoatanVisualAssets.PalmGreen, new Vector2(0f, -92f), new Vector2(520f, 88f), 31, () => { });
         onlineEndPrimaryBtnLabel = onlineEndPrimaryBtn.GetComponentInChildren<TMP_Text>();
 
-        onlineEndNewMatchBtn = CreatePillButton(endCard.transform, "BtnOnlineNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -172f), new Vector2(460f, 82f), 28, () =>
+        onlineEndNewMatchBtn = CreatePillButton(endCard.transform, "BtnOnlineNewMatch", "New Match", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -200f), new Vector2(460f, 80f), 27, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             onlineEndOverlay.SetActive(false);
             ShowSubView(hubView);
             RequestLobbiesList();
+            RequestLeaderboard();
         });
         onlineEndNewMatchBtn.gameObject.SetActive(false);
 
-        CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -276f), new Vector2(380f, 76f), 28, () =>
+        CreatePillButton(endCard.transform, "BtnOnlineLeave", "Leave", new Color(0.24f, 0.20f, 0.24f, 1f), new Vector2(0f, -306f), new Vector2(380f, 74f), 27, () =>
         {
             RoatanSoundFX.Instance?.PlayTap();
             RoatanMatchSessionStore.ClearSession();
@@ -3169,6 +3862,7 @@ public class RoatanOnlineController : MonoBehaviour
             subscribedClient?.AddToSendQueue(MessageFrameBuilder.LeaveGameFrame());
             ShowSubView(hubView);
             RequestLobbiesList();
+            RequestLeaderboard();
         });
         onlineEndOverlay.SetActive(false);
 
@@ -3278,6 +3972,293 @@ public class RoatanOnlineController : MonoBehaviour
         invitePlayersModal.SetActive(false);
     }
 
+    private void BuildChallengeTeamModal(Transform safeRoot)
+    {
+        challengeTeamModal = CreateStretchPanel(safeRoot, "ChallengeTeamModal", new Color(0f, 0f, 0f, 0.78f));
+        GameObject card = CreateCard(challengeTeamModal.transform, "ChallengeTeamCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 650f));
+
+        CreateText(card.transform, "Header", "CHALLENGE TEAM", 34, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 256f), new Vector2(760f, 52f));
+        challengeTeamModalTitle = CreateText(card.transform, "TargetTeam", "Target Crew", 23, FontStyles.Bold, Color.white, new Vector2(0f, 196f), new Vector2(760f, 44f));
+
+        CreateText(card.transform, "ModeLbl", "GAME MODE", 19, FontStyles.Bold, new Color(0.75f, 0.88f, 0.93f), new Vector2(0f, 130f), new Vector2(740f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        Button btnSixLov = CreatePillButton(card.transform, "BtnChSixLov", "Six-Lov (2v2)", RoatanVisualAssets.IslandGold, new Vector2(-186f, 70f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            challengeSelectedMode = MatchFormat.SIX_LOV;
+            RefreshChallengeModalButtons();
+        });
+        challengeModeSixLovImg = btnSixLov.GetComponent<Image>();
+
+        Button btnTwoBest = CreatePillButton(card.transform, "BtnChTwoBest", "Two-Best (1v1)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(186f, 70f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            challengeSelectedMode = MatchFormat.TWO_BEST;
+            RefreshChallengeModalButtons();
+        });
+        challengeModeTwoBestImg = btnTwoBest.GetComponent<Image>();
+
+        CreateText(card.transform, "VarLbl", "VARIANT", 19, FontStyles.Bold, new Color(0.75f, 0.88f, 0.93f), new Vector2(0f, -4f), new Vector2(740f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        Button btnDraw = CreatePillButton(card.transform, "BtnChDraw", "Draw", RoatanVisualAssets.BrightLagoon, new Vector2(-186f, -64f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            challengeSelectedVariant = TableStyle.DRAW;
+            RefreshChallengeModalButtons();
+        });
+        challengeVariantDrawImg = btnDraw.GetComponent<Image>();
+
+        Button btnBlock = CreatePillButton(card.transform, "BtnChBlock", "Block (Cerrado)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(186f, -64f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            challengeSelectedVariant = TableStyle.BLOCK;
+            RefreshChallengeModalButtons();
+        });
+        challengeVariantBlockImg = btnBlock.GetComponent<Image>();
+
+        CreatePillButton(card.transform, "BtnSubmitTeamChallenge", "Send Challenge & Open Table", RoatanVisualAssets.PalmGreen, new Vector2(0f, -166f), new Vector2(640f, 80f), 24, SubmitTeamChallenge);
+        CreatePillButton(card.transform, "BtnCancelTeamChallenge", "Cancel", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(0f, -254f), new Vector2(360f, 64f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            challengeTargetTeam = null;
+            challengeTeamModal.SetActive(false);
+        });
+
+        RefreshChallengeModalButtons();
+        challengeTeamModal.SetActive(false);
+    }
+
+    private void BuildIncomingTeamChallengeModal(Transform safeRoot)
+    {
+        incomingTeamChallengeModal = CreateStretchPanel(safeRoot, "IncomingTeamChallengeModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(incomingTeamChallengeModal.transform, "IncomingChallengeCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 590f));
+
+        incomingTeamChallengeTitle = CreateText(card.transform, "Title", "TEAM CHALLENGE!", 36, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 214f), new Vector2(760f, 54f));
+        incomingTeamChallengeBody = CreateText(card.transform, "Body", "A rival crew has challenged your team!", 23, FontStyles.Normal, Color.white, new Vector2(0f, 68f), new Vector2(740f, 210f));
+
+        incomingTeamChallengeAcceptBtn = CreatePillButton(card.transform, "BtnAcceptTeamChallenge", "Accept & Join Table", RoatanVisualAssets.PalmGreen, new Vector2(0f, -110f), new Vector2(600f, 84f), 25, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            incomingTeamChallengeModal.SetActive(false);
+            TeamChallengeDto ch = pendingTeamChallenge;
+            pendingTeamChallenge = null;
+            if (ch == null || !EnsureConnectedForRequest()) return;
+
+            if (ch.Status == TeamChallengeStatus.Pending)
+            {
+                if (currentLobby != null)
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveLobbyFrame());
+                    currentLobby = null;
+                }
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamChallengeFrame(new RespondTeamChallengeDto
+                {
+                    ChallengeId = ch.ChallengeId,
+                    Accept = true
+                }));
+            }
+            else if (ch.Status == TeamChallengeStatus.Accepted)
+            {
+                if (currentLobby != null && currentLobby.Id == ch.TableId)
+                {
+                    ShowSubView(lobbyView);
+                    RefreshLobbyView();
+                    return;
+                }
+                if (currentLobby != null)
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveLobbyFrame());
+                    currentLobby = null;
+                }
+                if (!string.IsNullOrWhiteSpace(ch.TableCode))
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyWithCodeFrame(new LobbyCodeDto { Code = ch.TableCode }));
+                }
+                else
+                {
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = ch.TableId }));
+                }
+            }
+        });
+        incomingTeamChallengeAcceptLabel = incomingTeamChallengeAcceptBtn.GetComponentInChildren<TMP_Text>();
+
+        incomingTeamChallengeDeclineBtn = CreatePillButton(card.transform, "BtnDeclineTeamChallenge", "Decline", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -210f), new Vector2(400f, 70f), 23, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            incomingTeamChallengeModal.SetActive(false);
+            TeamChallengeDto ch = pendingTeamChallenge;
+            pendingTeamChallenge = null;
+            if (ch != null && ch.Status == TeamChallengeStatus.Pending && EnsureConnectedForRequest())
+            {
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamChallengeFrame(new RespondTeamChallengeDto
+                {
+                    ChallengeId = ch.ChallengeId,
+                    Accept = false
+                }));
+            }
+        });
+        incomingTeamChallengeDeclineLabel = incomingTeamChallengeDeclineBtn.GetComponentInChildren<TMP_Text>();
+
+        incomingTeamChallengeModal.SetActive(false);
+    }
+
+    private void BuildPlayerActionModal(Transform safeRoot)
+    {
+        playerActionModal = CreateStretchPanel(safeRoot, "PlayerActionModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(playerActionModal.transform, "PlayerActionCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(860f, 820f));
+
+        CreateText(card.transform, "Header", "PLAYER PROFILE", 34, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-30f, 354f), new Vector2(680f, 50f));
+        CreatePillButton(card.transform, "BtnClosePlayerAction", "X", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(368f, 354f), new Vector2(66f, 56f), 26, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            playerActionModal.SetActive(false);
+        });
+
+        GameObject avObj = new GameObject("ActionAvatar");
+        avObj.transform.SetParent(card.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(0f, 232f);
+        avRect.sizeDelta = new Vector2(138f, 138f);
+        playerActionAvatarImg = avObj.AddComponent<Image>();
+        playerActionAvatarInitials = CreateText(avObj.transform, "Init", "?", 48, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(120f, 88f));
+        playerActionAvatarInitials.raycastTarget = false;
+
+        playerActionNameTierLabel = CreateText(card.transform, "NameTier", "Player", 28, FontStyles.Bold, Color.white, new Vector2(0f, 120f), new Vector2(780f, 76f));
+
+        GameObject statsBox = CreateCard(card.transform, "ActionStatsBox", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, 14f), new Vector2(780f, 118f));
+        playerActionStatsLabel = CreateText(statsBox.transform, "StatsTxt", "W/L: 0-0 • Acc: — • Assists: 0 • Avg: —", 21, FontStyles.Bold, new Color(0.86f, 0.95f, 0.98f), Vector2.zero, new Vector2(746f, 102f));
+
+        playerActionChallengeBtn = CreatePillButton(card.transform, "BtnActionChallenge", "Challenge Player (1v1)", RoatanVisualAssets.SunsetCoral, new Vector2(0f, -110f), new Vector2(640f, 78f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            playerActionModal.SetActive(false);
+            OpenDirectChallengeModal(selectedActionPlayer);
+        });
+
+        playerActionMessageBtn = CreatePillButton(card.transform, "BtnActionMessage", "Send Message", RoatanVisualAssets.BrightLagoon, new Vector2(0f, -204f), new Vector2(640f, 78f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            PlayerActionProfileData target = selectedActionPlayer;
+            playerActionModal.SetActive(false);
+            if (target != null)
+            {
+                OpenDirectMessageThread(target.UserId, target.Username);
+            }
+        });
+
+        playerActionInviteTeamBtn = CreatePillButton(card.transform, "BtnActionInviteTeam", "Invite to Team", RoatanVisualAssets.PalmGreen, new Vector2(0f, -298f), new Vector2(640f, 78f), 24, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            PlayerActionProfileData target = selectedActionPlayer;
+            playerActionModal.SetActive(false);
+            if (target != null && EnsureConnectedForRequest())
+            {
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.InviteToTeamFrame(new InviteToTeamDto
+                {
+                    TargetUserId = target.UserId,
+                    TargetUsername = target.Username
+                }));
+                SetFeedback($"Sent team invite to {target.Username}!", RoatanVisualAssets.PalmGreen);
+            }
+        });
+
+        playerActionModal.SetActive(false);
+    }
+
+    private void BuildDirectChallengeModal(Transform safeRoot)
+    {
+        directChallengeModal = CreateStretchPanel(safeRoot, "DirectChallengeModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(directChallengeModal.transform, "DirectChallengeCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 640f));
+
+        CreateText(card.transform, "Header", "CHALLENGE PLAYER (1v1)", 32, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 250f), new Vector2(760f, 50f));
+        directChallengeModalTitle = CreateText(card.transform, "TargetLbl", "Player", 23, FontStyles.Bold, Color.white, new Vector2(0f, 192f), new Vector2(760f, 42f));
+
+        CreateText(card.transform, "ModeHdr", "GAME MODE", 19, FontStyles.Bold, new Color(0.75f, 0.88f, 0.93f), new Vector2(0f, 126f), new Vector2(740f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        Button btnTwoBest = CreatePillButton(card.transform, "BtnDcTwoBest", "Two-Best (1v1)", RoatanVisualAssets.IslandGold, new Vector2(-186f, 66f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            directChallengeMode = MatchFormat.TWO_BEST;
+            RefreshDirectChallengeModalButtons();
+        });
+        directChallengeTwoBestImg = btnTwoBest.GetComponent<Image>();
+
+        Button btnCutThroat = CreatePillButton(card.transform, "BtnDcCutThroat", "Cut-Throat (1v1)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(186f, 66f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            directChallengeMode = MatchFormat.CUT_THROAT;
+            RefreshDirectChallengeModalButtons();
+        });
+        directChallengeCutThroatImg = btnCutThroat.GetComponent<Image>();
+
+        CreateText(card.transform, "VarHdr", "VARIANT", 19, FontStyles.Bold, new Color(0.75f, 0.88f, 0.93f), new Vector2(0f, -8f), new Vector2(740f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        Button btnDraw = CreatePillButton(card.transform, "BtnDcDraw", "Draw", RoatanVisualAssets.BrightLagoon, new Vector2(-186f, -68f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            directChallengeVariant = TableStyle.DRAW;
+            RefreshDirectChallengeModalButtons();
+        });
+        directChallengeDrawImg = btnDraw.GetComponent<Image>();
+
+        Button btnBlock = CreatePillButton(card.transform, "BtnDcBlock", "Block (Cerrado)", new Color(0.14f, 0.22f, 0.28f, 1f), new Vector2(186f, -68f), new Vector2(356f, 68f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            directChallengeVariant = TableStyle.BLOCK;
+            RefreshDirectChallengeModalButtons();
+        });
+        directChallengeBlockImg = btnBlock.GetComponent<Image>();
+
+        CreatePillButton(card.transform, "BtnSubmitDirectChallenge", "Send 1v1 Challenge", RoatanVisualAssets.PalmGreen, new Vector2(0f, -168f), new Vector2(600f, 78f), 24, SubmitDirectChallenge);
+        CreatePillButton(card.transform, "BtnCancelDirectChallenge", "Cancel", new Color(0.24f, 0.22f, 0.26f, 1f), new Vector2(0f, -254f), new Vector2(340f, 62f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            directChallengeModal.SetActive(false);
+        });
+
+        RefreshDirectChallengeModalButtons();
+        directChallengeModal.SetActive(false);
+    }
+
+    private void BuildIncomingDirectChallengeModal(Transform safeRoot)
+    {
+        incomingDirectChallengeModal = CreateStretchPanel(safeRoot, "IncomingDirectChallengeModal", new Color(0f, 0f, 0f, 0.80f));
+        GameObject card = CreateCard(incomingDirectChallengeModal.transform, "IncomingDcCard", RoatanVisualAssets.DarkSlate, Vector2.zero, new Vector2(840f, 540f));
+
+        CreateText(card.transform, "Title", "1v1 PLAYER CHALLENGE!", 34, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 194f), new Vector2(760f, 52f));
+        incomingDirectChallengeBody = CreateText(card.transform, "Body", "A player challenged you to a 1v1 match!", 23, FontStyles.Normal, Color.white, new Vector2(0f, 54f), new Vector2(740f, 190f));
+
+        CreatePillButton(card.transform, "BtnAcceptDirectChallenge", "Accept", RoatanVisualAssets.PalmGreen, new Vector2(0f, -104f), new Vector2(560f, 82f), 26, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            incomingDirectChallengeModal.SetActive(false);
+            DirectChallengeDto ch = pendingDirectChallenge;
+            pendingDirectChallenge = null;
+            if (ch != null && EnsureConnectedForRequest())
+            {
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondDirectChallengeFrame(new RespondDirectChallengeDto
+                {
+                    ChallengeId = ch.ChallengeId,
+                    Accept = true
+                }));
+            }
+        });
+
+        CreatePillButton(card.transform, "BtnIgnoreDirectChallenge", "Ignore", new Color(0.28f, 0.24f, 0.26f, 1f), new Vector2(0f, -200f), new Vector2(400f, 68f), 23, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            incomingDirectChallengeModal.SetActive(false);
+            DirectChallengeDto ch = pendingDirectChallenge;
+            pendingDirectChallenge = null;
+            if (ch != null && EnsureConnectedForRequest())
+            {
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondDirectChallengeFrame(new RespondDirectChallengeDto
+                {
+                    ChallengeId = ch.ChallengeId,
+                    Accept = false
+                }));
+            }
+        });
+
+        incomingDirectChallengeModal.SetActive(false);
+    }
+
     private void BuildOAuthWaitingModal(Transform safeRoot)
     {
         oauthWaitingModal = CreateStretchPanel(safeRoot, "OAuthWaitingModal", new Color(0f, 0f, 0f, 0.78f));
@@ -3320,8 +4301,8 @@ public class RoatanOnlineController : MonoBehaviour
         GameObject badge = CreateCard(card.transform, "ProviderBadge", new Color(0.09f, 0.27f, 0.34f, 0.95f), new Vector2(0f, 76f), new Vector2(460f, 46f));
         profileModalProviderBadge = CreateText(badge.transform, "BadgeTxt", "Signed in with Email", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(430f, 36f));
 
-        GameObject statsCard = CreateCard(card.transform, "StatsCard", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, -8f), new Vector2(790f, 78f));
-        profileModalStatsLabel = CreateText(statsCard.transform, "StatsTxt", "Elo 1000", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(750f, 60f));
+        GameObject statsCard = CreateCard(card.transform, "StatsCard", new Color(0.04f, 0.14f, 0.19f, 0.95f), new Vector2(0f, -8f), new Vector2(790f, 102f));
+        profileModalStatsLabel = CreateText(statsCard.transform, "StatsTxt", "[Sailor] • 1000 Elo", 22, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(756f, 88f));
 
         profileModalStatusLabel = CreateText(card.transform, "StatusTxt", "", 20, FontStyles.Italic, RoatanVisualAssets.IslandGold, new Vector2(0f, -74f), new Vector2(780f, 36f));
 
@@ -3532,16 +4513,2110 @@ public class RoatanOnlineController : MonoBehaviour
         }
     }
 
-    private void SelectHubBrowserTab(bool showPlayers)
+    private void SelectHubBrowserTab(HubBrowserTab tab)
     {
-        hubShowingPlayersTab = showPlayers;
-        if (hubTablesScrollObj != null) hubTablesScrollObj.SetActive(!showPlayers);
-        if (hubPlayersScrollObj != null) hubPlayersScrollObj.SetActive(showPlayers);
-        if (hubTablesTabImg != null) hubTablesTabImg.color = !showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
-        if (hubPlayersTabImg != null) hubPlayersTabImg.color = showPlayers ? RoatanVisualAssets.BrightLagoon : new Color(0.14f, 0.22f, 0.28f, 1f);
-        if (showPlayers)
+        activeHubTab = tab;
+        if (hubTablesScrollObj != null) hubTablesScrollObj.SetActive(tab == HubBrowserTab.Tables);
+        if (hubPlayersScrollObj != null) hubPlayersScrollObj.SetActive(tab == HubBrowserTab.Players);
+        if (hubLeaderboardViewObj != null) hubLeaderboardViewObj.SetActive(tab == HubBrowserTab.Leaderboard);
+        if (hubTeamsScrollObj != null) hubTeamsScrollObj.SetActive(tab == HubBrowserTab.Teams);
+        if (hubChatViewObj != null) hubChatViewObj.SetActive(tab == HubBrowserTab.Chat);
+
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (hubTablesTabImg != null) hubTablesTabImg.color = tab == HubBrowserTab.Tables ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (hubPlayersTabImg != null) hubPlayersTabImg.color = tab == HubBrowserTab.Players ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (hubLeaderboardTabImg != null) hubLeaderboardTabImg.color = tab == HubBrowserTab.Leaderboard ? RoatanVisualAssets.IslandGold : inactive;
+        if (hubTeamsTabImg != null) hubTeamsTabImg.color = tab == HubBrowserTab.Teams ? RoatanVisualAssets.PalmGreen : inactive;
+        if (hubChatTabImg != null) hubChatTabImg.color = tab == HubBrowserTab.Chat ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (hubLeaderboardTabLabel != null)
+        {
+            hubLeaderboardTabLabel.color = tab == HubBrowserTab.Leaderboard ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+
+        if (tab == HubBrowserTab.Players)
         {
             RefreshPlayersRosterUI();
+        }
+        else if (tab == HubBrowserTab.Leaderboard)
+        {
+            RefreshLeaderboardUI();
+            RefreshTeamLeaderboardUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestLeaderboard();
+                RequestTeamLeaderboard();
+                RequestMyTeam();
+            }
+        }
+        else if (tab == HubBrowserTab.Teams)
+        {
+            RefreshTeamsTabUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestMyTeam();
+                RequestTeamsList();
+                RequestOpenTeamChallenges();
+            }
+        }
+        else if (tab == HubBrowserTab.Chat)
+        {
+            if (myTeamDetails?.TeamInfo == null && !chatShowingDirectMessages)
+            {
+                chatShowingDirectMessages = true;
+            }
+            ClearCurrentChatChannelUnread();
+            RefreshChatTabUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestChatHistories();
+            }
+        }
+    }
+
+    // ==================== TEAMS / CREWS HUB & ROSTER MANAGEMENT ====================
+
+    private void OnGetTeamsResponse(ResponseObjectDto<TeamsListDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        latestTeamsList = dto.Object;
+        if (myTeamDetails == null)
+        {
+            myTeamDetails = new MyTeamDetailsDto
+            {
+                PendingInvites = dto.Object.PendingInvites ?? new List<TeamInviteDto>()
+            };
+        }
+        else if (myTeamDetails.TeamInfo == null && dto.Object.PendingInvites != null)
+        {
+            myTeamDetails.PendingInvites = dto.Object.PendingInvites;
+        }
+        UpdateTeamsTabBadge();
+        if (activeHubTab == HubBrowserTab.Teams)
+        {
+            RefreshTeamsTabUI();
+        }
+    }
+
+    private void OnTeamMutationOrDetailsResponse(ResponseObjectDto<MyTeamDetailsDto> dto)
+    {
+        if (dto == null) return;
+        if (!dto.OkResult)
+        {
+            string err = FormatFriendlyError(dto, "Team action failed.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        if (dto.Object != null)
+        {
+            myTeamDetails = dto.Object;
+            if (myTeamDetails.TeamInfo != null && editTeamDraftTeamId != myTeamDetails.TeamInfo.Id)
+            {
+                SyncEditTeamDraftFromTeamInfo(myTeamDetails.TeamInfo);
+            }
+            else if (myTeamDetails.TeamInfo == null)
+            {
+                editTeamDraftTeamId = -1;
+            }
+
+            if (!string.IsNullOrWhiteSpace(myTeamDetails.StatusMessage))
+            {
+                SetFeedback(myTeamDetails.StatusMessage, RoatanVisualAssets.PalmGreen);
+            }
+        }
+
+        UpdateTeamsTabBadge();
+        if (activeHubTab == HubBrowserTab.Teams)
+        {
+            RefreshTeamsTabUI();
+        }
+        RefreshTeamLeaderboardUI();
+        if (myTeamDetails?.TeamInfo == null && isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+        {
+            RequestTeamsList();
+        }
+    }
+
+    private void UpdateTeamsTabBadge()
+    {
+        if (hubTeamsTabLabel == null) return;
+        if (myTeamDetails?.TeamInfo != null)
+        {
+            int reqCount = myTeamDetails.PendingRequests != null ? myTeamDetails.PendingRequests.Count : 0;
+            hubTeamsTabLabel.text = reqCount > 0 ? $"Teams ({reqCount})" : $"[{myTeamDetails.TeamInfo.Tag}]";
+        }
+        else
+        {
+            int invCount = GetPendingTeamInvites().Count;
+            hubTeamsTabLabel.text = invCount > 0 ? $"Teams ({invCount})" : "Teams";
+        }
+    }
+
+    private List<TeamInviteDto> GetPendingTeamInvites()
+    {
+        if (myTeamDetails?.PendingInvites != null && myTeamDetails.PendingInvites.Count > 0)
+        {
+            return myTeamDetails.PendingInvites;
+        }
+        if (latestTeamsList?.PendingInvites != null)
+        {
+            return latestTeamsList.PendingInvites;
+        }
+        return new List<TeamInviteDto>();
+    }
+
+    private void SyncEditTeamDraftFromTeamInfo(TeamInfoDto info)
+    {
+        if (info == null) return;
+        editTeamDraftTeamId = info.Id;
+        editTeamNameDraft = info.Name ?? string.Empty;
+        editTeamTagDraft = info.Tag ?? string.Empty;
+        editTeamJoinPolicy = info.JoinPolicy;
+        editTeamActivityReq = info.ActivityRequirement;
+        editTeamMinEloIndex = FindClosestMinEloOptionIndex(info.MinElo);
+    }
+
+    private static int FindClosestMinEloOptionIndex(int minElo)
+    {
+        int bestIdx = 0;
+        for (int i = 0; i < TeamMinEloOptions.Length; i++)
+        {
+            if (TeamMinEloOptions[i] <= minElo) bestIdx = i;
+        }
+        return bestIdx;
+    }
+
+    private static string FormatMinEloOptionLabel(int minElo)
+    {
+        if (minElo <= RoatanRankTierHelper.MinElo)
+        {
+            return "Any Elo (100+)";
+        }
+        string tierName = RoatanRankTierHelper.FromElo(minElo).GetDisplayName();
+        return $"{tierName} ({minElo}+)";
+    }
+
+    private void RefreshTeamsTabUI()
+    {
+        if (teamsContentRoot == null) return;
+        foreach (GameObject go in spawnedTeamSectionObjs) Destroy(go);
+        spawnedTeamSectionObjs.Clear();
+
+        if (myTeamDetails?.TeamInfo != null)
+        {
+            BuildMyTeamDashboardUI(myTeamDetails);
+        }
+        else
+        {
+            BuildNoTeamHubUI();
+        }
+    }
+
+    private void BuildNoTeamHubUI()
+    {
+        // 1. Pending Team Invites Banner (Accept / Decline)
+        List<TeamInviteDto> invites = GetPendingTeamInvites();
+        if (invites.Count > 0)
+        {
+            GameObject invHdr = CreateCard(teamsContentRoot, "PendingInvitesHdr", new Color(0.11f, 0.30f, 0.34f, 0.96f), Vector2.zero, new Vector2(860f, 44f));
+            invHdr.AddComponent<LayoutElement>().preferredHeight = 44f;
+            CreateText(invHdr.transform, "Title", $"PENDING TEAM INVITES ({invites.Count})", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            spawnedTeamSectionObjs.Add(invHdr);
+
+            foreach (TeamInviteDto invite in invites)
+            {
+                TeamInviteDto capturedInv = invite;
+                GameObject invRow = CreateCard(teamsContentRoot, $"TeamInvite_{invite.InviteId}", new Color(0.08f, 0.26f, 0.30f, 0.98f), Vector2.zero, new Vector2(860f, 108f));
+                invRow.AddComponent<LayoutElement>().preferredHeight = 108f;
+
+                string teamBadge = RoatanRankTierHelper.FormatRichBadge(invite.TeamElo);
+                CreateText(invRow.transform, "InvTeam", $"[{invite.TeamTag}] {invite.TeamName}  <size=17>{teamBadge}</size>", 21, FontStyles.Bold, Color.white, new Vector2(-135f, 20f), new Vector2(540f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
+                CreateText(invRow.transform, "InvBy", $"Invited by {invite.InvitedByUsername}", 18, FontStyles.Italic, new Color(0.78f, 0.92f, 0.96f), new Vector2(-135f, -20f), new Vector2(540f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+                CreatePillButton(invRow.transform, "BtnAcceptTeamInvite", "Accept", RoatanVisualAssets.PalmGreen, new Vector2(214f, 0f), new Vector2(138f, 60f), 20, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamInviteFrame(new RespondTeamInviteDto
+                    {
+                        InviteId = capturedInv.InviteId,
+                        Accept = true
+                    }));
+                });
+
+                CreatePillButton(invRow.transform, "BtnDeclineTeamInvite", "Decline", RoatanVisualAssets.SunsetCoral, new Vector2(358f, 0f), new Vector2(132f, 60f), 19, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamInviteFrame(new RespondTeamInviteDto
+                    {
+                        InviteId = capturedInv.InviteId,
+                        Accept = false
+                    }));
+                });
+
+                spawnedTeamSectionObjs.Add(invRow);
+            }
+        }
+
+        // 2. Create Team Form Card
+        GameObject createCard = CreateCard(teamsContentRoot, "CreateTeamCard", new Color(0.07f, 0.21f, 0.27f, 0.96f), Vector2.zero, new Vector2(860f, 332f));
+        createCard.AddComponent<LayoutElement>().preferredHeight = 332f;
+
+        CreateText(createCard.transform, "CreateTeamHdr", "CREATE A TEAM / CREW", 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 134f), new Vector2(820f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+        TMP_InputField nameInput = CreateInputField(createCard.transform, "CreateTeamName", "Team Name (3-24 chars)", createTeamNameDraft, new Vector2(-120f, 76f), new Vector2(570f, 58f));
+        nameInput.onValueChanged.AddListener(v => createTeamNameDraft = v);
+
+        TMP_InputField tagInput = CreateInputField(createCard.transform, "CreateTeamTag", "TAG (3-4)", createTeamTagDraft, new Vector2(292f, 76f), new Vector2(236f, 58f));
+        tagInput.characterLimit = 4;
+        tagInput.onValueChanged.AddListener(v => createTeamTagDraft = v);
+
+        // Join Policy toggle pills (Open vs Approval Required)
+        Color activeBlue = RoatanVisualAssets.BrightLagoon;
+        Color inactiveDark = new Color(0.14f, 0.22f, 0.28f, 1f);
+        CreatePillButton(createCard.transform, "BtnPolicyOpen", "Open Join", createTeamJoinPolicy == TeamJoinPolicy.Open ? activeBlue : inactiveDark, new Vector2(-210f, 6f), new Vector2(400f, 54f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            createTeamJoinPolicy = TeamJoinPolicy.Open;
+            RefreshTeamsTabUI();
+        });
+        CreatePillButton(createCard.transform, "BtnPolicyApproval", "Approval Required", createTeamJoinPolicy == TeamJoinPolicy.ApprovalRequired ? activeBlue : inactiveDark, new Vector2(210f, 6f), new Vector2(400f, 54f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            createTeamJoinPolicy = TeamJoinPolicy.ApprovalRequired;
+            RefreshTeamsTabUI();
+        });
+
+        // Min Elo & Activity Requirement selector dropdown buttons
+        int selectedMinElo = TeamMinEloOptions[Mathf.Clamp(createTeamMinEloIndex, 0, TeamMinEloOptions.Length - 1)];
+        CreatePillButton(createCard.transform, "BtnCreateMinElo", $"Min Elo: {FormatMinEloOptionLabel(selectedMinElo)}  ▾", new Color(0.10f, 0.28f, 0.35f, 1f), new Vector2(-210f, -60f), new Vector2(400f, 54f), 18, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            createTeamMinEloIndex = (createTeamMinEloIndex + 1) % TeamMinEloOptions.Length;
+            RefreshTeamsTabUI();
+        });
+        CreatePillButton(createCard.transform, "BtnCreateActivity", $"Activity: {createTeamActivityReq.GetDisplayName()}  ▾", new Color(0.10f, 0.28f, 0.35f, 1f), new Vector2(210f, -60f), new Vector2(400f, 54f), 18, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            createTeamActivityReq = (TeamActivityRequirement)(((int)createTeamActivityReq + 1) % 3);
+            RefreshTeamsTabUI();
+        });
+
+        CreatePillButton(createCard.transform, "BtnSubmitCreateTeam", "Create Team (Starts at 1000 Elo)", RoatanVisualAssets.PalmGreen, new Vector2(0f, -128f), new Vector2(620f, 60f), 22, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            if (!EnsureConnectedForRequest()) return;
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.CreateTeamFrame(new CreateTeamDto
+            {
+                Name = createTeamNameDraft.Trim(),
+                Tag = createTeamTagDraft.Trim().ToUpperInvariant(),
+                JoinPolicy = createTeamJoinPolicy,
+                MinElo = TeamMinEloOptions[Mathf.Clamp(createTeamMinEloIndex, 0, TeamMinEloOptions.Length - 1)],
+                ActivityRequirement = createTeamActivityReq
+            }));
+        });
+        spawnedTeamSectionObjs.Add(createCard);
+
+        // 3. Browse Teams Search Bar + List
+        GameObject searchCard = CreateCard(teamsContentRoot, "BrowseTeamsSearch", new Color(0.06f, 0.19f, 0.25f, 0.94f), Vector2.zero, new Vector2(860f, 108f));
+        searchCard.AddComponent<LayoutElement>().preferredHeight = 108f;
+        CreateText(searchCard.transform, "BrowseHdr", "BROWSE TEAMS", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 32f), new Vector2(820f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        TMP_InputField searchInput = CreateInputField(searchCard.transform, "TeamSearchInput", "Search teams by name or tag...", teamSearchQuery, new Vector2(-105f, -16f), new Vector2(610f, 52f));
+        searchInput.onValueChanged.AddListener(v => teamSearchQuery = v);
+        CreatePillButton(searchCard.transform, "BtnSearchTeams", "Search", RoatanVisualAssets.BrightLagoon, new Vector2(310f, -16f), new Vector2(196f, 52f), 20, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            RequestTeamsList(teamSearchQuery);
+        });
+        spawnedTeamSectionObjs.Add(searchCard);
+
+        List<TeamInfoDto> teams = latestTeamsList?.Teams;
+        if (teams == null || teams.Count == 0)
+        {
+            GameObject emptyCard = CreateCard(teamsContentRoot, "NoTeamsRow", new Color(0.07f, 0.19f, 0.25f, 0.72f), Vector2.zero, new Vector2(860f, 78f));
+            emptyCard.AddComponent<LayoutElement>().preferredHeight = 78f;
+            CreateText(emptyCard.transform, "EmptyLbl", "No teams found yet — create the first crew above!", 20, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(820f, 50f));
+            spawnedTeamSectionObjs.Add(emptyCard);
+            return;
+        }
+
+        foreach (TeamInfoDto team in teams)
+        {
+            TeamInfoDto capturedTeam = team;
+            bool canJoin = team.MeetsRequirements;
+            float rowHeight = canJoin ? 132f : 156f;
+            GameObject row = CreateCard(teamsContentRoot, $"TeamRow_{team.Id}", new Color(0.07f, 0.22f, 0.28f, 0.96f), Vector2.zero, new Vector2(860f, rowHeight));
+            row.AddComponent<LayoutElement>().preferredHeight = rowHeight;
+
+            string tierBadge = RoatanRankTierHelper.FormatRichBadge(team.TeamElo);
+            float topY = rowHeight * 0.5f - 28f;
+            CreateText(row.transform, "TName", $"[{team.Tag}] {team.Name}  <size=18>{tierBadge}</size>", 22, FontStyles.Bold, Color.white, new Vector2(-120f, topY), new Vector2(580f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TMeta", $"Capt: {team.CaptainUsername}  •  {team.MemberCount}/{team.MaxMembers}  •  W/L: {team.TeamWins}-{team.TeamLosses}  •  Squad Avg: {team.AverageMemberElo}", 16, FontStyles.Normal, new Color(0.84f, 0.94f, 0.97f), new Vector2(-120f, topY - 34f), new Vector2(580f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "TReqs", $"{team.JoinPolicy.GetDisplayName()}  •  Min: {FormatMinEloOptionLabel(team.MinElo)}  •  {team.ActivityRequirement.GetDisplayName()}", 16, FontStyles.Italic, RoatanVisualAssets.IslandGold, new Vector2(-120f, topY - 64f), new Vector2(580f, 26f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            if (!canJoin && !string.IsNullOrWhiteSpace(team.DisqualifyReason))
+            {
+                CreateText(row.transform, "TDisq", $"✗ {team.DisqualifyReason}", 16, FontStyles.Bold, RoatanVisualAssets.SunsetCoral, new Vector2(-120f, topY - 94f), new Vector2(580f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+            }
+
+            string actionLabel = team.JoinPolicy == TeamJoinPolicy.ApprovalRequired ? "Request Join" : "Join";
+            Color btnColor = canJoin
+                ? (team.JoinPolicy == TeamJoinPolicy.ApprovalRequired ? RoatanVisualAssets.BrightLagoon : RoatanVisualAssets.PalmGreen)
+                : new Color(0.28f, 0.24f, 0.26f, 0.90f);
+            Button joinBtn = CreatePillButton(row.transform, "BtnJoinTeam", actionLabel, btnColor, new Vector2(310f, 0f), new Vector2(198f, 64f), 19, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                if (!EnsureConnectedForRequest()) return;
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinOrRequestTeamFrame(new JoinOrRequestTeamDto
+                {
+                    TeamId = capturedTeam.Id
+                }));
+            });
+            joinBtn.interactable = canJoin;
+
+            spawnedTeamSectionObjs.Add(row);
+        }
+    }
+
+    private void BuildMyTeamDashboardUI(MyTeamDetailsDto details)
+    {
+        TeamInfoDto info = details.TeamInfo;
+        TeamRole myRole = details.MyRole ?? TeamRole.Teammate;
+        bool isCaptain = myRole == TeamRole.Captain;
+        bool isCaptainOrVice = myRole == TeamRole.Captain || myRole == TeamRole.ViceCaptain;
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+
+        if (editTeamDraftTeamId != info.Id)
+        {
+            SyncEditTeamDraftFromTeamInfo(info);
+        }
+
+        // 1. My Team Header Card
+        GameObject hdrCard = CreateCard(teamsContentRoot, "MyTeamHeader", new Color(0.08f, 0.27f, 0.32f, 0.98f), Vector2.zero, new Vector2(860f, 168f));
+        hdrCard.AddComponent<LayoutElement>().preferredHeight = 168f;
+
+        string teamBadge = RoatanRankTierHelper.FormatRichBadge(info.TeamElo);
+        string roleHex = myRole.GetBadgeColorHex();
+        CreateText(hdrCard.transform, "MyTeamTitle", $"[{info.Tag}] {info.Name}", 28, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-115f, 48f), new Vector2(590f, 40f)).alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(hdrCard.transform, "MyTeamElo", $"{teamBadge} Team  •  Squad Avg: {info.AverageMemberElo}  •  W/L: {info.TeamWins}-{info.TeamLosses}  •  {info.MemberCount}/{info.MaxMembers}", 17, FontStyles.Bold, Color.white, new Vector2(-115f, 8f), new Vector2(590f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(hdrCard.transform, "MyTeamReqs", $"Entry: {info.JoinPolicy.GetDisplayName()}  •  {FormatMinEloOptionLabel(info.MinElo)}  •  {info.ActivityRequirement.GetDisplayName()}", 16, FontStyles.Normal, new Color(0.80f, 0.93f, 0.96f), new Vector2(-115f, -26f), new Vector2(590f, 26f)).alignment = TextAlignmentOptions.MidlineLeft;
+        CreateText(hdrCard.transform, "MyTeamRole", $"Your Role: <color={roleHex}><b>{myRole.GetDisplayName()}</b></color>", 18, FontStyles.Bold, Color.white, new Vector2(-115f, -56f), new Vector2(590f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+        CreatePillButton(hdrCard.transform, "BtnLeaveTeam", "Leave Team", RoatanVisualAssets.SunsetCoral, new Vector2(316f, 0f), new Vector2(186f, 62f), 19, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            if (!EnsureConnectedForRequest()) return;
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveTeamFrame());
+        });
+        spawnedTeamSectionObjs.Add(hdrCard);
+
+        // 2. Invite Player Card (available to Captain, Vice-Captain, AND Teammates)
+        GameObject inviteCard = CreateCard(teamsContentRoot, "TeamInviteCard", new Color(0.06f, 0.20f, 0.26f, 0.95f), Vector2.zero, new Vector2(860f, 108f));
+        inviteCard.AddComponent<LayoutElement>().preferredHeight = 108f;
+        CreateText(inviteCard.transform, "InvHdr", "INVITE PLAYER TO TEAM", 19, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 32f), new Vector2(820f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+        TMP_InputField invInput = CreateInputField(inviteCard.transform, "TeamInviteUserInput", "Enter player username to invite...", teamInviteUsernameDraft, new Vector2(-108f, -16f), new Vector2(604f, 52f));
+        invInput.onValueChanged.AddListener(v => teamInviteUsernameDraft = v);
+        CreatePillButton(inviteCard.transform, "BtnSendTeamInvite", "Send Invite", RoatanVisualAssets.PalmGreen, new Vector2(308f, -16f), new Vector2(200f, 52f), 19, () =>
+        {
+            RoatanSoundFX.Instance?.PlayTap();
+            if (!EnsureConnectedForRequest()) return;
+            if (string.IsNullOrWhiteSpace(teamInviteUsernameDraft))
+            {
+                SetFeedback("Enter a player's username to send a team invite.", RoatanVisualAssets.SunsetCoral);
+                return;
+            }
+            string targetUsername = teamInviteUsernameDraft.Trim();
+            teamInviteUsernameDraft = string.Empty;
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.InviteToTeamFrame(new InviteToTeamDto
+            {
+                TargetUsername = targetUsername
+            }));
+        });
+        spawnedTeamSectionObjs.Add(inviteCard);
+
+        // 3. Pending Join Requests (shown ONLY to Captain & Vice-Captain)
+        if (isCaptainOrVice)
+        {
+            List<TeamJoinRequestDto> requests = details.PendingRequests ?? new List<TeamJoinRequestDto>();
+            GameObject reqHdr = CreateCard(teamsContentRoot, "JoinReqHdr", new Color(0.09f, 0.24f, 0.30f, 0.95f), Vector2.zero, new Vector2(860f, 42f));
+            reqHdr.AddComponent<LayoutElement>().preferredHeight = 42f;
+            CreateText(reqHdr.transform, "Title", $"PENDING JOIN REQUESTS ({requests.Count})", 19, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+            spawnedTeamSectionObjs.Add(reqHdr);
+
+            if (requests.Count == 0)
+            {
+                GameObject noneReq = CreateCard(teamsContentRoot, "NoJoinReqs", new Color(0.06f, 0.17f, 0.22f, 0.72f), Vector2.zero, new Vector2(860f, 54f));
+                noneReq.AddComponent<LayoutElement>().preferredHeight = 54f;
+                CreateText(noneReq.transform, "Lbl", "No pending join requests right now.", 18, FontStyles.Italic, new Color(0.76f, 0.88f, 0.92f), Vector2.zero, new Vector2(820f, 34f));
+                spawnedTeamSectionObjs.Add(noneReq);
+            }
+            else
+            {
+                foreach (TeamJoinRequestDto req in requests)
+                {
+                    TeamJoinRequestDto capturedReq = req;
+                    GameObject reqRow = CreateCard(teamsContentRoot, $"JoinReq_{req.RequestId}", new Color(0.07f, 0.22f, 0.28f, 0.96f), Vector2.zero, new Vector2(860f, 88f));
+                    reqRow.AddComponent<LayoutElement>().preferredHeight = 88f;
+
+                    GameObject avObj = new GameObject("ReqAvatar");
+                    avObj.transform.SetParent(reqRow.transform, false);
+                    RectTransform avRect = avObj.AddComponent<RectTransform>();
+                    avRect.anchoredPosition = new Vector2(-382f, 0f);
+                    avRect.sizeDelta = new Vector2(54f, 54f);
+                    Image avImg = avObj.AddComponent<Image>();
+                    avImg.raycastTarget = false;
+                    TMP_Text avInit = CreateText(avObj.transform, "Init", "?", 19, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(46f, 36f));
+                    avInit.raycastTarget = false;
+                    ApplyCircularAvatar(avImg, avInit, $"treq_{req.UserId}", req.AvatarBase64, req.Username);
+
+                    string reqBadge = RoatanRankTierHelper.FormatRichBadge(req.Elo);
+                    CreateText(reqRow.transform, "ReqName", $"{req.Username}  <size=17>{reqBadge}</size>", 20, FontStyles.Bold, Color.white, new Vector2(-110f, 0f), new Vector2(460f, 44f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+                    CreatePillButton(reqRow.transform, "BtnApproveReq", "Approve", RoatanVisualAssets.PalmGreen, new Vector2(216f, 0f), new Vector2(138f, 54f), 19, () =>
+                    {
+                        RoatanSoundFX.Instance?.PlayTap();
+                        if (!EnsureConnectedForRequest()) return;
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamJoinRequestFrame(new RespondTeamJoinRequestDto
+                        {
+                            RequestId = capturedReq.RequestId,
+                            Approve = true
+                        }));
+                    });
+
+                    CreatePillButton(reqRow.transform, "BtnDenyReq", "Deny", RoatanVisualAssets.SunsetCoral, new Vector2(360f, 0f), new Vector2(124f, 54f), 19, () =>
+                    {
+                        RoatanSoundFX.Instance?.PlayTap();
+                        if (!EnsureConnectedForRequest()) return;
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.RespondTeamJoinRequestFrame(new RespondTeamJoinRequestDto
+                        {
+                            RequestId = capturedReq.RequestId,
+                            Approve = false
+                        }));
+                    });
+
+                    spawnedTeamSectionObjs.Add(reqRow);
+                }
+            }
+        }
+
+        // 4. Team Settings Edit Panel (shown ONLY to Captain)
+        if (isCaptain)
+        {
+            GameObject settingsCard = CreateCard(teamsContentRoot, "TeamSettingsCard", new Color(0.07f, 0.21f, 0.27f, 0.96f), Vector2.zero, new Vector2(860f, 326f));
+            settingsCard.AddComponent<LayoutElement>().preferredHeight = 326f;
+
+            CreateText(settingsCard.transform, "SettingsHdr", "TEAM SETTINGS (CAPTAIN ONLY)", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 132f), new Vector2(820f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            TMP_InputField editName = CreateInputField(settingsCard.transform, "EditTeamName", "Team Name", editTeamNameDraft, new Vector2(-120f, 74f), new Vector2(570f, 56f));
+            editName.onValueChanged.AddListener(v => editTeamNameDraft = v);
+
+            TMP_InputField editTag = CreateInputField(settingsCard.transform, "EditTeamTag", "TAG", editTeamTagDraft, new Vector2(292f, 74f), new Vector2(236f, 56f));
+            editTag.characterLimit = 4;
+            editTag.onValueChanged.AddListener(v => editTeamTagDraft = v);
+
+            Color activeBlue = RoatanVisualAssets.BrightLagoon;
+            Color inactiveDark = new Color(0.14f, 0.22f, 0.28f, 1f);
+            CreatePillButton(settingsCard.transform, "BtnEditPolicyOpen", "Open Join", editTeamJoinPolicy == TeamJoinPolicy.Open ? activeBlue : inactiveDark, new Vector2(-210f, 6f), new Vector2(400f, 52f), 19, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                editTeamJoinPolicy = TeamJoinPolicy.Open;
+                RefreshTeamsTabUI();
+            });
+            CreatePillButton(settingsCard.transform, "BtnEditPolicyApproval", "Approval Required", editTeamJoinPolicy == TeamJoinPolicy.ApprovalRequired ? activeBlue : inactiveDark, new Vector2(210f, 6f), new Vector2(400f, 52f), 19, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                editTeamJoinPolicy = TeamJoinPolicy.ApprovalRequired;
+                RefreshTeamsTabUI();
+            });
+
+            int editMinElo = TeamMinEloOptions[Mathf.Clamp(editTeamMinEloIndex, 0, TeamMinEloOptions.Length - 1)];
+            CreatePillButton(settingsCard.transform, "BtnEditMinElo", $"Min Elo: {FormatMinEloOptionLabel(editMinElo)}  ▾", new Color(0.10f, 0.28f, 0.35f, 1f), new Vector2(-210f, -58f), new Vector2(400f, 52f), 18, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                editTeamMinEloIndex = (editTeamMinEloIndex + 1) % TeamMinEloOptions.Length;
+                RefreshTeamsTabUI();
+            });
+            CreatePillButton(settingsCard.transform, "BtnEditActivity", $"Activity: {editTeamActivityReq.GetDisplayName()}  ▾", new Color(0.10f, 0.28f, 0.35f, 1f), new Vector2(210f, -58f), new Vector2(400f, 52f), 18, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                editTeamActivityReq = (TeamActivityRequirement)(((int)editTeamActivityReq + 1) % 3);
+                RefreshTeamsTabUI();
+            });
+
+            CreatePillButton(settingsCard.transform, "BtnSaveTeamSettings", "Save Team Settings", RoatanVisualAssets.IslandGold, new Vector2(0f, -124f), new Vector2(520f, 58f), 21, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                if (!EnsureConnectedForRequest()) return;
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.UpdateTeamSettingsFrame(new UpdateTeamSettingsDto
+                {
+                    Name = editTeamNameDraft.Trim(),
+                    Tag = editTeamTagDraft.Trim().ToUpperInvariant(),
+                    JoinPolicy = editTeamJoinPolicy,
+                    MinElo = TeamMinEloOptions[Mathf.Clamp(editTeamMinEloIndex, 0, TeamMinEloOptions.Length - 1)],
+                    ActivityRequirement = editTeamActivityReq
+                }));
+            }).GetComponentInChildren<TMP_Text>().color = new Color(0.08f, 0.10f, 0.12f, 1f);
+
+            spawnedTeamSectionObjs.Add(settingsCard);
+        }
+
+        // 5. Team Roster List with Role Badges & Role-Appropriate Contextual Actions
+        List<TeamMemberDto> members = details.Members ?? new List<TeamMemberDto>();
+        GameObject rosterHdr = CreateCard(teamsContentRoot, "TeamRosterHdr", new Color(0.09f, 0.24f, 0.30f, 0.95f), Vector2.zero, new Vector2(860f, 42f));
+        rosterHdr.AddComponent<LayoutElement>().preferredHeight = 42f;
+        CreateText(rosterHdr.transform, "Title", $"TEAM ROSTER ({members.Count}/{info.MaxMembers})", 19, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+        spawnedTeamSectionObjs.Add(rosterHdr);
+
+        foreach (TeamMemberDto member in members)
+        {
+            TeamMemberDto capturedMember = member;
+            bool isSelf = member.UserId == selfId;
+            Color bg = isSelf
+                ? new Color(0.10f, 0.31f, 0.30f, 0.98f)
+                : new Color(0.07f, 0.20f, 0.26f, 0.95f);
+
+            GameObject mRow = CreateCard(teamsContentRoot, $"TeamMember_{member.UserId}", bg, Vector2.zero, new Vector2(860f, 92f));
+            mRow.AddComponent<LayoutElement>().preferredHeight = 92f;
+
+            Color dotColor = member.IsOnline ? new Color(0.22f, 0.88f, 0.48f, 1f) : new Color(0.50f, 0.56f, 0.60f, 1f);
+            CreateText(mRow.transform, "Dot", "●", 22, FontStyles.Bold, dotColor, new Vector2(-404f, 0f), new Vector2(28f, 36f));
+
+            GameObject avObj = new GameObject("MemberAvatar");
+            avObj.transform.SetParent(mRow.transform, false);
+            RectTransform avRect = avObj.AddComponent<RectTransform>();
+            avRect.anchoredPosition = new Vector2(-354f, 0f);
+            avRect.sizeDelta = new Vector2(54f, 54f);
+            Image avImg = avObj.AddComponent<Image>();
+            avImg.raycastTarget = false;
+            TMP_Text avInit = CreateText(avObj.transform, "Init", "?", 19, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(46f, 36f));
+            avInit.raycastTarget = false;
+            ApplyCircularAvatar(avImg, avInit, $"tmem_{member.UserId}", member.AvatarBase64, member.Username);
+
+            string mRoleHex = member.Role.GetBadgeColorHex();
+            string mRankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(member.Elo));
+            string youTag = isSelf ? " <color=#F7C948>(You)</color>" : string.Empty;
+
+            CreateText(mRow.transform, "MName", $"{member.Username}{youTag}  <size=17><color={mRoleHex}>[{member.Role.GetDisplayName()}]</color></size>", 20, FontStyles.Bold, Color.white, new Vector2(-98f, 15f), new Vector2(440f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(mRow.transform, "MElo", mRankBadge, 17, FontStyles.Normal, new Color(0.84f, 0.94f, 0.97f), new Vector2(-98f, -18f), new Vector2(440f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            if (!isSelf)
+            {
+                Button rowClickBtn = mRow.AddComponent<Button>();
+                rowClickBtn.transition = Selectable.Transition.ColorTint;
+                rowClickBtn.onClick.AddListener(() =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    OpenPlayerActionModal(new PlayerActionProfileData
+                    {
+                        UserId = capturedMember.UserId,
+                        Username = capturedMember.Username,
+                        AvatarBase64 = capturedMember.AvatarBase64,
+                        Elo = ResolveDisplayElo(capturedMember.Elo),
+                        Wins = capturedMember.Wins,
+                        Losses = capturedMember.Losses,
+                        WinAssists = capturedMember.WinAssists,
+                        TotalMoves = capturedMember.TotalMoves,
+                        OptimalMoves = capturedMember.OptimalMoves,
+                        AverageTurnSeconds = capturedMember.AverageTurnSeconds,
+                        IsOnline = capturedMember.IsOnline,
+                        TeamId = info.Id,
+                        TeamTag = info.Tag
+                    });
+                });
+            }
+
+            if (!isSelf)
+            {
+                bool canPromote = isCaptain && member.Role == TeamRole.Teammate;
+                bool canDemote = isCaptain && member.Role == TeamRole.ViceCaptain;
+                bool canKick = (isCaptain && member.Role != TeamRole.Captain) ||
+                               (myRole == TeamRole.ViceCaptain && member.Role == TeamRole.Teammate);
+
+                if (canPromote)
+                {
+                    CreatePillButton(mRow.transform, "BtnPromote", "Promote", RoatanVisualAssets.BrightLagoon, new Vector2(216f, 0f), new Vector2(138f, 52f), 18, () =>
+                    {
+                        RoatanSoundFX.Instance?.PlayTap();
+                        if (!EnsureConnectedForRequest()) return;
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.PromoteOrDemoteMemberFrame(new PromoteOrDemoteMemberDto
+                        {
+                            TargetUserId = capturedMember.UserId,
+                            NewRole = TeamRole.ViceCaptain
+                        }));
+                    });
+                }
+                else if (canDemote)
+                {
+                    CreatePillButton(mRow.transform, "BtnDemote", "Demote", new Color(0.42f, 0.34f, 0.14f, 1f), new Vector2(216f, 0f), new Vector2(138f, 52f), 18, () =>
+                    {
+                        RoatanSoundFX.Instance?.PlayTap();
+                        if (!EnsureConnectedForRequest()) return;
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.PromoteOrDemoteMemberFrame(new PromoteOrDemoteMemberDto
+                        {
+                            TargetUserId = capturedMember.UserId,
+                            NewRole = TeamRole.Teammate
+                        }));
+                    });
+                }
+
+                if (canKick)
+                {
+                    float kickX = (canPromote || canDemote) ? 358f : 316f;
+                    float kickW = (canPromote || canDemote) ? 124f : 168f;
+                    CreatePillButton(mRow.transform, "BtnKick", "Kick", RoatanVisualAssets.SunsetCoral, new Vector2(kickX, 0f), new Vector2(kickW, 52f), 18, () =>
+                    {
+                        RoatanSoundFX.Instance?.PlayTap();
+                        if (!EnsureConnectedForRequest()) return;
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.KickTeamMemberFrame(new KickTeamMemberDto
+                        {
+                            TargetUserId = capturedMember.UserId
+                        }));
+                    });
+                }
+            }
+
+            spawnedTeamSectionObjs.Add(mRow);
+        }
+
+        // 6. Open Challenge Board & Active 24h Team Challenges
+        BuildOpenChallengeBoardSection(info, myRole);
+    }
+
+    private static string FormatPlayWindowRemaining(DateTime? playDeadlineUtc)
+    {
+        if (!playDeadlineUtc.HasValue) return "24h window";
+        TimeSpan remaining = playDeadlineUtc.Value - DateTime.UtcNow;
+        if (remaining.TotalSeconds <= 0) return "Expired";
+        int hours = (int)remaining.TotalHours;
+        int mins = remaining.Minutes;
+        return hours > 0 ? $"{hours}h {mins}m left to play" : $"{Math.Max(1, mins)}m left to play";
+    }
+
+    private static string FormatOpenChallengeMinEloLabel(int minElo)
+    {
+        if (minElo <= RoatanRankTierHelper.MinElo) return "Any Team (100+)";
+        string tierName = RoatanRankTierHelper.FromElo(minElo).GetDisplayName();
+        return $"{tierName} ({minElo}+)";
+    }
+
+    private void BuildOpenChallengeBoardSection(TeamInfoDto myTeamInfo, TeamRole? myRole)
+    {
+        bool isCaptainOrVice = myTeamInfo != null && (myRole == TeamRole.Captain || myRole == TeamRole.ViceCaptain);
+        bool isTeammate = myTeamInfo != null && myRole == TeamRole.Teammate;
+        long myTeamId = myTeamInfo != null ? myTeamInfo.Id : -1;
+
+        // A. Active Accepted Team Challenges (24-Hour Play Window)
+        List<TeamChallengeDto> activeAccepted = latestOpenChallenges?.ActiveAcceptedChallenges;
+        if (myTeamInfo != null && activeAccepted != null && activeAccepted.Count > 0)
+        {
+            GameObject actHdr = CreateCard(teamsContentRoot, "ActiveChallengesHdr", new Color(0.11f, 0.30f, 0.28f, 0.96f), Vector2.zero, new Vector2(860f, 44f));
+            actHdr.AddComponent<LayoutElement>().preferredHeight = 44f;
+            CreateText(actHdr.transform, "Title", $"ACTIVE TEAM CHALLENGES ({activeAccepted.Count}) — 24H PLAY WINDOW", 19, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+            spawnedTeamSectionObjs.Add(actHdr);
+
+            foreach (TeamChallengeDto ch in activeAccepted)
+            {
+                TeamChallengeDto capturedCh = ch;
+                GameObject row = CreateCard(teamsContentRoot, $"ActiveCh_{ch.ChallengeId}", new Color(0.08f, 0.26f, 0.30f, 0.98f), Vector2.zero, new Vector2(860f, 122f));
+                row.AddComponent<LayoutElement>().preferredHeight = 122f;
+
+                string modeStr = ch.GameMode == MatchFormat.TWO_BEST ? "Two-Best 1v1" : "Six-Lov 2v2";
+                string varStr = ch.Variant == TableStyle.BLOCK ? "Block" : "Draw";
+                string countdown = FormatPlayWindowRemaining(ch.PlayDeadlineUtc);
+                string humansTag = ch.RequireFullHumanSquad ? "  •  <color=#FF9F43>[Humans Only]</color>" : string.Empty;
+                string checkInStatus = $"Check-In: [{ch.ChallengerTeamTag}] {(ch.TeamACheckedIn ? "✓" : "…")}  vs  [{ch.TargetTeamTag ?? "Rival"}] {(ch.TeamBCheckedIn ? "✓" : "…")}";
+
+                CreateText(row.transform, "Matchup", $"[{ch.ChallengerTeamTag}] {ch.ChallengerTeamName}  vs  [{ch.TargetTeamTag}] {ch.TargetTeamName}", 20, FontStyles.Bold, Color.white, new Vector2(-120f, 32f), new Vector2(580f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+                CreateText(row.transform, "Meta", $"{modeStr} • {varStr}{humansTag}  •  <color=#4BE38D><b>{countdown}</b></color>", 16, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(-120f, 0f), new Vector2(580f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+                CreateText(row.transform, "CheckIn", checkInStatus, 15, FontStyles.Normal, new Color(0.80f, 0.93f, 0.96f), new Vector2(-120f, -32f), new Vector2(580f, 26f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+                CreatePillButton(row.transform, "BtnJoinActiveCh", "Join Team Table", RoatanVisualAssets.PalmGreen, new Vector2(310f, 0f), new Vector2(204f, 62f), 18, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    if (!string.IsNullOrWhiteSpace(capturedCh.TableCode))
+                    {
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyWithCodeFrame(new LobbyCodeDto { Code = capturedCh.TableCode }));
+                    }
+                    else if (capturedCh.TableId > 0)
+                    {
+                        subscribedClient.AddToSendQueue(MessageFrameBuilder.JoinLobbyFrame(new JoinLobbyDto { LobbyIdToJoin = capturedCh.TableId }));
+                    }
+                });
+
+                spawnedTeamSectionObjs.Add(row);
+            }
+        }
+
+        // B. Open Challenge Board Header
+        GameObject boardHdr = CreateCard(teamsContentRoot, "OpenChallengeBoardHdr", new Color(0.09f, 0.24f, 0.30f, 0.96f), Vector2.zero, new Vector2(860f, 44f));
+        boardHdr.AddComponent<LayoutElement>().preferredHeight = 44f;
+        CreateText(boardHdr.transform, "Title", "OPEN CHALLENGE BOARD", 20, FontStyles.Bold, RoatanVisualAssets.IslandGold, Vector2.zero, new Vector2(820f, 32f)).alignment = TextAlignmentOptions.MidlineLeft;
+        spawnedTeamSectionObjs.Add(boardHdr);
+
+        // C. Post Open Challenge Form (Captain & Vice-Captain ONLY)
+        if (isCaptainOrVice)
+        {
+            GameObject postCard = CreateCard(teamsContentRoot, "PostOpenChallengeCard", new Color(0.06f, 0.19f, 0.26f, 0.96f), Vector2.zero, new Vector2(860f, 276f));
+            postCard.AddComponent<LayoutElement>().preferredHeight = 276f;
+
+            CreateText(postCard.transform, "PostHdr", "POST AN OPEN CHALLENGE (CAPTAIN / VICE-CAPTAIN)", 18, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(0f, 108f), new Vector2(820f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            Color activeGold = RoatanVisualAssets.IslandGold;
+            Color activeBlue = RoatanVisualAssets.BrightLagoon;
+            Color inactiveDark = new Color(0.14f, 0.22f, 0.28f, 1f);
+
+            Button bSix = CreatePillButton(postCard.transform, "BtnOpenSixLov", "Six-Lov (2v2)", openChSelectedMode == MatchFormat.SIX_LOV ? activeGold : inactiveDark, new Vector2(-315f, 52f), new Vector2(194f, 50f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChSelectedMode = MatchFormat.SIX_LOV;
+                RefreshTeamsTabUI();
+            });
+            if (openChSelectedMode == MatchFormat.SIX_LOV) bSix.GetComponentInChildren<TMP_Text>().color = new Color(0.08f, 0.10f, 0.12f, 1f);
+
+            Button bTwo = CreatePillButton(postCard.transform, "BtnOpenTwoBest", "Two-Best (1v1)", openChSelectedMode == MatchFormat.TWO_BEST ? activeGold : inactiveDark, new Vector2(-110f, 52f), new Vector2(194f, 50f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChSelectedMode = MatchFormat.TWO_BEST;
+                RefreshTeamsTabUI();
+            });
+            if (openChSelectedMode == MatchFormat.TWO_BEST) bTwo.GetComponentInChildren<TMP_Text>().color = new Color(0.08f, 0.10f, 0.12f, 1f);
+
+            CreatePillButton(postCard.transform, "BtnOpenDraw", "Draw", openChSelectedVariant == TableStyle.DRAW ? activeBlue : inactiveDark, new Vector2(110f, 52f), new Vector2(194f, 50f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChSelectedVariant = TableStyle.DRAW;
+                RefreshTeamsTabUI();
+            });
+
+            CreatePillButton(postCard.transform, "BtnOpenBlock", "Block", openChSelectedVariant == TableStyle.BLOCK ? activeBlue : inactiveDark, new Vector2(315f, 52f), new Vector2(194f, 50f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChSelectedVariant = TableStyle.BLOCK;
+                RefreshTeamsTabUI();
+            });
+
+            int minEloVal = OpenChallengeMinEloOptions[Mathf.Clamp(openChMinEloIndex, 0, OpenChallengeMinEloOptions.Length - 1)];
+            CreatePillButton(postCard.transform, "BtnOpenMinElo", $"Min Rival Elo: {FormatOpenChallengeMinEloLabel(minEloVal)}  ▾", new Color(0.10f, 0.28f, 0.35f, 1f), new Vector2(-210f, -14f), new Vector2(400f, 52f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChMinEloIndex = (openChMinEloIndex + 1) % OpenChallengeMinEloOptions.Length;
+                RefreshTeamsTabUI();
+            });
+
+            CreatePillButton(postCard.transform, "BtnOpenNoBots", openChRequireHumansOnly ? "No Bots (Humans Only): ON ✓" : "No Bots (Humans Only): OFF", openChRequireHumansOnly ? RoatanVisualAssets.SunsetCoral : inactiveDark, new Vector2(210f, -14f), new Vector2(400f, 52f), 17, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                openChRequireHumansOnly = !openChRequireHumansOnly;
+                RefreshTeamsTabUI();
+            });
+
+            CreatePillButton(postCard.transform, "BtnSubmitOpenChallenge", "Post Open Challenge", RoatanVisualAssets.PalmGreen, new Vector2(0f, -92f), new Vector2(600f, 58f), 21, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                if (!EnsureConnectedForRequest()) return;
+                subscribedClient.AddToSendQueue(MessageFrameBuilder.PostOpenTeamChallengeFrame(new PostOpenTeamChallengeDto
+                {
+                    GameMode = openChSelectedMode,
+                    Variant = openChSelectedVariant,
+                    MinOpponentTeamElo = OpenChallengeMinEloOptions[Mathf.Clamp(openChMinEloIndex, 0, OpenChallengeMinEloOptions.Length - 1)],
+                    RequireFullHumanSquad = openChRequireHumansOnly
+                }));
+            });
+
+            spawnedTeamSectionObjs.Add(postCard);
+        }
+
+        // D. Open Board Challenge Rows (Role-Aware: Accept / Ask Leaders / Cancel)
+        List<TeamChallengeDto> openList = latestOpenChallenges?.OpenChallenges;
+        if (openList == null || openList.Count == 0)
+        {
+            GameObject emptyCard = CreateCard(teamsContentRoot, "NoOpenChallengesRow", new Color(0.06f, 0.17f, 0.22f, 0.72f), Vector2.zero, new Vector2(860f, 64f));
+            emptyCard.AddComponent<LayoutElement>().preferredHeight = 64f;
+            CreateText(emptyCard.transform, "Lbl", "No open challenges on the board right now — leaders can post one above!", 18, FontStyles.Italic, new Color(0.76f, 0.88f, 0.92f), Vector2.zero, new Vector2(820f, 40f));
+            spawnedTeamSectionObjs.Add(emptyCard);
+            return;
+        }
+
+        foreach (TeamChallengeDto ch in openList)
+        {
+            TeamChallengeDto capturedCh = ch;
+            bool isOwnTeam = myTeamId > 0 && ch.ChallengerTeamId == myTeamId;
+            bool hasEndorsements = !isOwnTeam && ch.RequestedByTeammateUsernames != null && ch.RequestedByTeammateUsernames.Count > 0;
+            bool showDisqualify = !isOwnTeam && !ch.MeetsConditions && !string.IsNullOrWhiteSpace(ch.DisqualifyReason);
+            float rowH = (hasEndorsements || showDisqualify) ? 148f : 118f;
+
+            GameObject row = CreateCard(teamsContentRoot, $"OpenCh_{ch.ChallengeId}", new Color(0.07f, 0.21f, 0.28f, 0.96f), Vector2.zero, new Vector2(860f, rowH));
+            row.AddComponent<LayoutElement>().preferredHeight = rowH;
+
+            string tierBadge = RoatanRankTierHelper.FormatRichBadge(ch.ChallengerTeamElo);
+            string modeStr = ch.GameMode == MatchFormat.TWO_BEST ? "Two-Best 1v1" : "Six-Lov 2v2";
+            string varStr = ch.Variant == TableStyle.BLOCK ? "Block" : "Draw";
+            string humansStr = ch.RequireFullHumanSquad ? "  •  <color=#FF9F43>Humans Only (No Bots)</color>" : string.Empty;
+            float topY = rowH * 0.5f - 26f;
+
+            CreateText(row.transform, "ChTeam", $"[{ch.ChallengerTeamTag}] {ch.ChallengerTeamName}  <size=17>{tierBadge}</size>", 21, FontStyles.Bold, Color.white, new Vector2(-120f, topY), new Vector2(580f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+            CreateText(row.transform, "ChMeta", $"{modeStr} • {varStr}  •  Min Rival: {FormatOpenChallengeMinEloLabel(ch.MinOpponentTeamElo)}{humansStr}", 16, FontStyles.Normal, RoatanVisualAssets.IslandGold, new Vector2(-120f, topY - 32f), new Vector2(580f, 28f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+            if (hasEndorsements)
+            {
+                string reqNames = string.Join(", ", ch.RequestedByTeammateUsernames);
+                CreateText(row.transform, "ChEndorse", $"★ Requested by {reqNames}", 16, FontStyles.Bold, new Color(0.42f, 0.95f, 0.68f), new Vector2(-120f, topY - 64f), new Vector2(580f, 26f)).alignment = TextAlignmentOptions.MidlineLeft;
+            }
+            else if (showDisqualify)
+            {
+                CreateText(row.transform, "ChDisq", $"✗ {ch.DisqualifyReason}", 16, FontStyles.Bold, RoatanVisualAssets.SunsetCoral, new Vector2(-120f, topY - 64f), new Vector2(580f, 26f)).alignment = TextAlignmentOptions.MidlineLeft;
+            }
+
+            if (isOwnTeam && isCaptainOrVice)
+            {
+                CreatePillButton(row.transform, "BtnCancelOpenCh", "Cancel", RoatanVisualAssets.SunsetCoral, new Vector2(310f, 0f), new Vector2(198f, 58f), 19, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.CancelOpenTeamChallengeFrame(new CancelOpenTeamChallengeDto
+                    {
+                        ChallengeId = capturedCh.ChallengeId
+                    }));
+                });
+            }
+            else if (isOwnTeam)
+            {
+                CreateText(row.transform, "OwnPostLbl", "YOUR POST", 16, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(310f, 0f), new Vector2(198f, 40f));
+            }
+            else if (isCaptainOrVice)
+            {
+                bool canAccept = ch.MeetsConditions;
+                Button accBtn = CreatePillButton(row.transform, "BtnAcceptOpenCh", "Accept Challenge", canAccept ? RoatanVisualAssets.PalmGreen : new Color(0.28f, 0.24f, 0.26f, 0.90f), new Vector2(310f, 0f), new Vector2(204f, 60f), 17, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.AcceptOpenTeamChallengeFrame(new AcceptOpenTeamChallengeDto
+                    {
+                        ChallengeId = capturedCh.ChallengeId
+                    }));
+                });
+                accBtn.interactable = canAccept;
+            }
+            else if (isTeammate)
+            {
+                bool alreadyAsked = ch.AlreadyRequestedByMe;
+                bool canAsk = ch.MeetsConditions && !alreadyAsked;
+                string askLabel = alreadyAsked ? "Asked Leaders ✓" : "Ask Leaders";
+                Color askColor = alreadyAsked
+                    ? new Color(0.14f, 0.42f, 0.28f, 0.95f)
+                    : (canAsk ? RoatanVisualAssets.BrightLagoon : new Color(0.28f, 0.24f, 0.26f, 0.90f));
+                Button askBtn = CreatePillButton(row.transform, "BtnAskLeaders", askLabel, askColor, new Vector2(310f, 0f), new Vector2(204f, 60f), 18, () =>
+                {
+                    RoatanSoundFX.Instance?.PlayTap();
+                    if (!EnsureConnectedForRequest()) return;
+                    subscribedClient.AddToSendQueue(MessageFrameBuilder.RequestAcceptTeamChallengeFrame(new RequestAcceptTeamChallengeDto
+                    {
+                        ChallengeId = capturedCh.ChallengeId
+                    }));
+                });
+                askBtn.interactable = canAsk;
+            }
+
+            spawnedTeamSectionObjs.Add(row);
+        }
+    }
+
+    private void OnGetLeaderboardResponse(ResponseObjectDto<LeaderboardDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        latestLeaderboard = dto.Object;
+        RefreshLeaderboardUI();
+    }
+
+    private void RefreshLeaderboardUI()
+    {
+        RefreshLeaderboardSelfBanner();
+
+        if (leaderboardListContent == null) return;
+        foreach (GameObject row in spawnedLeaderboardRows) Destroy(row);
+        spawnedLeaderboardRows.Clear();
+
+        List<LeaderboardEntryDto> entries = latestLeaderboard?.Entries;
+        if (entries == null || entries.Count == 0)
+        {
+            GameObject emptyRow = CreateCard(leaderboardListContent, "EmptyLeaderboardRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(870f, 84f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No ranked players on the leaderboard yet — complete an online match!", 21, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(830f, 60f));
+            spawnedLeaderboardRows.Add(emptyRow);
+            return;
+        }
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        foreach (LeaderboardEntryDto entry in entries)
+        {
+            SpawnLeaderboardRow(entry, selfId);
+        }
+    }
+
+    private void RefreshLeaderboardSelfBanner()
+    {
+        if (leaderboardSelfBannerCard == null) return;
+
+        LeaderboardEntryDto selfEntry = latestLeaderboard?.LocalPlayerEntry;
+        UserDto localUser = subscribedClient?.User;
+
+        if (selfEntry != null)
+        {
+            string tierHex = string.IsNullOrWhiteSpace(selfEntry.TierColorHex) ? selfEntry.Tier.GetBadgeColorHex() : selfEntry.TierColorHex;
+            string tierName = string.IsNullOrWhiteSpace(selfEntry.TierName) ? selfEntry.Tier.GetDisplayName() : selfEntry.TierName;
+            string accStr = selfEntry.TotalMoves > 0 ? $"{selfEntry.AccuracyPercent:0.#}%" : "—";
+
+            if (leaderboardSelfRankLabel != null) leaderboardSelfRankLabel.text = $"#{selfEntry.Rank}";
+            if (leaderboardSelfNameTierLabel != null)
+            {
+                leaderboardSelfNameTierLabel.text = $"{selfEntry.Username} (You)\n<size=17><color={tierHex}>[{tierName}]</color>  •  Rank #{selfEntry.Rank} of {Math.Max(1, latestLeaderboard.TotalRankedPlayers)}</size>";
+            }
+            if (leaderboardSelfStatsLabel != null)
+            {
+                leaderboardSelfStatsLabel.text = $"<b>{selfEntry.Elo}</b> Elo  •  {selfEntry.Wins}/{selfEntry.Losses}\n<size=16><color=#CBE6EE>Acc {accStr}  •  {selfEntry.WinAssists} Ast</color></size>";
+            }
+            ApplyCircularAvatar(leaderboardSelfAvatarImg, leaderboardSelfAvatarInitials, $"lb_self_{selfEntry.UserId}", selfEntry.AvatarBase64, selfEntry.Username);
+        }
+        else if (localUser != null)
+        {
+            int elo = ResolveDisplayElo(localUser);
+            RoatanRankTierInfo info = RoatanRankTierHelper.GetInfoForElo(elo);
+            string accStr = localUser.TotalMoves > 0 ? $"{localUser.AccuracyPercent:0.#}%" : "—";
+            if (leaderboardSelfRankLabel != null) leaderboardSelfRankLabel.text = "#—";
+            if (leaderboardSelfNameTierLabel != null)
+            {
+                leaderboardSelfNameTierLabel.text = $"{localUser.Login} (You)\n<size=17><color={info.BadgeColorHex}>[{info.DisplayName}]</color>  •  Your Ranking</size>";
+            }
+            if (leaderboardSelfStatsLabel != null)
+            {
+                leaderboardSelfStatsLabel.text = $"<b>{elo}</b> Elo  •  {localUser.Wins}/{localUser.Losses}\n<size=16><color=#CBE6EE>Acc {accStr}  •  {localUser.WinAssists} Ast</color></size>";
+            }
+            ApplyCircularAvatar(leaderboardSelfAvatarImg, leaderboardSelfAvatarInitials, $"lb_self_{localUser.Id}", localUser.AvatarBase64, localUser.Login);
+        }
+    }
+
+    private void SpawnLeaderboardRow(LeaderboardEntryDto entry, long selfId)
+    {
+        bool isSelf = entry.UserId == selfId;
+        Color bg = isSelf
+            ? new Color(0.11f, 0.34f, 0.32f, 0.98f)
+            : new Color(0.07f, 0.21f, 0.27f, 0.94f);
+
+        GameObject row = CreateCard(leaderboardListContent, $"LB_{entry.Rank}_{entry.UserId}", bg, Vector2.zero, new Vector2(870f, 84f));
+        row.AddComponent<LayoutElement>().preferredHeight = 84f;
+
+        Color rankColor = entry.Rank == 1
+            ? RoatanVisualAssets.IslandGold
+            : (entry.Rank == 2
+                ? new Color(0.84f, 0.88f, 0.92f)
+                : (entry.Rank == 3 ? new Color(0.85f, 0.56f, 0.28f) : Color.white));
+        CreateText(row.transform, "RankNum", $"#{entry.Rank}", 22, FontStyles.Bold, rankColor, new Vector2(-404f, 0f), new Vector2(68f, 44f));
+
+        GameObject avObj = new GameObject("Avatar");
+        avObj.transform.SetParent(row.transform, false);
+        RectTransform avRect = avObj.AddComponent<RectTransform>();
+        avRect.anchoredPosition = new Vector2(-334f, 0f);
+        avRect.sizeDelta = new Vector2(54f, 54f);
+        Image avImg = avObj.AddComponent<Image>();
+        avImg.raycastTarget = false;
+        TMP_Text avInit = CreateText(avObj.transform, "Init", "?", 19, FontStyles.Bold, Color.white, Vector2.zero, new Vector2(46f, 36f));
+        avInit.raycastTarget = false;
+        ApplyCircularAvatar(avImg, avInit, $"lb_{entry.UserId}", entry.AvatarBase64, entry.Username);
+
+        string tierHex = string.IsNullOrWhiteSpace(entry.TierColorHex) ? entry.Tier.GetBadgeColorHex() : entry.TierColorHex;
+        string tierName = string.IsNullOrWhiteSpace(entry.TierName) ? entry.Tier.GetDisplayName() : entry.TierName;
+        string youTag = isSelf ? " <color=#F7C948>(You)</color>" : string.Empty;
+
+        TMP_Text nameTier = CreateText(row.transform, "NameTier", $"{entry.Username}{youTag}\n<size=16><color={tierHex}>[{tierName}]</color></size>", 19, FontStyles.Bold, Color.white, new Vector2(-132f, 0f), new Vector2(336f, 68f));
+        nameTier.alignment = TextAlignmentOptions.MidlineLeft;
+
+        CreateText(row.transform, "EloVal", entry.Elo.ToString(), 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(105f, 0f), new Vector2(96f, 40f));
+        CreateText(row.transform, "WLVal", $"{entry.Wins}/{entry.Losses}", 19, FontStyles.Normal, Color.white, new Vector2(210f, 0f), new Vector2(94f, 40f));
+        string accStr = entry.TotalMoves > 0 ? $"{entry.AccuracyPercent:0}%" : "—";
+        CreateText(row.transform, "AccVal", accStr, 19, FontStyles.Normal, new Color(0.68f, 0.94f, 0.80f), new Vector2(310f, 0f), new Vector2(96f, 40f));
+        CreateText(row.transform, "AstVal", entry.WinAssists.ToString(), 19, FontStyles.Bold, new Color(0.68f, 0.88f, 0.96f), new Vector2(400f, 0f), new Vector2(74f, 40f));
+
+        if (!isSelf)
+        {
+            LeaderboardEntryDto capturedEntry = entry;
+            Button rowBtn = row.AddComponent<Button>();
+            rowBtn.transition = Selectable.Transition.ColorTint;
+            rowBtn.onClick.AddListener(() =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                PlayerPresenceDto presence = latestRoster.FirstOrDefault(p => p.UserId == capturedEntry.UserId);
+                OpenPlayerActionModal(new PlayerActionProfileData
+                {
+                    UserId = capturedEntry.UserId,
+                    Username = capturedEntry.Username,
+                    AvatarBase64 = capturedEntry.AvatarBase64,
+                    Elo = ResolveDisplayElo(capturedEntry.Elo),
+                    Wins = capturedEntry.Wins,
+                    Losses = capturedEntry.Losses,
+                    WinAssists = capturedEntry.WinAssists,
+                    TotalMoves = capturedEntry.TotalMoves,
+                    OptimalMoves = capturedEntry.OptimalMoves,
+                    AverageTurnSeconds = capturedEntry.AverageTurnSeconds,
+                    IsOnline = presence != null && presence.IsOnline,
+                    TeamId = capturedEntry.TeamId ?? presence?.TeamId,
+                    TeamTag = !string.IsNullOrWhiteSpace(capturedEntry.TeamTag) ? capturedEntry.TeamTag : presence?.TeamTag
+                });
+            });
+        }
+
+        spawnedLeaderboardRows.Add(row);
+    }
+
+    // ==================== TEAM LEADERBOARD & TEAM CHALLENGES ====================
+
+    private void SelectLeaderboardSubTab(bool showTeams)
+    {
+        leaderboardShowingTeams = showTeams;
+        if (lbPlayersSubViewObj != null) lbPlayersSubViewObj.SetActive(!showTeams);
+        if (lbTeamsSubViewObj != null) lbTeamsSubViewObj.SetActive(showTeams);
+
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (lbPlayersSubTabImg != null) lbPlayersSubTabImg.color = !showTeams ? RoatanVisualAssets.IslandGold : inactive;
+        if (lbTeamsSubTabImg != null) lbTeamsSubTabImg.color = showTeams ? RoatanVisualAssets.PalmGreen : inactive;
+        if (lbPlayersSubTabLabel != null) lbPlayersSubTabLabel.color = !showTeams ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        if (lbTeamsSubTabLabel != null) lbTeamsSubTabLabel.color = Color.white;
+
+        if (showTeams)
+        {
+            RefreshTeamLeaderboardUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestTeamLeaderboard();
+            }
+        }
+        else
+        {
+            RefreshLeaderboardUI();
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestLeaderboard();
+            }
+        }
+    }
+
+    private void OnGetTeamLeaderboardResponse(ResponseObjectDto<TeamLeaderboardDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        latestTeamLeaderboard = dto.Object;
+        RefreshTeamLeaderboardUI();
+    }
+
+    private void RefreshTeamLeaderboardUI()
+    {
+        RefreshTeamLeaderboardSelfBanner();
+
+        if (teamLeaderboardListContent == null) return;
+        foreach (GameObject row in spawnedTeamLeaderboardRows) Destroy(row);
+        spawnedTeamLeaderboardRows.Clear();
+
+        List<TeamLeaderboardEntryDto> entries = latestTeamLeaderboard?.Entries;
+        if (entries == null || entries.Count == 0)
+        {
+            GameObject emptyRow = CreateCard(teamLeaderboardListContent, "EmptyTeamLeaderboardRow", new Color(0.08f, 0.21f, 0.27f, 0.7f), Vector2.zero, new Vector2(870f, 84f));
+            emptyRow.AddComponent<LayoutElement>().preferredHeight = 84f;
+            CreateText(emptyRow.transform, "EmptyLbl", "No teams on the leaderboard yet — create a crew in the Teams tab!", 20, FontStyles.Italic, new Color(0.82f, 0.92f, 0.95f), Vector2.zero, new Vector2(830f, 60f));
+            spawnedTeamLeaderboardRows.Add(emptyRow);
+            return;
+        }
+
+        long myTeamId = myTeamDetails?.TeamInfo != null ? myTeamDetails.TeamInfo.Id : -1;
+        bool canChallengeOthers = myTeamDetails?.TeamInfo != null &&
+                                  (myTeamDetails.MyRole == TeamRole.Captain || myTeamDetails.MyRole == TeamRole.ViceCaptain);
+
+        foreach (TeamLeaderboardEntryDto entry in entries)
+        {
+            SpawnTeamLeaderboardRow(entry, myTeamId, canChallengeOthers);
+        }
+    }
+
+    private void RefreshTeamLeaderboardSelfBanner()
+    {
+        if (teamLeaderboardSelfCard == null) return;
+
+        TeamLeaderboardEntryDto mine = latestTeamLeaderboard?.MyTeamEntry;
+        if (mine != null)
+        {
+            string tierHex = string.IsNullOrWhiteSpace(mine.TierColorHex) ? mine.TeamRankTier.GetBadgeColorHex() : mine.TierColorHex;
+            string tierName = string.IsNullOrWhiteSpace(mine.TierName) ? mine.TeamRankTier.GetDisplayName() : mine.TierName;
+            if (teamLeaderboardSelfRankLabel != null) teamLeaderboardSelfRankLabel.text = $"#{mine.Rank}";
+            if (teamLeaderboardSelfNameTierLabel != null)
+            {
+                teamLeaderboardSelfNameTierLabel.text = $"[{mine.Tag}] {mine.Name} <color=#F7C948>(Your Team)</color>\n<size=16><color={tierHex}>[{tierName}]</color>  •  Rank #{mine.Rank} of {Math.Max(1, latestTeamLeaderboard.TotalTeams)}</size>";
+            }
+            if (teamLeaderboardSelfStatsLabel != null)
+            {
+                teamLeaderboardSelfStatsLabel.text = $"<b>{mine.TeamElo}</b> Elo  •  {mine.TeamWins}/{mine.TeamLosses}\n<size=15><color=#CBE6EE>Squad Avg: {mine.AverageMemberElo}  •  {mine.MemberCount}/{mine.MaxMembers}</color></size>";
+            }
+        }
+        else if (myTeamDetails?.TeamInfo != null)
+        {
+            TeamInfoDto info = myTeamDetails.TeamInfo;
+            RoatanRankTierInfo tInfo = RoatanRankTierHelper.GetInfoForElo(info.TeamElo);
+            if (teamLeaderboardSelfRankLabel != null) teamLeaderboardSelfRankLabel.text = "#—";
+            if (teamLeaderboardSelfNameTierLabel != null)
+            {
+                teamLeaderboardSelfNameTierLabel.text = $"[{info.Tag}] {info.Name} <color=#F7C948>(Your Team)</color>\n<size=16><color={tInfo.BadgeColorHex}>[{tInfo.DisplayName}]</color>  •  Captain: {info.CaptainUsername}</size>";
+            }
+            if (teamLeaderboardSelfStatsLabel != null)
+            {
+                teamLeaderboardSelfStatsLabel.text = $"<b>{info.TeamElo}</b> Elo  •  {info.TeamWins}/{info.TeamLosses}\n<size=16><color=#CBE6EE>{info.MemberCount}/{info.MaxMembers} Members</color></size>";
+            }
+        }
+        else
+        {
+            if (teamLeaderboardSelfRankLabel != null) teamLeaderboardSelfRankLabel.text = "#—";
+            if (teamLeaderboardSelfNameTierLabel != null)
+            {
+                teamLeaderboardSelfNameTierLabel.text = "Not in a Team Yet\n<size=16><color=#B8DCE6>Create or join a crew in the Teams tab to compete!</color></size>";
+            }
+            if (teamLeaderboardSelfStatsLabel != null) teamLeaderboardSelfStatsLabel.text = string.Empty;
+        }
+    }
+
+    private void SpawnTeamLeaderboardRow(TeamLeaderboardEntryDto entry, long myTeamId, bool canChallengeOthers)
+    {
+        TeamLeaderboardEntryDto captured = entry;
+        bool isMyTeam = myTeamId > 0 && entry.TeamId == myTeamId;
+        Color bg = isMyTeam
+            ? new Color(0.11f, 0.34f, 0.32f, 0.98f)
+            : new Color(0.07f, 0.21f, 0.27f, 0.95f);
+
+        GameObject row = CreateCard(teamLeaderboardListContent, $"TLB_{entry.Rank}_{entry.TeamId}", bg, Vector2.zero, new Vector2(870f, 92f));
+        row.AddComponent<LayoutElement>().preferredHeight = 92f;
+
+        Color rankColor = entry.Rank == 1
+            ? RoatanVisualAssets.IslandGold
+            : (entry.Rank == 2
+                ? new Color(0.84f, 0.88f, 0.92f)
+                : (entry.Rank == 3 ? new Color(0.85f, 0.56f, 0.28f) : Color.white));
+        CreateText(row.transform, "RankNum", $"#{entry.Rank}", 22, FontStyles.Bold, rankColor, new Vector2(-404f, 0f), new Vector2(60f, 44f));
+
+        string tierHex = string.IsNullOrWhiteSpace(entry.TierColorHex) ? entry.TeamRankTier.GetBadgeColorHex() : entry.TierColorHex;
+        string tierName = string.IsNullOrWhiteSpace(entry.TierName) ? entry.TeamRankTier.GetDisplayName() : entry.TierName;
+        string myTag = isMyTeam ? " <color=#F7C948>(You)</color>" : string.Empty;
+
+        TMP_Text nameTier = CreateText(
+            row.transform,
+            "TeamNameTier",
+            $"[{entry.Tag}] {entry.Name}{myTag}\n<size=15><color={tierHex}>[{tierName}]</color>  •  Squad Avg: {entry.AverageMemberElo}  •  Capt: {entry.CaptainUsername}</size>",
+            19,
+            FontStyles.Bold,
+            Color.white,
+            new Vector2(-180f, 0f),
+            new Vector2(368f, 72f));
+        nameTier.alignment = TextAlignmentOptions.MidlineLeft;
+
+        CreateText(row.transform, "EloVal", entry.TeamElo.ToString(), 22, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(60f, 0f), new Vector2(88f, 40f));
+        CreateText(row.transform, "WLVal", $"{entry.TeamWins}/{entry.TeamLosses}", 18, FontStyles.Normal, Color.white, new Vector2(150f, 0f), new Vector2(84f, 40f));
+        CreateText(row.transform, "CrewVal", $"{entry.MemberCount}/{entry.MaxMembers}", 18, FontStyles.Normal, new Color(0.74f, 0.92f, 0.96f), new Vector2(236f, 0f), new Vector2(78f, 40f));
+
+        if (canChallengeOthers && !isMyTeam)
+        {
+            CreatePillButton(row.transform, "BtnChallengeTeam", "Challenge", RoatanVisualAssets.SunsetCoral, new Vector2(358f, 0f), new Vector2(146f, 54f), 18, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                OpenChallengeTeamModal(captured);
+            });
+        }
+        else if (isMyTeam)
+        {
+            CreateText(row.transform, "YourCrewLbl", "YOUR CREW", 15, FontStyles.Bold, RoatanVisualAssets.IslandGold, new Vector2(358f, 0f), new Vector2(146f, 36f));
+        }
+
+        spawnedTeamLeaderboardRows.Add(row);
+    }
+
+    private void OpenChallengeTeamModal(TeamLeaderboardEntryDto targetTeam)
+    {
+        if (targetTeam == null || challengeTeamModal == null) return;
+        challengeTargetTeam = targetTeam;
+        challengeSelectedMode = MatchFormat.SIX_LOV;
+        challengeSelectedVariant = TableStyle.DRAW;
+
+        string tierBadge = RoatanRankTierHelper.FormatRichBadge(targetTeam.TeamElo);
+        if (challengeTeamModalTitle != null)
+        {
+            challengeTeamModalTitle.text = $"[{targetTeam.Tag}] {targetTeam.Name}  •  {tierBadge}";
+        }
+        RefreshChallengeModalButtons();
+        challengeTeamModal.transform.SetAsLastSibling();
+        challengeTeamModal.SetActive(true);
+    }
+
+    private void RefreshChallengeModalButtons()
+    {
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (challengeModeSixLovImg != null)
+        {
+            bool active = challengeSelectedMode == MatchFormat.SIX_LOV;
+            challengeModeSixLovImg.color = active ? RoatanVisualAssets.IslandGold : inactive;
+            TMP_Text lbl = challengeModeSixLovImg.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+        if (challengeModeTwoBestImg != null)
+        {
+            bool active = challengeSelectedMode == MatchFormat.TWO_BEST;
+            challengeModeTwoBestImg.color = active ? RoatanVisualAssets.IslandGold : inactive;
+            TMP_Text lbl = challengeModeTwoBestImg.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+        if (challengeVariantDrawImg != null)
+        {
+            challengeVariantDrawImg.color = challengeSelectedVariant == TableStyle.DRAW ? RoatanVisualAssets.BrightLagoon : inactive;
+        }
+        if (challengeVariantBlockImg != null)
+        {
+            challengeVariantBlockImg.color = challengeSelectedVariant == TableStyle.BLOCK ? RoatanVisualAssets.BrightLagoon : inactive;
+        }
+    }
+
+    private void SubmitTeamChallenge()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (challengeTargetTeam == null || !EnsureConnectedForRequest()) return;
+
+        long targetId = challengeTargetTeam.TeamId;
+        challengeTeamModal.SetActive(false);
+
+        if (currentLobby != null)
+        {
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveLobbyFrame());
+            currentLobby = null;
+        }
+
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SendTeamChallengeFrame(new SendTeamChallengeDto
+        {
+            TargetTeamId = targetId,
+            GameMode = challengeSelectedMode,
+            Variant = challengeSelectedVariant
+        }));
+        SetFeedback($"Sending challenge to [{challengeTargetTeam.Tag}] {challengeTargetTeam.Name}...", RoatanVisualAssets.IslandGold);
+        challengeTargetTeam = null;
+    }
+
+    private void OnSendTeamChallengeResponse(ResponseObjectDto<TeamChallengeActionResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            string err = FormatFriendlyError(dto, "Could not send team challenge.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        TeamChallengeDto ch = dto.Object.Challenge;
+        if (dto.Object.Table != null)
+        {
+            currentLobby = dto.Object.Table;
+            localReady = false;
+            InLobby.SetOfflineLobby(currentLobby);
+            ShowSubView(lobbyView);
+            RefreshLobbyView();
+            RequestPlayerRoster();
+        }
+
+        string msg = !string.IsNullOrWhiteSpace(ch?.Message)
+            ? ch.Message
+            : $"Challenge sent to [{ch?.TargetTeamTag}] {ch?.TargetTeamName}!";
+        SetFeedback(msg, RoatanVisualAssets.PalmGreen);
+    }
+
+    private void OnRespondTeamChallengeResponse(ResponseObjectDto<TeamChallengeActionResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            string err = FormatFriendlyError(dto, "Could not respond to team challenge.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        TeamChallengeDto ch = dto.Object.Challenge;
+        if (dto.Object.Table != null)
+        {
+            currentLobby = dto.Object.Table;
+            localReady = false;
+            InLobby.SetOfflineLobby(currentLobby);
+            ShowSubView(lobbyView);
+            RefreshLobbyView();
+            RequestPlayerRoster();
+            RequestOpenTeamChallenges();
+            SetFeedback($"Joined Team Challenge vs [{ch?.ChallengerTeamTag}] {ch?.ChallengerTeamName}!", RoatanVisualAssets.PalmGreen);
+        }
+        else
+        {
+            string msg = !string.IsNullOrWhiteSpace(ch?.Message) ? ch.Message : "Team challenge declined.";
+            SetFeedback(msg, RoatanVisualAssets.IslandGold);
+            RequestOpenTeamChallenges();
+        }
+    }
+
+    private void OnGetOpenTeamChallengesResponse(ResponseObjectDto<OpenTeamChallengesDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        latestOpenChallenges = dto.Object;
+        if (activeHubTab == HubBrowserTab.Teams)
+        {
+            RefreshTeamsTabUI();
+        }
+    }
+
+    private void OnPostOpenTeamChallengeResponse(ResponseObjectDto<TeamChallengeDto> dto)
+    {
+        if (dto == null || !dto.OkResult)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not post open challenge."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+        SetFeedback("Open challenge posted to the Challenge Board!", RoatanVisualAssets.PalmGreen);
+        RequestOpenTeamChallenges();
+    }
+
+    private void OnCancelOpenTeamChallengeResponse(ResponseObjectDto<TeamChallengeDto> dto)
+    {
+        if (dto == null || !dto.OkResult)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not cancel open challenge."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+        SetFeedback("Open challenge cancelled.", RoatanVisualAssets.IslandGold);
+        RequestOpenTeamChallenges();
+    }
+
+    private void OnRequestAcceptTeamChallengeResponse(ResponseObjectDto<TeamChallengeDto> dto)
+    {
+        if (dto == null || !dto.OkResult)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not ask leaders."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+        SetFeedback("Asked your Captain & Vice-Captains to accept this challenge!", RoatanVisualAssets.PalmGreen);
+        RequestOpenTeamChallenges();
+    }
+
+    private void OnAcceptOpenTeamChallengeResponse(ResponseObjectDto<TeamChallengeActionResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not accept open challenge."), RoatanVisualAssets.SunsetCoral);
+            RequestOpenTeamChallenges();
+            return;
+        }
+
+        TeamChallengeDto ch = dto.Object.Challenge;
+        if (dto.Object.Table != null)
+        {
+            currentLobby = dto.Object.Table;
+            localReady = false;
+            InLobby.SetOfflineLobby(currentLobby);
+            ShowSubView(lobbyView);
+            RefreshLobbyView();
+            RequestPlayerRoster();
+        }
+        RequestOpenTeamChallenges();
+        SetFeedback($"Accepted [{ch?.ChallengerTeamTag}] {ch?.ChallengerTeamName}'s challenge — 24h play window started!", RoatanVisualAssets.PalmGreen);
+    }
+
+    private void OnTeamChallengeNotification(TeamChallengeDto notification)
+    {
+        if (notification == null) return;
+
+        // Teammate "Ask Leaders" endorsement notification for an Open Board Challenge
+        if (notification.IsOpenBoardChallenge && notification.Status == TeamChallengeStatus.Pending)
+        {
+            if (!string.IsNullOrWhiteSpace(notification.Message))
+            {
+                SetFeedback(notification.Message, RoatanVisualAssets.IslandGold);
+            }
+            if (isSignedIn && Networking.Instance != null && Networking.Instance.IsConnected)
+            {
+                RequestOpenTeamChallenges();
+            }
+            return;
+        }
+
+        if (notification.Status == TeamChallengeStatus.Declined)
+        {
+            string declinedMsg = !string.IsNullOrWhiteSpace(notification.Message)
+                ? notification.Message
+                : $"[{notification.TargetTeamTag}] {notification.TargetTeamName} declined your team challenge.";
+            SetFeedback(declinedMsg, RoatanVisualAssets.SunsetCoral);
+            if (currentLobby != null && currentLobby.Id == notification.TableId)
+            {
+                currentLobby = null;
+                ShowSubView(hubView);
+                RequestLobbiesList();
+            }
+            return;
+        }
+
+        // If already seated at this challenge table and it was accepted, just toast!
+        if (notification.Status == TeamChallengeStatus.Accepted && currentLobby != null && currentLobby.Id == notification.TableId)
+        {
+            SetFeedback($"[{notification.TargetTeamTag}] {notification.TargetTeamName} accepted the challenge!", RoatanVisualAssets.PalmGreen);
+            return;
+        }
+
+        if (incomingTeamChallengeModal == null) return;
+
+        pendingTeamChallenge = notification;
+        string modeStr = notification.GameMode == MatchFormat.TWO_BEST ? "Two-Best (1v1)" : "Six-Lov (2v2)";
+        string varStr = notification.Variant == TableStyle.BLOCK ? "Block (Cerrado)" : "Draw";
+
+        if (notification.Status == TeamChallengeStatus.Pending)
+        {
+            if (incomingTeamChallengeTitle != null) incomingTeamChallengeTitle.text = "INCOMING TEAM CHALLENGE!";
+            if (incomingTeamChallengeBody != null)
+            {
+                incomingTeamChallengeBody.text =
+                    $"<b>[{notification.ChallengerTeamTag}] {notification.ChallengerTeamName}</b> ({notification.ChallengerTeamElo} Elo)\n" +
+                    $"challenged your crew to a <b>{modeStr} • {varStr}</b> match!\n\n" +
+                    $"<size=19><color=#F7C948>Accept to enter the Team Challenge table immediately.</color></size>";
+            }
+            if (incomingTeamChallengeAcceptLabel != null) incomingTeamChallengeAcceptLabel.text = "Accept & Join Table";
+            if (incomingTeamChallengeDeclineLabel != null) incomingTeamChallengeDeclineLabel.text = "Decline";
+        }
+        else if (notification.Status == TeamChallengeStatus.Accepted)
+        {
+            if (incomingTeamChallengeTitle != null) incomingTeamChallengeTitle.text = "CREW MATCH LIVE!";
+            if (incomingTeamChallengeBody != null)
+            {
+                incomingTeamChallengeBody.text =
+                    $"<b>[{notification.ChallengerTeamTag}] {notification.ChallengerTeamName}</b> vs <b>[{notification.TargetTeamTag}] {notification.TargetTeamName}</b>\n" +
+                    $"Mode: <b>{modeStr} • {varStr}</b>\n\n" +
+                    $"<size=19><color=#4BE38D>Your team's open seat is waiting — tap below to join!</color></size>";
+            }
+            if (incomingTeamChallengeAcceptLabel != null) incomingTeamChallengeAcceptLabel.text = "Join Team Table";
+            if (incomingTeamChallengeDeclineLabel != null) incomingTeamChallengeDeclineLabel.text = "Dismiss";
+        }
+
+        incomingTeamChallengeModal.transform.SetAsLastSibling();
+        incomingTeamChallengeModal.SetActive(true);
+    }
+
+    // ==================== LIVE MATCH SPECTATING ====================
+
+    private void OnJoinAsSpectatorResponse(ResponseObjectDto<SpectatorMatchSnapshotDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            string err = FormatFriendlyError(dto, "Unable to spectate that match.");
+            SetFeedback(err, RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        SpectatorMatchSnapshotDto snap = dto.Object;
+        isSpectatingMatch = true;
+        spectatingGameId = snap.GameId;
+        spectatingMatchTitle = !string.IsNullOrWhiteSpace(snap.MatchTitle) ? snap.MatchTitle : $"Live Match #{snap.GameId}";
+        liveSpectatorCount = Math.Max(1, snap.SpectatorCount);
+        spectatingPlayers.Clear();
+        if (snap.Players != null) spectatingPlayers.AddRange(snap.Players);
+
+        CancelOnlineShuffle();
+        ClearOnlineBoardVisuals();
+        onlineHand.Clear();
+        onlinePossibleMoves = null;
+        onlineSelectedDomino = null;
+        onlineTurnTimerActive = false;
+        onlineIsBotControlled = false;
+        if (onlineTimerBadgeObj != null) onlineTimerBadgeObj.SetActive(false);
+        if (onlineDrawBtn != null) onlineDrawBtn.gameObject.SetActive(false);
+        if (onlineEndOverlay != null) onlineEndOverlay.SetActive(false);
+        RefreshOnlineTakeoverIndicators();
+
+        if (snap.BoardMoves != null)
+        {
+            foreach (MoveDto move in snap.BoardMoves)
+            {
+                SpawnOnlineBoardMove(move);
+            }
+        }
+
+        RebuildOnlineHandUI();
+        ShowSubView(onlineGameView);
+        RefreshOnlineSpectatorHUD();
+
+        if (snap.NumberOfDominoPerPlayer != null)
+        {
+            OnOnlineCountsUpdated(new NumberOfDominoPerPlayerDto { NumberOfDomino = snap.NumberOfDominoPerPlayer });
+        }
+
+        string activeName = spectatingPlayers.FirstOrDefault(p => p.Id == snap.CurrentTurnPlayerId)?.Name ?? "Player";
+        onlineMatchStatus.text = $"SPECTATING LIVE  •  {activeName}'s turn  •  Hand #{Math.Max(1, snap.HandNumber)}";
+        SetFeedback($"Watching {spectatingMatchTitle} live!", RoatanVisualAssets.BrightLagoon);
+    }
+
+    private void OnLeaveSpectatorResponse(ResponseDto dto)
+    {
+        isSpectatingMatch = false;
+        spectatingGameId = 0;
+        liveSpectatorCount = 0;
+        spectatingPlayers.Clear();
+        RefreshOnlineSpectatorHUD();
+        ShowSubView(hubView);
+        RequestLobbiesList();
+    }
+
+    private void OnSpectatorCountUpdated(SpectatorCountUpdateDto dto)
+    {
+        if (dto == null) return;
+        bool matchesCurrent = (isSpectatingMatch && dto.GameId == spectatingGameId) ||
+                              (!isSpectatingMatch && currentLobby != null && currentLobby.Id == dto.GameId);
+        if (!matchesCurrent && onlineGameView != null && !onlineGameView.activeSelf) return;
+
+        liveSpectatorCount = Math.Max(0, dto.SpectatorCount);
+        RefreshOnlineSpectatorHUD();
+    }
+
+    private void LeaveSpectatingMatch()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        int gameIdToLeave = spectatingGameId;
+        isSpectatingMatch = false;
+        spectatingGameId = 0;
+        liveSpectatorCount = 0;
+        spectatingPlayers.Clear();
+        RefreshOnlineSpectatorHUD();
+
+        if (EnsureConnectedForRequest())
+        {
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.LeaveSpectatorFrame(new LeaveSpectatorDto { GameId = gameIdToLeave }));
+        }
+        ShowSubView(hubView);
+        RequestLobbiesList();
+    }
+
+    private void RefreshOnlineSpectatorHUD()
+    {
+        if (onlineSpectatorBadgeObj != null)
+        {
+            bool showBadge = isSpectatingMatch || liveSpectatorCount > 0;
+            onlineSpectatorBadgeObj.SetActive(showBadge);
+            if (onlineSpectatorBadgeLabel != null)
+            {
+                onlineSpectatorBadgeLabel.text = $"Watching: {liveSpectatorCount}";
+            }
+        }
+        if (onlineLeaveSpectateBtn != null)
+        {
+            onlineLeaveSpectateBtn.gameObject.SetActive(isSpectatingMatch);
+        }
+    }
+
+    // ==================== PLAYER ACTION CARD & DIRECT CHALLENGES ====================
+
+    private void OpenPlayerActionModal(PlayerActionProfileData target)
+    {
+        if (target == null || playerActionModal == null) return;
+        selectedActionPlayer = target;
+
+        ApplyCircularAvatar(playerActionAvatarImg, playerActionAvatarInitials, $"act_{target.UserId}", target.AvatarBase64, target.Username);
+        string tierBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(target.Elo));
+        string teamTagStr = !string.IsNullOrWhiteSpace(target.TeamTag) ? $"  <color=#F7C948>[{target.TeamTag}]</color>" : string.Empty;
+        string onlineStr = target.IsOnline ? "<color=#4BE38D>● Online</color>" : "<color=#8FA6B0>● Offline</color>";
+
+        if (playerActionNameTierLabel != null)
+        {
+            playerActionNameTierLabel.text = $"{target.Username}{teamTagStr}\n<size=20>{tierBadge}  •  {onlineStr}</size>";
+        }
+
+        if (playerActionStatsLabel != null)
+        {
+            double acc = RoatanRankTierHelper.CalculateAccuracyPercent(target.OptimalMoves, target.TotalMoves);
+            string accStr = target.TotalMoves > 0 ? $"{acc:0.#}%" : "—";
+            string speedStr = target.AverageTurnSeconds > 0.01 ? $"{target.AverageTurnSeconds:0.0}s" : "—";
+            playerActionStatsLabel.text =
+                $"Wins / Losses: <b>{target.Wins} - {target.Losses}</b>  •  Win Assists: <b>{target.WinAssists}</b>\n" +
+                $"Accuracy: <b>{accStr}</b>  •  Avg Speed: <b>{speedStr}</b>";
+        }
+
+        if (playerActionChallengeBtn != null)
+        {
+            playerActionChallengeBtn.interactable = target.IsOnline;
+            TMP_Text chLbl = playerActionChallengeBtn.GetComponentInChildren<TMP_Text>();
+            if (chLbl != null)
+            {
+                chLbl.text = target.IsOnline ? "Challenge Player (1v1)" : "Player Offline (Cannot Challenge)";
+            }
+        }
+
+        if (playerActionInviteTeamBtn != null)
+        {
+            bool senderCanInvite = myTeamDetails?.TeamInfo != null &&
+                                   myTeamDetails.TeamInfo.MemberCount < TeamInfoDto.DefaultMaxMembers &&
+                                   !target.TeamId.HasValue;
+            playerActionInviteTeamBtn.gameObject.SetActive(senderCanInvite);
+        }
+
+        playerActionModal.transform.SetAsLastSibling();
+        playerActionModal.SetActive(true);
+    }
+
+    private void OpenDirectChallengeModal(PlayerActionProfileData target)
+    {
+        if (target == null || directChallengeModal == null) return;
+        selectedActionPlayer = target;
+        directChallengeMode = MatchFormat.TWO_BEST;
+        directChallengeVariant = TableStyle.DRAW;
+
+        if (directChallengeModalTitle != null)
+        {
+            string badge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(target.Elo));
+            directChallengeModalTitle.text = $"{target.Username}  •  {badge}";
+        }
+        RefreshDirectChallengeModalButtons();
+        directChallengeModal.transform.SetAsLastSibling();
+        directChallengeModal.SetActive(true);
+    }
+
+    private void RefreshDirectChallengeModalButtons()
+    {
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (directChallengeTwoBestImg != null)
+        {
+            bool active = directChallengeMode == MatchFormat.TWO_BEST;
+            directChallengeTwoBestImg.color = active ? RoatanVisualAssets.IslandGold : inactive;
+            TMP_Text lbl = directChallengeTwoBestImg.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+        if (directChallengeCutThroatImg != null)
+        {
+            bool active = directChallengeMode == MatchFormat.CUT_THROAT;
+            directChallengeCutThroatImg.color = active ? RoatanVisualAssets.IslandGold : inactive;
+            TMP_Text lbl = directChallengeCutThroatImg.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.color = active ? new Color(0.08f, 0.10f, 0.12f, 1f) : Color.white;
+        }
+        if (directChallengeDrawImg != null)
+        {
+            directChallengeDrawImg.color = directChallengeVariant == TableStyle.DRAW ? RoatanVisualAssets.BrightLagoon : inactive;
+        }
+        if (directChallengeBlockImg != null)
+        {
+            directChallengeBlockImg.color = directChallengeVariant == TableStyle.BLOCK ? RoatanVisualAssets.BrightLagoon : inactive;
+        }
+    }
+
+    private void SubmitDirectChallenge()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (selectedActionPlayer == null || !EnsureConnectedForRequest()) return;
+
+        long targetId = selectedActionPlayer.UserId;
+        string targetName = selectedActionPlayer.Username;
+        directChallengeModal.SetActive(false);
+
+        subscribedClient.AddToSendQueue(MessageFrameBuilder.SendDirectChallengeFrame(new SendDirectChallengeDto
+        {
+            TargetUserId = targetId,
+            GameMode = directChallengeMode,
+            Variant = directChallengeVariant
+        }));
+        SetFeedback($"Sent 1v1 challenge to {targetName}!", RoatanVisualAssets.IslandGold);
+    }
+
+    private void OnSendDirectChallengeResponse(ResponseObjectDto<DirectChallengeActionResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not send challenge."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+        string targetName = dto.Object?.Challenge?.TargetUsername ?? "player";
+        SetFeedback($"Challenge sent to {targetName} — waiting for response...", RoatanVisualAssets.PalmGreen);
+    }
+
+    private void OnRespondDirectChallengeResponse(ResponseObjectDto<DirectChallengeActionResponseDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not respond to challenge."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        if (dto.Object.Table != null)
+        {
+            currentLobby = dto.Object.Table;
+            localReady = false;
+            InLobby.SetOfflineLobby(currentLobby);
+            ShowSubView(lobbyView);
+            RefreshLobbyView();
+            RequestPlayerRoster();
+            SetFeedback($"Joined 1v1 challenge table vs {dto.Object.Challenge?.ChallengerUsername}!", RoatanVisualAssets.PalmGreen);
+        }
+        else
+        {
+            SetFeedback("Challenge ignored.", RoatanVisualAssets.IslandGold);
+        }
+    }
+
+    private void OnDirectChallengeNotification(DirectChallengeDto notification)
+    {
+        if (notification == null) return;
+
+        if (notification.Status == DirectChallengeStatus.Accepted)
+        {
+            SetFeedback($"{notification.TargetUsername} accepted your 1v1 challenge!", RoatanVisualAssets.PalmGreen);
+            if (currentLobby != null && notification.TableId.HasValue && currentLobby.Id == notification.TableId.Value)
+            {
+                ShowSubView(lobbyView);
+                RefreshLobbyView();
+            }
+            return;
+        }
+
+        if (notification.Status == DirectChallengeStatus.Ignored)
+        {
+            SetFeedback($"{notification.TargetUsername} ignored your 1v1 challenge.", RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+
+        if (incomingDirectChallengeModal == null) return;
+        pendingDirectChallenge = notification;
+        string modeStr = notification.GameMode == MatchFormat.CUT_THROAT ? "Cut-Throat (1v1)" : "Two-Best (1v1)";
+        string varStr = notification.Variant == TableStyle.BLOCK ? "Block (Cerrado)" : "Draw";
+        string rankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(notification.ChallengerElo));
+
+        if (incomingDirectChallengeBody != null)
+        {
+            incomingDirectChallengeBody.text =
+                $"<b>{notification.ChallengerUsername}</b>  {rankBadge}\n" +
+                $"challenged you to a <b>{modeStr} • {varStr}</b> match!\n\n" +
+                $"<size=19><color=#4BE38D>Tap Accept to jump straight into a private 2-seat table.</color></size>";
+        }
+
+        incomingDirectChallengeModal.transform.SetAsLastSibling();
+        incomingDirectChallengeModal.SetActive(true);
+    }
+
+    // ==================== TEAM CHAT & DIRECT MESSAGING ====================
+
+    private void SelectChatChannel(bool showDirectMessages)
+    {
+        chatShowingDirectMessages = showDirectMessages;
+        ClearCurrentChatChannelUnread();
+        RefreshChatTabUI();
+    }
+
+    private void OpenDirectMessageThread(long partnerUserId, string partnerUsername)
+    {
+        if (partnerUserId <= 0) return;
+        activeDmPartnerUserId = partnerUserId;
+        activeDmPartnerUsername = string.IsNullOrWhiteSpace(partnerUsername) ? $"Player {partnerUserId}" : partnerUsername;
+        dmPartnerNamesByUserId[partnerUserId] = activeDmPartnerUsername;
+        if (!dmThreadsByUserId.ContainsKey(partnerUserId))
+        {
+            dmThreadsByUserId[partnerUserId] = new List<ChatMessageDto>();
+        }
+
+        chatShowingDirectMessages = true;
+        unreadDmCountByUserId[partnerUserId] = 0;
+        ShowSubView(hubView);
+        SelectHubBrowserTab(HubBrowserTab.Chat);
+        if (EnsureConnectedForRequest())
+        {
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.GetChatHistoryFrame(new GetChatHistoryDto
+            {
+                ChannelType = SocialChatChannelType.Direct,
+                OtherUserId = partnerUserId,
+                Limit = 60
+            }));
+        }
+    }
+
+    private void SubmitSocialChatMessage()
+    {
+        RoatanSoundFX.Instance?.PlayTap();
+        if (chatComposeInput == null || !EnsureConnectedForRequest()) return;
+        string body = chatComposeInput.text.Trim();
+        if (string.IsNullOrEmpty(body)) return;
+
+        if (!chatShowingDirectMessages)
+        {
+            if (myTeamDetails?.TeamInfo == null)
+            {
+                SetFeedback("Join or create a team first to use Team Chat.", RoatanVisualAssets.SunsetCoral);
+                return;
+            }
+            chatComposeInput.text = string.Empty;
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.SendSocialChatMessageFrame(new ChatMessageDto
+            {
+                ChannelType = SocialChatChannelType.Team,
+                TeamId = myTeamDetails.TeamInfo.Id,
+                Body = body
+            }));
+        }
+        else
+        {
+            if (activeDmPartnerUserId <= 0)
+            {
+                SetFeedback("Select a player above (or tap Send Message on any player) first.", RoatanVisualAssets.SunsetCoral);
+                return;
+            }
+            chatComposeInput.text = string.Empty;
+            subscribedClient.AddToSendQueue(MessageFrameBuilder.SendSocialChatMessageFrame(new ChatMessageDto
+            {
+                ChannelType = SocialChatChannelType.Direct,
+                RecipientUserId = activeDmPartnerUserId,
+                Body = body
+            }));
+        }
+    }
+
+    private void OnSendSocialChatMessageResponse(ResponseObjectDto<ChatMessageDto> dto)
+    {
+        if (dto == null) return;
+        if (!dto.OkResult)
+        {
+            SetFeedback(FormatFriendlyError(dto, "Could not send message."), RoatanVisualAssets.SunsetCoral);
+            return;
+        }
+        if (dto.Object != null)
+        {
+            AppendChatMessageIfNew(dto.Object, countAsUnread: false);
+            if (activeHubTab == HubBrowserTab.Chat)
+            {
+                RefreshChatTabUI();
+            }
+        }
+    }
+
+    private void OnGetChatHistoryResponse(ResponseObjectDto<ChatHistoryDto> dto)
+    {
+        if (dto == null || !dto.OkResult || dto.Object == null) return;
+        if (dto.Object.Messages != null)
+        {
+            foreach (ChatMessageDto msg in dto.Object.Messages)
+            {
+                AppendChatMessageIfNew(msg, countAsUnread: false);
+            }
+        }
+        UpdateChatTabUnreadBadges();
+        if (activeHubTab == HubBrowserTab.Chat)
+        {
+            RefreshChatTabUI();
+        }
+    }
+
+    private void OnChatMessageReceived(ChatMessageDto msg)
+    {
+        if (msg == null) return;
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        bool isFromMe = msg.SenderUserId == selfId;
+        bool isViewingNow = hubView != null && hubView.activeSelf && activeHubTab == HubBrowserTab.Chat &&
+                            ((msg.ChannelType == SocialChatChannelType.Team && !chatShowingDirectMessages) ||
+                             (msg.ChannelType == SocialChatChannelType.Direct && chatShowingDirectMessages &&
+                              (msg.SenderUserId == activeDmPartnerUserId || msg.RecipientUserId == activeDmPartnerUserId)));
+
+        AppendChatMessageIfNew(msg, countAsUnread: !isFromMe && !isViewingNow);
+        UpdateChatTabUnreadBadges();
+        if (activeHubTab == HubBrowserTab.Chat)
+        {
+            RefreshChatTabUI();
+        }
+    }
+
+    private void AppendChatMessageIfNew(ChatMessageDto msg, bool countAsUnread)
+    {
+        if (msg == null) return;
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+
+        if (msg.ChannelType == SocialChatChannelType.Team)
+        {
+            if (teamChatMessages.Any(m => m.MessageId > 0 && m.MessageId == msg.MessageId)) return;
+            teamChatMessages.Add(msg);
+            if (countAsUnread) unreadTeamChatCount++;
+        }
+        else
+        {
+            long partnerId = msg.SenderUserId == selfId ? (msg.RecipientUserId ?? 0) : msg.SenderUserId;
+            if (partnerId <= 0) return;
+
+            string partnerName = msg.SenderUserId == selfId
+                ? (msg.RecipientUsername ?? $"Player {partnerId}")
+                : (msg.SenderUsername ?? $"Player {partnerId}");
+            dmPartnerNamesByUserId[partnerId] = partnerName;
+
+            if (!dmThreadsByUserId.TryGetValue(partnerId, out List<ChatMessageDto> thread))
+            {
+                thread = new List<ChatMessageDto>();
+                dmThreadsByUserId[partnerId] = thread;
+            }
+            if (thread.Any(m => m.MessageId > 0 && m.MessageId == msg.MessageId)) return;
+            thread.Add(msg);
+
+            if (countAsUnread)
+            {
+                unreadDmCountByUserId[partnerId] = unreadDmCountByUserId.TryGetValue(partnerId, out int prev) ? prev + 1 : 1;
+            }
+        }
+    }
+
+    private void ClearCurrentChatChannelUnread()
+    {
+        if (!chatShowingDirectMessages)
+        {
+            unreadTeamChatCount = 0;
+        }
+        else if (activeDmPartnerUserId > 0)
+        {
+            unreadDmCountByUserId[activeDmPartnerUserId] = 0;
+        }
+        UpdateChatTabUnreadBadges();
+    }
+
+    private void UpdateChatTabUnreadBadges()
+    {
+        int totalDmUnread = unreadDmCountByUserId.Values.Sum();
+        int totalUnread = unreadTeamChatCount + totalDmUnread;
+
+        if (hubChatTabLabel != null)
+        {
+            hubChatTabLabel.text = totalUnread > 0 ? $"Chat ({totalUnread})" : "Chat";
+        }
+        if (chatTeamSubTabLabel != null)
+        {
+            chatTeamSubTabLabel.text = unreadTeamChatCount > 0 ? $"Team Chat ({unreadTeamChatCount})" : "Team Chat";
+        }
+        if (chatDmSubTabLabel != null)
+        {
+            chatDmSubTabLabel.text = totalDmUnread > 0 ? $"Direct Messages ({totalDmUnread})" : "Direct Messages";
+        }
+    }
+
+    private void RefreshChatTabUI()
+    {
+        Color inactive = new Color(0.14f, 0.22f, 0.28f, 1f);
+        if (chatTeamSubTabImg != null) chatTeamSubTabImg.color = !chatShowingDirectMessages ? RoatanVisualAssets.PalmGreen : inactive;
+        if (chatDmSubTabImg != null) chatDmSubTabImg.color = chatShowingDirectMessages ? RoatanVisualAssets.BrightLagoon : inactive;
+        if (chatDmPartnersStripObj != null) chatDmPartnersStripObj.SetActive(chatShowingDirectMessages);
+        UpdateChatTabUnreadBadges();
+
+        if (chatShowingDirectMessages)
+        {
+            RefreshDmPartnersStripUI();
+            if (chatActiveChannelHeader != null)
+            {
+                chatActiveChannelHeader.text = activeDmPartnerUserId > 0
+                    ? $"DIRECT MESSAGE  •  {activeDmPartnerUsername}"
+                    : "DIRECT MESSAGES — Tap a player below or tap Send Message on any player";
+            }
+        }
+        else
+        {
+            if (chatActiveChannelHeader != null)
+            {
+                chatActiveChannelHeader.text = myTeamDetails?.TeamInfo != null
+                    ? $"TEAM CHAT  •  [{myTeamDetails.TeamInfo.Tag}] {myTeamDetails.TeamInfo.Name}"
+                    : "TEAM CHAT — Join or create a team to chat with your crew";
+            }
+        }
+
+        if (chatMessagesListContent == null) return;
+        foreach (GameObject go in spawnedChatMessageRows) Destroy(go);
+        spawnedChatMessageRows.Clear();
+
+        List<ChatMessageDto> messages = !chatShowingDirectMessages
+            ? teamChatMessages
+            : (activeDmPartnerUserId > 0 && dmThreadsByUserId.TryGetValue(activeDmPartnerUserId, out List<ChatMessageDto> dmList)
+                ? dmList
+                : new List<ChatMessageDto>());
+
+        if (messages.Count == 0)
+        {
+            GameObject emptyCard = CreateCard(chatMessagesListContent, "EmptyChatRow", new Color(0.07f, 0.19f, 0.25f, 0.72f), Vector2.zero, new Vector2(860f, 74f));
+            emptyCard.AddComponent<LayoutElement>().preferredHeight = 74f;
+            string emptyMsg = !chatShowingDirectMessages
+                ? (myTeamDetails?.TeamInfo != null ? "No team messages yet — say hello to your crew!" : "Join or create a team in the Teams tab to unlock Team Chat.")
+                : (activeDmPartnerUserId > 0 ? $"No messages with {activeDmPartnerUsername} yet — start the conversation!" : "Select a player chip above to open a Direct Message thread.");
+            CreateText(emptyCard.transform, "EmptyLbl", emptyMsg, 19, FontStyles.Italic, new Color(0.80f, 0.92f, 0.96f), Vector2.zero, new Vector2(820f, 52f));
+            spawnedChatMessageRows.Add(emptyCard);
+            return;
+        }
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        foreach (ChatMessageDto msg in messages)
+        {
+            bool isMine = msg.SenderUserId == selfId;
+            Color bubbleBg = isMine
+                ? new Color(0.10f, 0.34f, 0.30f, 0.96f)
+                : new Color(0.07f, 0.21f, 0.28f, 0.95f);
+
+            GameObject row = CreateCard(chatMessagesListContent, $"ChatMsg_{msg.MessageId}", bubbleBg, Vector2.zero, new Vector2(860f, 78f));
+            row.AddComponent<LayoutElement>().preferredHeight = 78f;
+
+            string senderTag = isMine ? "<color=#F7C948>You</color>" : $"<b>{msg.SenderUsername}</b>";
+            string timeStr = msg.SentUtc.ToLocalTime().ToString("HH:mm");
+            TMP_Text headerTxt = CreateText(row.transform, "Sender", $"{senderTag}  <size=15><color=#9FC5D0>{timeStr}</color></size>", 17, FontStyles.Bold, Color.white, new Vector2(0f, 18f), new Vector2(820f, 26f));
+            headerTxt.alignment = isMine ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft;
+
+            TMP_Text bodyTxt = CreateText(row.transform, "Body", msg.Body ?? string.Empty, 19, FontStyles.Normal, new Color(0.92f, 0.97f, 0.99f), new Vector2(0f, -14f), new Vector2(820f, 34f));
+            bodyTxt.alignment = isMine ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft;
+
+            spawnedChatMessageRows.Add(row);
+        }
+    }
+
+    private void RefreshDmPartnersStripUI()
+    {
+        if (chatDmPartnersContent == null) return;
+        foreach (GameObject chip in spawnedChatPartnerChips) Destroy(chip);
+        spawnedChatPartnerChips.Clear();
+
+        long selfId = subscribedClient?.User != null ? subscribedClient.User.Id : -1;
+        Dictionary<long, string> partners = new Dictionary<long, string>(dmPartnerNamesByUserId);
+
+        if (myTeamDetails?.Members != null)
+        {
+            foreach (TeamMemberDto m in myTeamDetails.Members)
+            {
+                if (m.UserId != selfId && !partners.ContainsKey(m.UserId))
+                {
+                    partners[m.UserId] = m.Username;
+                }
+            }
+        }
+        foreach (PlayerPresenceDto p in latestRoster)
+        {
+            if (p.UserId != selfId && p.IsOnline && !partners.ContainsKey(p.UserId))
+            {
+                partners[p.UserId] = p.Username;
+            }
+        }
+
+        if (activeDmPartnerUserId <= 0 && partners.Count > 0)
+        {
+            KeyValuePair<long, string> first = partners.First();
+            activeDmPartnerUserId = first.Key;
+            activeDmPartnerUsername = first.Value;
+        }
+
+        foreach (KeyValuePair<long, string> kv in partners.Take(6))
+        {
+            long partnerId = kv.Key;
+            string partnerName = kv.Value;
+            int unread = unreadDmCountByUserId.TryGetValue(partnerId, out int u) ? u : 0;
+            bool selected = partnerId == activeDmPartnerUserId;
+            string label = unread > 0 ? $"{partnerName} ({unread})" : partnerName;
+            Color bg = selected ? RoatanVisualAssets.IslandGold : new Color(0.12f, 0.25f, 0.32f, 1f);
+
+            Button chipBtn = CreatePillButton(chatDmPartnersContent, $"DmChip_{partnerId}", label, bg, Vector2.zero, new Vector2(148f, 42f), 16, () =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                OpenDirectMessageThread(partnerId, partnerName);
+            });
+            chipBtn.gameObject.AddComponent<LayoutElement>().preferredWidth = 148f;
+            if (selected)
+            {
+                TMP_Text lbl = chipBtn.GetComponentInChildren<TMP_Text>();
+                if (lbl != null) lbl.color = new Color(0.08f, 0.10f, 0.12f, 1f);
+            }
+            spawnedChatPartnerChips.Add(chipBtn.gameObject);
         }
     }
 
@@ -3616,7 +6691,8 @@ public class RoatanOnlineController : MonoBehaviour
         ApplyCircularAvatar(avImg, avInit, $"roster_{player.UserId}", player.AvatarBase64, player.Username);
 
         string youSuffix = player.UserId == selfId ? " (You)" : string.Empty;
-        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  •  Elo {player.Elo}", 22, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-78f, 15f), new Vector2(430f, 34f)).alignment = TextAlignmentOptions.MidlineLeft;
+        string rosterRankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(player.Elo));
+        CreateText(row.transform, "PName", $"{player.Username}{youSuffix}  <size=18>{rosterRankBadge}</size>", 21, FontStyles.Bold, player.IsOnline ? Color.white : new Color(0.68f, 0.74f, 0.78f), new Vector2(-68f, 16f), new Vector2(460f, 36f)).alignment = TextAlignmentOptions.MidlineLeft;
 
         string statusText = player.IsOnline
             ? (string.IsNullOrWhiteSpace(player.TableName) ? player.Status : $"{player.Status} • {player.TableName}")
@@ -3625,6 +6701,32 @@ public class RoatanOnlineController : MonoBehaviour
             ? new Color(0.55f, 0.62f, 0.66f)
             : (player.Status == "Available" ? new Color(0.32f, 0.90f, 0.56f) : RoatanVisualAssets.IslandGold);
         CreateText(row.transform, "PStatus", statusText, 18, FontStyles.Normal, statusColor, new Vector2(-78f, -18f), new Vector2(430f, 30f)).alignment = TextAlignmentOptions.MidlineLeft;
+
+        if (player.UserId != selfId)
+        {
+            Button rowBtn = row.AddComponent<Button>();
+            rowBtn.transition = Selectable.Transition.ColorTint;
+            rowBtn.onClick.AddListener(() =>
+            {
+                RoatanSoundFX.Instance?.PlayTap();
+                OpenPlayerActionModal(new PlayerActionProfileData
+                {
+                    UserId = captured.UserId,
+                    Username = captured.Username,
+                    AvatarBase64 = captured.AvatarBase64,
+                    Elo = ResolveDisplayElo(captured.Elo),
+                    Wins = captured.Wins,
+                    Losses = captured.Losses,
+                    WinAssists = captured.WinAssists,
+                    TotalMoves = captured.TotalMoves,
+                    OptimalMoves = captured.OptimalMoves,
+                    AverageTurnSeconds = captured.AverageTurnSeconds,
+                    IsOnline = captured.IsOnline,
+                    TeamId = captured.TeamId,
+                    TeamTag = captured.TeamTag
+                });
+            });
+        }
 
         if (player.IsOnline && player.UserId != selfId)
         {
@@ -3761,25 +6863,37 @@ public class RoatanOnlineController : MonoBehaviour
         if (currentLobby == null) return;
         lobbyTitleLabel.text = currentLobby.Name;
         string codePart = !string.IsNullOrEmpty(currentLobby.Code) ? $"  •  Code: {currentLobby.Code}" : "";
+        string deadlinePart = currentLobby.PlayDeadlineUtc.HasValue ? $"  •  {FormatPlayWindowRemaining(currentLobby.PlayDeadlineUtc)}" : "";
+        string humansOnlyPart = currentLobby.IsTeamChallenge && currentLobby.RequireFullHumanSquad ? "  •  Humans Only" : "";
         string rulesBadge = FormatLobbyRulesBadge(currentLobby.MatchFormat, currentLobby.TableStyle, currentLobby.OneOnePlayoff);
         int seatedCount = currentLobby.Players != null ? currentLobby.Players.Count : 0;
-        lobbyInfoLabel.text = $"{rulesBadge}\nSeated: {seatedCount}/{currentLobby.MaxNumberOfPlayer}{codePart}";
+        lobbyInfoLabel.text = $"{rulesBadge}{humansOnlyPart}\nSeated: {seatedCount}/{currentLobby.MaxNumberOfPlayer}{codePart}{deadlinePart}";
 
         bool isHost = IsLocalPlayerTableHost();
+        bool botsAllowed = !(currentLobby.IsTeamChallenge && currentLobby.RequireFullHumanSquad);
         bool isTeam2v2 = currentLobby.MaxNumberOfPlayer == 4 &&
                          (currentLobby.MatchFormat == MatchFormat.SIX_LOV || currentLobby.MatchFormat == MatchFormat.TWO_BEST);
 
         if (tableFeltLabel != null)
         {
-            string layoutHint = currentLobby.MaxNumberOfPlayer == 2
-                ? "1v1 Head-to-Head"
-                : (isTeam2v2 ? "2v2 Partners\n(Across = Padna)" : $"{currentLobby.MaxNumberOfPlayer}P Free-For-All");
-            tableFeltLabel.text = $"ROATAN TABLE\n<size=19><color=#F7C948>{layoutHint}</color></size>";
+            if (currentLobby.IsTeamChallenge)
+            {
+                string teamALabel = string.IsNullOrWhiteSpace(currentLobby.TeamAName) ? "Team A" : currentLobby.TeamAName;
+                string teamBLabel = string.IsNullOrWhiteSpace(currentLobby.TeamBName) ? "Team B" : currentLobby.TeamBName;
+                tableFeltLabel.text = $"TEAM CHALLENGE\n<size=17><color=#F7C948>{teamALabel}\nvs\n{teamBLabel}</color></size>";
+            }
+            else
+            {
+                string layoutHint = currentLobby.MaxNumberOfPlayer == 2
+                    ? "1v1 Head-to-Head"
+                    : (isTeam2v2 ? "2v2 Partners\n(Across = Padna)" : $"{currentLobby.MaxNumberOfPlayer}P Free-For-All");
+                tableFeltLabel.text = $"ROATAN TABLE\n<size=19><color=#F7C948>{layoutHint}</color></size>";
+            }
         }
 
         if (hostBotDifficultyRow != null)
         {
-            hostBotDifficultyRow.SetActive(isHost);
+            hostBotDifficultyRow.SetActive(isHost && botsAllowed);
             RefreshHostBotDifficultyButtons();
         }
 
@@ -3832,7 +6946,17 @@ public class RoatanOnlineController : MonoBehaviour
             Vector2 cardSize = isTopOrBottom ? new Vector2(330f, 152f) : new Vector2(246f, 176f);
 
             string roleLabel;
-            if (seat.SeatIndex == localSeatIndex)
+            if (currentLobby.IsTeamChallenge)
+            {
+                bool isTeamASeat = (seat.SeatIndex % 2) == 0;
+                string crewName = isTeamASeat
+                    ? (!string.IsNullOrWhiteSpace(currentLobby.TeamAName) ? currentLobby.TeamAName : "Team A")
+                    : (!string.IsNullOrWhiteSpace(currentLobby.TeamBName) ? currentLobby.TeamBName : "Team B");
+                roleLabel = seat.SeatIndex == localSeatIndex
+                    ? $"{crewName} (You)"
+                    : $"{crewName} • Seat {seat.SeatIndex + 1}";
+            }
+            else if (seat.SeatIndex == localSeatIndex)
             {
                 roleLabel = $"Seat {seat.SeatIndex + 1}: You";
             }
@@ -3875,9 +6999,10 @@ public class RoatanOnlineController : MonoBehaviour
                 string occupantTitle = seat.IsBot
                     ? $"{seat.Player.Name}"
                     : (seat.Player.Id == localUserId ? $"{seat.Player.Name} (You)" : seat.Player.Name);
+                string seatRankBadge = RoatanRankTierHelper.FormatRichBadge(ResolveDisplayElo(seat.Player.Elo));
                 string subLine = seat.IsBot
                     ? $"Bot • {seat.BotDifficulty ?? "Pro"}"
-                    : (seat.IsReady ? $"Elo {seat.Player.Elo} • READY" : $"Elo {seat.Player.Elo}");
+                    : (seat.IsReady ? $"{seatRankBadge} • READY" : seatRankBadge);
 
                 // Circular seat avatar thumbnail
                 GameObject seatAvObj = new GameObject("SeatAvatar");
@@ -3914,7 +7039,7 @@ public class RoatanOnlineController : MonoBehaviour
             {
                 CreateText(seatCard.transform, "EmptyLbl", "Open Seat", 19, FontStyles.Italic, new Color(0.68f, 0.80f, 0.85f), new Vector2(0f, 12f), new Vector2(cardSize.x - 20f, 28f));
 
-                if (isHost)
+                if (isHost && botsAllowed)
                 {
                     float btnW = isTopOrBottom ? 142f : 108f;
                     float offsetX = isTopOrBottom ? 76f : 56f;
@@ -4060,7 +7185,7 @@ public class RoatanOnlineController : MonoBehaviour
         if (quickRankedLabel != null) quickRankedLabel.text = RoatanLocalization.T("quick_ranked");
         if (createLobbyBtnLabel != null) createLobbyBtnLabel.text = RoatanLocalization.T("create_lobby");
         if (joinCodeBtnLabel != null) joinCodeBtnLabel.text = RoatanLocalization.T("join_code");
-        if (refreshLobbiesBtnLabel != null) refreshLobbiesBtnLabel.text = RoatanLocalization.T("refresh_lobbies");
+        if (refreshLobbiesBtnLabel != null) refreshLobbiesBtnLabel.text = "Refresh";
         if (leaveLobbyBtnLabel != null) leaveLobbyBtnLabel.text = RoatanLocalization.T("leave_lobby");
         RefreshLobbyReadyButton();
         RefreshConnectionBadge();

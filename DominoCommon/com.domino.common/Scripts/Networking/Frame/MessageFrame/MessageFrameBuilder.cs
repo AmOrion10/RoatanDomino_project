@@ -4,6 +4,7 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 
 namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
@@ -198,5 +199,98 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame DeleteAccountFrame()
             => new MessageFrame(FrameCommandType.DeleteAccount, string.Empty);
+
+        public static MessageFrame GetLeaderboardFrame()
+            => new MessageFrame(FrameCommandType.GetLeaderboard, string.Empty);
+
+        public static MessageFrame MatchEloBreakdownFrame(MatchEloBreakdownDto dto)
+            => new MessageFrame(FrameCommandType.MatchEloBreakdown, dto.ToJson());
+
+        public static MessageFrame GetTeamsFrame(GetTeamsRequestDto dto = null)
+            => new MessageFrame(FrameCommandType.GetTeams, (dto ?? new GetTeamsRequestDto()).ToJson());
+
+        public static MessageFrame GetMyTeamFrame()
+            => new MessageFrame(FrameCommandType.GetMyTeam, string.Empty);
+
+        public static MessageFrame CreateTeamFrame(CreateTeamDto dto)
+            => new MessageFrame(FrameCommandType.CreateTeam, dto.ToJson());
+
+        public static MessageFrame UpdateTeamSettingsFrame(UpdateTeamSettingsDto dto)
+            => new MessageFrame(FrameCommandType.UpdateTeamSettings, dto.ToJson());
+
+        public static MessageFrame JoinOrRequestTeamFrame(JoinOrRequestTeamDto dto)
+            => new MessageFrame(FrameCommandType.JoinOrRequestTeam, dto.ToJson());
+
+        public static MessageFrame RespondTeamJoinRequestFrame(RespondTeamJoinRequestDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamJoinRequest, dto.ToJson());
+
+        public static MessageFrame InviteToTeamFrame(InviteToTeamDto dto)
+            => new MessageFrame(FrameCommandType.InviteToTeam, dto.ToJson());
+
+        public static MessageFrame RespondTeamInviteFrame(RespondTeamInviteDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamInvite, dto.ToJson());
+
+        public static MessageFrame PromoteOrDemoteMemberFrame(PromoteOrDemoteMemberDto dto)
+            => new MessageFrame(FrameCommandType.PromoteOrDemoteMember, dto.ToJson());
+
+        public static MessageFrame KickTeamMemberFrame(KickTeamMemberDto dto)
+            => new MessageFrame(FrameCommandType.KickTeamMember, dto.ToJson());
+
+        public static MessageFrame LeaveTeamFrame()
+            => new MessageFrame(FrameCommandType.LeaveTeam, string.Empty);
+
+        public static MessageFrame GetTeamLeaderboardFrame()
+            => new MessageFrame(FrameCommandType.GetTeamLeaderboard, string.Empty);
+
+        public static MessageFrame SendTeamChallengeFrame(SendTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.SendTeamChallenge, dto.ToJson());
+
+        public static MessageFrame RespondTeamChallengeFrame(RespondTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamChallenge, dto.ToJson());
+
+        public static MessageFrame TeamChallengeNotificationFrame(TeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.TeamChallengeNotification, dto.ToJson());
+
+        public static MessageFrame JoinAsSpectatorFrame(JoinSpectatorDto dto)
+            => new MessageFrame(FrameCommandType.JoinAsSpectator, dto.ToJson());
+
+        public static MessageFrame LeaveSpectatorFrame(LeaveSpectatorDto dto = null)
+            => new MessageFrame(FrameCommandType.LeaveSpectator, (dto ?? new LeaveSpectatorDto()).ToJson());
+
+        public static MessageFrame SpectatorCountUpdatedFrame(SpectatorCountUpdateDto dto)
+            => new MessageFrame(FrameCommandType.SpectatorCountUpdated, dto.ToJson());
+
+        public static MessageFrame SendDirectChallengeFrame(SendDirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.SendDirectChallenge, dto.ToJson());
+
+        public static MessageFrame RespondDirectChallengeFrame(RespondDirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RespondDirectChallenge, dto.ToJson());
+
+        public static MessageFrame DirectChallengeNotificationFrame(DirectChallengeDto dto)
+            => new MessageFrame(FrameCommandType.DirectChallengeNotification, dto.ToJson());
+
+        public static MessageFrame SendSocialChatMessageFrame(ChatMessageDto dto)
+            => new MessageFrame(FrameCommandType.SendChatMessage, dto.ToJson());
+
+        public static MessageFrame GetChatHistoryFrame(GetChatHistoryDto dto)
+            => new MessageFrame(FrameCommandType.GetChatHistory, dto.ToJson());
+
+        public static MessageFrame ChatMessageReceivedFrame(ChatMessageDto dto)
+            => new MessageFrame(FrameCommandType.ChatMessageReceived, dto.ToJson());
+
+        public static MessageFrame GetOpenTeamChallengesFrame()
+            => new MessageFrame(FrameCommandType.GetOpenTeamChallenges, string.Empty);
+
+        public static MessageFrame PostOpenTeamChallengeFrame(PostOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.PostOpenTeamChallenge, dto.ToJson());
+
+        public static MessageFrame CancelOpenTeamChallengeFrame(CancelOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.CancelOpenTeamChallenge, dto.ToJson());
+
+        public static MessageFrame RequestAcceptTeamChallengeFrame(RequestAcceptTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.RequestAcceptTeamChallenge, dto.ToJson());
+
+        public static MessageFrame AcceptOpenTeamChallengeFrame(AcceptOpenTeamChallengeDto dto)
+            => new MessageFrame(FrameCommandType.AcceptOpenTeamChallenge, dto.ToJson());
     }
 }

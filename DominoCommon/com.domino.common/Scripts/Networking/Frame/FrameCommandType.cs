@@ -84,5 +84,45 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         // Profile Avatars & Account Deletion
         UpdateProfileAvatar,
         DeleteAccount,
+
+        // Elo Ranking & Player Leaderboard
+        GetLeaderboard,
+        MatchEloBreakdown,
+
+        // Teams / Crews System
+        GetTeams,
+        GetMyTeam,
+        CreateTeam,
+        UpdateTeamSettings,
+        JoinOrRequestTeam,
+        RespondTeamJoinRequest,
+        InviteToTeam,
+        RespondTeamInvite,
+        PromoteOrDemoteMember,
+        KickTeamMember,
+        LeaveTeam,
+
+        // Team Challenges & Team Leaderboard
+        GetTeamLeaderboard,
+        SendTeamChallenge,
+        RespondTeamChallenge,
+        TeamChallengeNotification,
+
+        // Live Match Spectating, Direct Player Challenges & Team/DM Chat
+        JoinAsSpectator,
+        LeaveSpectator,
+        SpectatorCountUpdated,
+        SendDirectChallenge,
+        RespondDirectChallenge,
+        DirectChallengeNotification,
+        GetChatHistory,
+        ChatMessageReceived,
+
+        // Open Team Challenge Board & Ask Leaders Flow
+        GetOpenTeamChallenges,
+        PostOpenTeamChallenge,
+        CancelOpenTeamChallenge,
+        RequestAcceptTeamChallenge,
+        AcceptOpenTeamChallenge,
     }
 }

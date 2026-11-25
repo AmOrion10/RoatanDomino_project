@@ -318,6 +318,22 @@ public class Program
             return Results.Ok(new { ok = true, deletedUserId = userId });
         });
 
+        app.MapGet("/api/leaderboard", async (HttpContext context, LeaderboardService leaderboardService) =>
+        {
+            long? userId = long.TryParse(context.Request.Query["userId"].FirstOrDefault(), out long parsedId) && parsedId > 0 ? parsedId : null;
+            int limit = int.TryParse(context.Request.Query["limit"].FirstOrDefault(), out int parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
+            LeaderboardDto board = await leaderboardService.BuildLeaderboardAsync(userId, limit);
+            return Results.Ok(board);
+        });
+
+        app.MapGet("/api/leaderboard/teams", async (HttpContext context, TeamService teamService) =>
+        {
+            long? userId = long.TryParse(context.Request.Query["userId"].FirstOrDefault(), out long parsedId) && parsedId > 0 ? parsedId : null;
+            int limit = int.TryParse(context.Request.Query["limit"].FirstOrDefault(), out int parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
+            DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams.TeamLeaderboardDto board = await teamService.GetTeamLeaderboardAsync(userId, limit);
+            return Results.Ok(board);
+        });
+
         app.Map("/ws", async (HttpContext context, IClientManager cm, ILogger<WebSocketClient> wsLogger) =>
         {
             await HandleWebSocketUpgradeAsync(context, cm, wsLogger);
@@ -418,6 +434,130 @@ public class Program
             {
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN avatar_url TEXT NULL"); } catch { }
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN auth_provider VARCHAR(32) NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN elo INT NOT NULL DEFAULT 1000"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN wins INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN losses INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN win_assists INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN total_moves INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN optimal_moves INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN average_turn_seconds DOUBLE NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN online_matches_last_7_days INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN last_online_match_utc DATETIME NULL"); } catch { }
+
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS Teams (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(64) NOT NULL,
+                            tag VARCHAR(8) NOT NULL,
+                            team_elo INT NOT NULL DEFAULT 1000,
+                            team_wins INT NOT NULL DEFAULT 0,
+                            team_losses INT NOT NULL DEFAULT 0,
+                            max_members INT NOT NULL DEFAULT 12,
+                            join_policy INT NOT NULL DEFAULT 0,
+                            min_elo INT NOT NULL DEFAULT 100,
+                            activity_requirement INT NOT NULL DEFAULT 0,
+                            created_at_utc DATETIME NOT NULL
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamMembers (
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            role INT NOT NULL DEFAULT 0,
+                            joined_at_utc DATETIME NOT NULL,
+                            PRIMARY KEY (team_id, user_id),
+                            UNIQUE KEY UX_TeamMembers_UserId (user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamJoinRequests (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            created_at_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamJoinRequests_TeamUser (team_id, user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamInvites (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            team_id BIGINT NOT NULL,
+                            invited_user_id BIGINT NOT NULL,
+                            invited_by_user_id BIGINT NOT NULL,
+                            created_at_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamInvites_TeamInvited (team_id, invited_user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamChallenges (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            challenger_team_id BIGINT NOT NULL,
+                            target_team_id BIGINT NOT NULL,
+                            game_mode INT NOT NULL DEFAULT 0,
+                            variant INT NOT NULL DEFAULT 0,
+                            table_id INT NOT NULL DEFAULT 0,
+                            table_code VARCHAR(32) NOT NULL DEFAULT '',
+                            status INT NOT NULL DEFAULT 0,
+                            created_utc DATETIME NOT NULL
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync("UPDATE Teams SET max_members = 6 WHERE max_members > 6");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS SocialChatMessages (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            channel_type INT NOT NULL DEFAULT 0,
+                            team_id BIGINT NULL,
+                            sender_user_id BIGINT NOT NULL,
+                            recipient_user_id BIGINT NULL,
+                            body VARCHAR(1000) NOT NULL,
+                            sent_utc DATETIME NOT NULL
+                        )");
+                }
+                catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN abandoned_matches INT NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges MODIFY COLUMN target_team_id BIGINT NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN is_open_board TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN min_opponent_team_elo INT NOT NULL DEFAULT 100"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN require_full_human_squad TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN expires_utc DATETIME NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN play_deadline_utc DATETIME NULL"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN team_a_checked_in TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE TeamChallenges ADD COLUMN team_b_checked_in TINYINT(1) NOT NULL DEFAULT 0"); } catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamChallengeEndorsements (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            challenge_id BIGINT NOT NULL,
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            username VARCHAR(64) NOT NULL,
+                            created_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamChallengeEndorsements_ChUser (challenge_id, user_id)
+                        )");
+                }
+                catch { }
             }
 
             if (!await db.Dominos.AnyAsync())
@@ -467,11 +607,13 @@ public class Program
 internal sealed class GameLoopHostedService(
     ServerUpdater serverUpdater,
     IChronometer chronometer,
+    IServiceProvider serviceProvider,
     ILogger<GameLoopHostedService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("DominoServer game loop started.");
+        DateTime lastChallengeSweepUtc = DateTime.UtcNow;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -481,6 +623,25 @@ internal sealed class GameLoopHostedService(
                 chronometer.StartFrame();
 
                 await serverUpdater.UpdateAsync(deltaTime);
+
+                if ((DateTime.UtcNow - lastChallengeSweepUtc).TotalSeconds >= 60)
+                {
+                    lastChallengeSweepUtc = DateTime.UtcNow;
+                    try
+                    {
+                        using IServiceScope sweepScope = serviceProvider.CreateScope();
+                        TeamService teamService = sweepScope.ServiceProvider.GetRequiredService<TeamService>();
+                        int resolved = await teamService.ResolveExpiredChallengesAsync(DateTime.UtcNow);
+                        if (resolved > 0)
+                        {
+                            logger.LogInformation("Resolved {count} expired team challenge(s).", resolved);
+                        }
+                    }
+                    catch (Exception sweepEx)
+                    {
+                        logger.LogWarning("Error during expired team challenge sweep: {message}", sweepEx.Message);
+                    }
+                }
 
                 chronometer.EndFrame();
                 await Task.Delay(16, stoppingToken);

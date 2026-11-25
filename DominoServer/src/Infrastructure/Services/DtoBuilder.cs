@@ -31,44 +31,14 @@ public static class DtoBuilder
                 IsBot = occupant?.IsBot ?? false,
                 BotDifficulty = occupant?.BotDifficulty,
                 IsReady = occupant?.IsReady ?? false,
-                Player = occupant is null ? null : new PlayerDto
-                {
-                    Id = occupant.Id,
-                    Name = occupant.Login,
-                    Elo = occupant.Score,
-                    IsBot = occupant.IsBot,
-                    BotDifficulty = occupant.BotDifficulty,
-                    SeatIndex = occupant.SeatIndex,
-                    AvatarUrl = occupant.AvatarUrl,
-                    AvatarBase64 = occupant.AvatarBase64
-                }
+                Player = occupant is null ? null : BuildPlayerDto(occupant, occupant.IsBot, occupant.BotDifficulty, occupant.SeatIndex)
             });
         }
 
         return new LobbyDto
         {
-            Creator = new PlayerDto
-            {
-                Id = lobby.Creator.Id,
-                Name = lobby.Creator.Login,
-                Elo = lobby.Creator.Score,
-                IsBot = lobby.Creator.IsBot,
-                BotDifficulty = lobby.Creator.BotDifficulty,
-                SeatIndex = lobby.Creator.SeatIndex,
-                AvatarUrl = lobby.Creator.AvatarUrl,
-                AvatarBase64 = lobby.Creator.AvatarBase64
-            },
-            Players = ordered.Select(p => new PlayerDto
-            {
-                Id = p.Id,
-                Name = p.Login,
-                Elo = p.Score,
-                IsBot = p.IsBot,
-                BotDifficulty = p.BotDifficulty,
-                SeatIndex = p.SeatIndex,
-                AvatarUrl = p.AvatarUrl,
-                AvatarBase64 = p.AvatarBase64
-            }).ToList(),
+            Creator = BuildPlayerDto(lobby.Creator, lobby.Creator.IsBot, lobby.Creator.BotDifficulty, lobby.Creator.SeatIndex),
+            Players = ordered.Select(p => BuildPlayerDto(p, p.IsBot, p.BotDifficulty, p.SeatIndex)).ToList(),
             Seats = seats,
             Id = lobby.Id,
             Name = lobby.Name,
@@ -79,7 +49,14 @@ public static class DtoBuilder
             TableStyle = lobby.TableStyle,
             MatchFormat = lobby.MatchFormat,
             OneOnePlayoff = lobby.OneOnePlayoff,
-            IsHouseTable = lobby.IsHouseTable
+            IsHouseTable = lobby.IsHouseTable,
+            IsTeamChallenge = lobby.IsTeamChallenge,
+            TeamAId = lobby.TeamAId,
+            TeamAName = lobby.TeamAName,
+            TeamBId = lobby.TeamBId,
+            TeamBName = lobby.TeamBName,
+            RequireFullHumanSquad = lobby.RequireFullHumanSquad,
+            PlayDeadlineUtc = lobby.PlayDeadlineUtc
         };
     }
 
@@ -91,26 +68,54 @@ public static class DtoBuilder
         };
     }
 
-    public static PlayerDto GetPlayerDto(User user)
+    private static PlayerDto BuildPlayerDto(User user, bool isBot = false, string? botDifficulty = null, int seatIndex = 0)
     {
+        int resolvedElo = user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
         return new PlayerDto
         {
             Id = user.Id,
             Name = user.Login,
-            Elo = user.Score,
+            Elo = resolvedElo,
+            Wins = user.Wins,
+            Losses = user.Losses,
+            WinAssists = user.WinAssists,
+            TotalMoves = user.TotalMoves,
+            OptimalMoves = user.OptimalMoves,
+            AverageTurnSeconds = user.AverageTurnSeconds,
+            OnlineMatchesLast7Days = user.OnlineMatchesLast7Days,
+            LastOnlineMatchUtc = user.LastOnlineMatchUtc,
+            IsBot = isBot,
+            BotDifficulty = botDifficulty,
+            SeatIndex = seatIndex,
             AvatarUrl = user.AvatarUrl,
             AvatarBase64 = user.AvatarBase64
         };
     }
 
+    public static PlayerDto GetPlayerDto(User user)
+    {
+        return BuildPlayerDto(user);
+    }
+
     public static UserDto GetUserDto(User user)
     {
+        int resolvedElo = user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
         return new UserDto
         {
             Id = user.Id,
             Login = user.Login,
             Email = user.Email,
             Score = user.Score,
+            Elo = resolvedElo,
+            Wins = user.Wins,
+            Losses = user.Losses,
+            WinAssists = user.WinAssists,
+            TotalMoves = user.TotalMoves,
+            OptimalMoves = user.OptimalMoves,
+            AverageTurnSeconds = user.AverageTurnSeconds,
+            OnlineMatchesLast7Days = user.OnlineMatchesLast7Days,
+            LastOnlineMatchUtc = user.LastOnlineMatchUtc,
+            AbandonedMatches = user.AbandonedMatches,
             BirthDate = user.Birthdate.ToString(Constants.ShortFormatDate),
             DateSignup = user.DateSignup.ToString(Constants.LongFormatDate),
             Nationality = user.Nationality,
@@ -137,29 +142,107 @@ public static class DtoBuilder
         };
     }
 
-    public static ResponseObjectDto<LobbiesInfoDto> GetLobbiesInfoDto(List<Lobby> lobbies)
+    public static ResponseObjectDto<LobbiesInfoDto> GetLobbiesInfoDto(List<Lobby> lobbies, List<Game>? activeGames = null)
     {
+        List<LobbyInfoDto> items = lobbies.Select(l => new LobbyInfoDto
+        {
+            Creator = l.Creator.Login,
+            Id = l.Id,
+            MaxNumberOfPlayer = l.MaxNumberOfPlayer,
+            NumberOfPlayer = l.PlayersInLobby.Count,
+            Name = l.Name,
+            IsPublic = l.IsPublic,
+            TableStyle = l.TableStyle,
+            MatchFormat = l.MatchFormat,
+            OneOnePlayoff = l.OneOnePlayoff,
+            IsHouseTable = l.IsHouseTable,
+            IsTeamChallenge = l.IsTeamChallenge,
+            TeamAId = l.TeamAId,
+            TeamAName = l.TeamAName,
+            TeamBId = l.TeamBId,
+            TeamBName = l.TeamBName,
+            IsInProgress = false,
+            SpectatorCount = 0,
+            RequireFullHumanSquad = l.RequireFullHumanSquad,
+            PlayDeadlineUtc = l.PlayDeadlineUtc,
+            SeatedPlayers = l.GetSeatedPlayersOrdered()
+                .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
+                .ToList()
+        }).ToList();
+
+        if (activeGames is not null)
+        {
+            HashSet<int> existingIds = items.Select(x => x.Id).ToHashSet();
+            foreach (Game game in activeGames)
+            {
+                if (game.IsMatchOver || existingIds.Contains(game.Id)) continue;
+                items.Add(new LobbyInfoDto
+                {
+                    Id = game.Id,
+                    Creator = game.Players.FirstOrDefault()?.Login ?? "Table",
+                    MaxNumberOfPlayer = game.Players.Count,
+                    NumberOfPlayer = game.Players.Count,
+                    Name = string.IsNullOrWhiteSpace(game.MatchTitle) ? $"Live Match #{game.Id}" : game.MatchTitle,
+                    IsPublic = true,
+                    TableStyle = game.TableStyle,
+                    MatchFormat = game.MatchFormat,
+                    OneOnePlayoff = game.OneOnePlayoff,
+                    IsTeamChallenge = game.IsTeamChallenge,
+                    TeamAId = game.TeamAId,
+                    TeamAName = game.TeamAName,
+                    TeamBId = game.TeamBId,
+                    TeamBName = game.TeamBName,
+                    IsInProgress = true,
+                    SpectatorCount = game.SpectatorCount,
+                    SeatedPlayers = game.Players
+                        .Select(p => p.IsPermanentlyBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
+                        .ToList()
+                });
+            }
+        }
+
         return new ResponseObjectDto<LobbiesInfoDto>
         {
             Object = new LobbiesInfoDto
             {
-                Lobbies = lobbies.Select(l => new LobbyInfoDto
-                {
-                    Creator = l.Creator.Login,
-                    Id = l.Id,
-                    MaxNumberOfPlayer = l.MaxNumberOfPlayer,
-                    NumberOfPlayer = l.PlayersInLobby.Count,
-                    Name = l.Name,
-                    IsPublic = l.IsPublic,
-                    TableStyle = l.TableStyle,
-                    MatchFormat = l.MatchFormat,
-                    OneOnePlayoff = l.OneOnePlayoff,
-                    IsHouseTable = l.IsHouseTable,
-                    SeatedPlayers = l.GetSeatedPlayersOrdered()
-                        .Select(p => p.IsBot ? $"{p.Login} ({p.BotDifficulty ?? "Pro"})" : p.Login)
-                        .ToList()
-                }).ToList()
+                Lobbies = items
             }
+        };
+    }
+
+    public static SpectatorMatchSnapshotDto GetSpectatorMatchSnapshotDto(Game game)
+    {
+        List<MoveDto> boardMoves = game.MoveHistory.MoveHistory.Select(m => new MoveDto
+        {
+            Row = m.Row,
+            Col = m.Col,
+            Orientation = m.Orientation,
+            PlayerId = m.PlayerId,
+            Domino = new DominoDto
+            {
+                Side1 = m.Domino.Side1,
+                Side2 = m.Domino.Side2
+            }
+        }).ToList();
+
+        return new SpectatorMatchSnapshotDto
+        {
+            GameId = game.Id,
+            MatchTitle = string.IsNullOrWhiteSpace(game.MatchTitle) ? $"Live Match #{game.Id}" : game.MatchTitle,
+            MatchFormat = game.MatchFormat,
+            TableStyle = game.TableStyle,
+            HandNumber = game.HandNumber,
+            CurrentTurnPlayerId = game.Players.Count > 0 ? game.PlayerPlaying.Id : 0,
+            TurnTimer = GetTimerDto(game.PlayerTurnTimer),
+            BoardMoves = boardMoves,
+            NumberOfDominoPerPlayer = game.GetNumberOfDominoAllPlayer(),
+            TeamScores = new Dictionary<int, int>(game.TeamScores),
+            PlayerScores = new Dictionary<long, int>(game.PlayerScores),
+            Players = game.Players.Select((p, idx) => BuildPlayerDto(p, p.IsPermanentlyBot, p.BotDifficulty, idx)).ToList(),
+            SpectatorCount = game.SpectatorCount,
+            IsTeamChallenge = game.IsTeamChallenge,
+            TeamAName = game.TeamAName,
+            TeamBName = game.TeamBName
         };
     }
 
@@ -291,6 +374,11 @@ public static class DtoBuilder
             dto.IsKeyWin = game.LastHandResolution.IsKeyWin;
             dto.PointsAwarded = game.LastHandResolution.PointsAwarded;
             dto.AvailableActions = new List<PostHandAction>(game.LastHandResolution.AvailablePostHandActions);
+        }
+
+        if (game.LastMatchEloBreakdown is not null)
+        {
+            dto.EloBreakdown = game.LastMatchEloBreakdown;
         }
 
         return dto;
@@ -429,16 +517,7 @@ public static class DtoBuilder
                 PlayerId = player.Id,
                 ReconnectToken = player.ReconnectToken,
                 AuthToken = authToken.ToString(),
-                User = new UserDto
-                {
-                    Id = player.Id,
-                    Login = player.Login,
-                    Email = player.Email,
-                    Score = player.Score,
-                    BirthDate = player.Birthdate.ToString(Constants.ShortFormatDate),
-                    DateSignup = player.DateSignup.ToString(Constants.LongFormatDate),
-                    Nationality = player.Nationality
-                },
+                User = GetUserDto(player),
                 MatchTitle = game.MatchTitle,
                 MatchFormat = game.MatchFormat,
                 TableStyle = game.TableStyle,
@@ -460,12 +539,7 @@ public static class DtoBuilder
                 NumberOfDominoPerPlayer = game.GetNumberOfDominoAllPlayer(),
                 TeamScores = new Dictionary<int, int>(game.TeamScores),
                 PlayerScores = new Dictionary<long, int>(game.PlayerScores),
-                Players = game.Players.Select(p => new PlayerDto
-                {
-                    Id = p.Id,
-                    Name = p.Login,
-                    Elo = p.Score
-                }).ToList()
+                Players = game.Players.Select(p => BuildPlayerDto(p, p.IsPermanentlyBot && !p.IsHumanSeat, p.BotDifficulty)).ToList()
             }
         };
     }

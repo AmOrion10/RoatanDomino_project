@@ -63,6 +63,7 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
             Login = trimmedLogin,
             Password = PasswordHasher.Hash(password),
             Birthdate = birthdate,
+            Elo = DominoCommon.com.domino.common.Scripts.Enums.RoatanRankTierHelper.DefaultElo,
             AuthProvider = string.IsNullOrWhiteSpace(user.AuthProvider) ? "Email" : user.AuthProvider
         };
         await dbContext.Users.AddAsync(entity);
@@ -169,6 +170,47 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
         UserEntity entity = await dbContext.Users.FirstAsync(u => u.Id == user.Id);
         entity.Score = newScore;
         await dbContext.SaveChangesAsync();
+    }
+
+    public async Task<User?> UpdateRankedStats(User user)
+    {
+        if (user.Id <= 0) return null;
+        UserEntity? entity = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == user.Id);
+        if (entity is null) return null;
+
+        entity.Elo = DominoCommon.com.domino.common.Scripts.Enums.RoatanRankTierHelper.ClampElo(user.Elo);
+        entity.Wins = Math.Max(0, user.Wins);
+        entity.Losses = Math.Max(0, user.Losses);
+        entity.WinAssists = Math.Max(0, user.WinAssists);
+        entity.TotalMoves = Math.Max(0, user.TotalMoves);
+        entity.OptimalMoves = Math.Clamp(user.OptimalMoves, 0, entity.TotalMoves);
+        entity.AverageTurnSeconds = Math.Max(0.0, user.AverageTurnSeconds);
+        entity.OnlineMatchesLast7Days = Math.Max(0, user.OnlineMatchesLast7Days);
+        entity.LastOnlineMatchUtc = user.LastOnlineMatchUtc;
+        entity.AbandonedMatches = Math.Max(0, user.AbandonedMatches);
+
+        await dbContext.SaveChangesAsync();
+        return entity.ToDomainEntity();
+    }
+
+    public async Task<List<User>> GetLeaderboardUsers(int limit = 100)
+    {
+        int cappedLimit = Math.Clamp(limit, 1, 500);
+        List<UserEntity> entities = await dbContext.Users
+            .Include(u => u.Nationality)
+            .Include(u => u.Avatar)
+            .Where(u => u.Id > 0)
+            .ToListAsync();
+
+        return entities
+            .Select(e => e.ToDomainEntity())
+            .OrderByDescending(u => u.Elo)
+            .ThenByDescending(u => u.Wins)
+            .ThenByDescending(u => u.AccuracyPercent)
+            .ThenByDescending(u => u.WinAssists)
+            .ThenBy(u => u.Login, StringComparer.OrdinalIgnoreCase)
+            .Take(cappedLimit)
+            .ToList();
     }
 
     public async Task<List<HistoryGame>> GetAllHistoryGames(long id)
@@ -329,6 +371,7 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
             Password = PasswordHasher.Hash(generatedSecret),
             Birthdate = new DateOnly(2000, 1, 1),
             Score = 1000,
+            Elo = DominoCommon.com.domino.common.Scripts.Enums.RoatanRankTierHelper.DefaultElo,
             AvatarId = newAvatar?.Id,
             Avatar = newAvatar,
             AvatarUrl = string.IsNullOrWhiteSpace(avatarUrl) ? null : avatarUrl.Trim(),
@@ -409,6 +452,42 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
             .Where(c => c.EmailAddress.ToLower() == entity.Email.ToLower())
             .ToListAsync();
         if (codes.Count > 0) dbContext.ResetPasswordCode.RemoveRange(codes);
+
+        List<TeamJoinRequestEntity> teamRequests = await dbContext.TeamJoinRequests
+            .Where(r => r.UserId == userId)
+            .ToListAsync();
+        if (teamRequests.Count > 0) dbContext.TeamJoinRequests.RemoveRange(teamRequests);
+
+        List<TeamInviteEntity> teamInvites = await dbContext.TeamInvites
+            .Where(i => i.InvitedUserId == userId || i.InvitedByUserId == userId)
+            .ToListAsync();
+        if (teamInvites.Count > 0) dbContext.TeamInvites.RemoveRange(teamInvites);
+
+        TeamMemberEntity? membership = await dbContext.TeamMembers
+            .FirstOrDefaultAsync(m => m.UserId == userId);
+        if (membership is not null)
+        {
+            long deletedFromTeamId = membership.TeamId;
+            bool wasCaptain = membership.Role == DominoCommon.com.domino.common.Scripts.Enums.TeamRole.Captain;
+            dbContext.TeamMembers.Remove(membership);
+            await dbContext.SaveChangesAsync();
+
+            List<TeamMemberEntity> remaining = await dbContext.TeamMembers
+                .Where(m => m.TeamId == deletedFromTeamId)
+                .OrderByDescending(m => m.Role)
+                .ThenBy(m => m.JoinedAtUtc)
+                .ThenBy(m => m.UserId)
+                .ToListAsync();
+            if (remaining.Count == 0)
+            {
+                TeamEntity? emptyTeam = await dbContext.Teams.FirstOrDefaultAsync(t => t.Id == deletedFromTeamId);
+                if (emptyTeam is not null) dbContext.Teams.Remove(emptyTeam);
+            }
+            else if (wasCaptain)
+            {
+                remaining[0].Role = DominoCommon.com.domino.common.Scripts.Enums.TeamRole.Captain;
+            }
+        }
 
         AvatarEntity? avatarToRemove = entity.Avatar;
         entity.AvatarId = null;

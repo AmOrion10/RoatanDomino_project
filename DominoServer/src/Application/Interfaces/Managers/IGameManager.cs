@@ -31,4 +31,8 @@ public interface IGameManager
     bool PlayerLeave(int gameId, IClient playerLeaving);
     List<Game> GetAllActiveGames();
     Game? FindRejoinableGame(int matchId, long playerId, string reconnectToken, out int remainingGraceSeconds);
+    bool AddSpectator(int gameId, long userId);
+    bool RemoveSpectator(int gameId, long userId);
+    List<Game> RemoveSpectatorFromAllGames(long userId);
+    Game? GetSpectatedGameForUser(long userId);
 }

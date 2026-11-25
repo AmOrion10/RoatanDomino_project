@@ -216,6 +216,13 @@ public class Client : IClient
                     User = avatarResp.Object;
                 }
                 break;
+            case FrameCommandType.GetInfoProfile:
+                ResponseObjectDto<InfoProfileDto> profileResp = frame.GetObjectFromMessage<ResponseObjectDto<InfoProfileDto>>();
+                if (profileResp != null && profileResp.OkResult && profileResp.Object?.User != null)
+                {
+                    User = profileResp.Object.User;
+                }
+                break;
             case FrameCommandType.DeleteAccount:
                 ResponseDto deleteResp = frame.GetObjectFromMessage<ResponseDto>();
                 if (deleteResp != null && deleteResp.OkResult)
@@ -240,6 +247,16 @@ public class Client : IClient
                     }
                 }
                 break;
+        }
+
+        if (frame.CommandType == FrameCommandType.MatchEloBreakdown && User != null)
+        {
+            MatchEloBreakdownDto breakdown = frame.GetObjectFromMessage<MatchEloBreakdownDto>();
+            PlayerEloBreakdownDto local = breakdown?.Players?.FirstOrDefault(p => p.PlayerId == User.Id);
+            if (local != null && local.IsRankedApplied)
+            {
+                User.Elo = local.NewElo;
+            }
         }
     }
 

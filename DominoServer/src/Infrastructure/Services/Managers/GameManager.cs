@@ -28,12 +28,16 @@ public class GameManager(IChatManager chatManager) : IGameManager
         bool hasBots = orderedSeats.Any(p => p.IsBot);
         List<GamePlayer> players = orderedSeats.Select(lobbyPlayer =>
         {
-            GamePlayer gp = new(lobbyPlayer);
+            GamePlayer gp = new(lobbyPlayer)
+            {
+                IsHumanSeat = !lobbyPlayer.IsBot && lobbyPlayer.Id > 0
+            };
             if (lobbyPlayer.IsBot)
             {
                 gp.IsReady = true;
                 gp.IsBotControlled = true;
                 gp.IsPermanentlyBot = true;
+                gp.IsHumanSeat = false;
                 gp.BotDifficulty = lobbyPlayer.BotDifficulty ?? "Pro";
             }
             return gp;
@@ -51,7 +55,15 @@ public class GameManager(IChatManager chatManager) : IGameManager
             {
                 ChatId = chatManager.CreateChat("Game"),
                 LobbyId = lobby.Id,
-                MatchTitle = lobby.Name
+                MatchTitle = lobby.Name,
+                IsTeamChallenge = lobby.IsTeamChallenge,
+                TeamChallengeId = lobby.TeamChallengeId,
+                TeamAId = lobby.TeamAId,
+                TeamAName = lobby.TeamAName,
+                TeamATag = lobby.TeamATag,
+                TeamBId = lobby.TeamBId,
+                TeamBName = lobby.TeamBName,
+                TeamBTag = lobby.TeamBTag
             };
         }
         else
@@ -238,6 +250,57 @@ public class GameManager(IChatManager chatManager) : IGameManager
                 return game;
             }
             return null;
+        }
+    }
+
+    public bool AddSpectator(int gameId, long userId)
+    {
+        if (userId <= 0) return false;
+        lock (games)
+        {
+            Game? target = games.FirstOrDefault(g => g.Id == gameId);
+            if (target is null) return false;
+            // Leave any other spectated game first so a user spectates at most one match
+            foreach (Game g in games)
+            {
+                if (g.Id != gameId) g.RemoveSpectator(userId);
+            }
+            return target.AddSpectator(userId);
+        }
+    }
+
+    public bool RemoveSpectator(int gameId, long userId)
+    {
+        lock (games)
+        {
+            Game? target = games.FirstOrDefault(g => g.Id == gameId);
+            return target is not null && target.RemoveSpectator(userId);
+        }
+    }
+
+    public List<Game> RemoveSpectatorFromAllGames(long userId)
+    {
+        List<Game> affected = [];
+        if (userId <= 0) return affected;
+        lock (games)
+        {
+            foreach (Game g in games)
+            {
+                if (g.RemoveSpectator(userId))
+                {
+                    affected.Add(g);
+                }
+            }
+        }
+        return affected;
+    }
+
+    public Game? GetSpectatedGameForUser(long userId)
+    {
+        if (userId <= 0) return null;
+        lock (games)
+        {
+            return games.FirstOrDefault(g => g.HasSpectator(userId));
         }
     }
 }

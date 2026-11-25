@@ -5,9 +5,13 @@ using Application.Interfaces.Repositories;
 using Domain;
 using Domain.Game;
 
+using DominoCommon.com.domino.common.Scripts.Enums;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.NetworkFrame;
+
+using Infrastructure.Database;
+using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Services;
 
@@ -15,11 +19,25 @@ public class PresenceService(
     IUserRepository userRepository,
     IClientManager clientManager,
     ILobbyManager lobbyManager,
-    IGameManager gameManager)
+    IGameManager gameManager,
+    ApplicationDbContext? dbContext = null)
 {
     public async Task<PlayerRosterDto> BuildRosterAsync()
     {
         List<User> registeredUsers = await userRepository.GetAllUsers();
+        Dictionary<long, (long TeamId, string TeamTag)> teamByUser = [];
+        if (dbContext is not null)
+        {
+            var memberships = await dbContext.TeamMembers
+                .Include(m => m.Team)
+                .Select(m => new { m.UserId, m.TeamId, Tag = m.Team.Tag })
+                .ToListAsync();
+            foreach (var m in memberships)
+            {
+                teamByUser[m.UserId] = (m.TeamId, m.Tag);
+            }
+        }
+
         List<IClient> onlineClients = clientManager.GetAllLoggedInClients();
         Dictionary<long, IClient> onlineById = [];
         foreach (IClient c in onlineClients)
@@ -34,7 +52,13 @@ public class PresenceService(
         foreach (User user in registeredUsers)
         {
             if (user.Id <= 0) continue;
-            entries[user.Id] = CreatePresenceEntry(user, onlineById.GetValueOrDefault(user.Id));
+            PlayerPresenceDto entry = CreatePresenceEntry(user, onlineById.GetValueOrDefault(user.Id));
+            if (teamByUser.TryGetValue(user.Id, out (long TeamId, string TeamTag) tm))
+            {
+                entry.TeamId = tm.TeamId;
+                entry.TeamTag = tm.TeamTag;
+            }
+            entries[user.Id] = entry;
         }
 
         // Include any logged-in users that may exist in test/mock setups without DB rows
@@ -42,7 +66,13 @@ public class PresenceService(
         {
             if (!entries.ContainsKey(kv.Key) && kv.Value.User is not null)
             {
-                entries[kv.Key] = CreatePresenceEntry(kv.Value.User, kv.Value);
+                PlayerPresenceDto entry = CreatePresenceEntry(kv.Value.User, kv.Value);
+                if (teamByUser.TryGetValue(kv.Key, out (long TeamId, string TeamTag) tm))
+                {
+                    entry.TeamId = tm.TeamId;
+                    entry.TeamTag = tm.TeamTag;
+                }
+                entries[kv.Key] = entry;
             }
         }
 
@@ -85,63 +115,51 @@ public class PresenceService(
 
     private PlayerPresenceDto CreatePresenceEntry(User user, IClient? activeClient)
     {
+        int resolvedElo = user.Elo >= RoatanRankTierHelper.MinElo ? user.Elo : RoatanRankTierHelper.DefaultElo;
+        PlayerPresenceDto dto = new()
+        {
+            UserId = user.Id,
+            Username = user.Login,
+            Elo = resolvedElo,
+            Wins = user.Wins,
+            Losses = user.Losses,
+            WinAssists = user.WinAssists,
+            TotalMoves = user.TotalMoves,
+            OptimalMoves = user.OptimalMoves,
+            AverageTurnSeconds = user.AverageTurnSeconds,
+            OnlineMatchesLast7Days = user.OnlineMatchesLast7Days,
+            LastOnlineMatchUtc = user.LastOnlineMatchUtc,
+            AvatarUrl = user.AvatarUrl,
+            AvatarBase64 = user.AvatarBase64
+        };
+
         if (activeClient is null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = false,
-                Status = "Offline",
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.IsOnline = false;
+            dto.Status = "Offline";
+            return dto;
         }
 
+        dto.IsOnline = true;
         Game? game = gameManager.GetForClient(activeClient);
         if (game is not null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = true,
-                Status = "In Match",
-                TableId = game.LobbyId > 0 ? game.LobbyId : game.Id,
-                TableName = game.MatchTitle,
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.Status = "In Match";
+            dto.TableId = game.LobbyId > 0 ? game.LobbyId : game.Id;
+            dto.TableName = game.MatchTitle;
+            return dto;
         }
 
         Lobby? lobby = lobbyManager.GetLobbyForClient(activeClient);
         if (lobby is not null)
         {
-            return new PlayerPresenceDto
-            {
-                UserId = user.Id,
-                Username = user.Login,
-                Elo = user.Score,
-                IsOnline = true,
-                Status = "At Table",
-                TableId = lobby.Id,
-                TableName = lobby.Name,
-                AvatarUrl = user.AvatarUrl,
-                AvatarBase64 = user.AvatarBase64
-            };
+            dto.Status = "At Table";
+            dto.TableId = lobby.Id;
+            dto.TableName = lobby.Name;
+            return dto;
         }
 
-        return new PlayerPresenceDto
-        {
-            UserId = user.Id,
-            Username = user.Login,
-            Elo = user.Score,
-            IsOnline = true,
-            Status = "Available",
-            AvatarUrl = user.AvatarUrl,
-            AvatarBase64 = user.AvatarBase64
-        };
+        dto.Status = "Available";
+        return dto;
     }
 }

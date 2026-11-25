@@ -1,4 +1,5 @@
 using Domain;
+using DominoCommon.com.domino.common.Scripts.Enums;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Infrastructure.Database.Entities;
@@ -25,6 +26,26 @@ public class UserEntity
     public string? AuthProvider { get; set; }
 
     public int Score { get; set; }
+
+    public int Elo { get; set; } = RoatanRankTierHelper.DefaultElo;
+
+    public int Wins { get; set; }
+
+    public int Losses { get; set; }
+
+    public int WinAssists { get; set; }
+
+    public int TotalMoves { get; set; }
+
+    public int OptimalMoves { get; set; }
+
+    public double AverageTurnSeconds { get; set; }
+
+    public int OnlineMatchesLast7Days { get; set; }
+
+    public DateTime? LastOnlineMatchUtc { get; set; }
+
+    public int AbandonedMatches { get; set; }
 
     public DateOnly Birthdate { get; set; }
 
@@ -62,10 +83,21 @@ public class UserEntity
 
     public User ToDomainEntity()
     {
+        int resolvedElo = Elo >= RoatanRankTierHelper.MinElo ? Elo : RoatanRankTierHelper.DefaultElo;
         return new User(Email, Login)
         {
             Id = Id,
             Score = Score,
+            Elo = resolvedElo,
+            Wins = Wins,
+            Losses = Losses,
+            WinAssists = WinAssists,
+            TotalMoves = TotalMoves,
+            OptimalMoves = OptimalMoves,
+            AverageTurnSeconds = AverageTurnSeconds,
+            OnlineMatchesLast7Days = OnlineMatchesLast7Days,
+            LastOnlineMatchUtc = LastOnlineMatchUtc,
+            AbandonedMatches = AbandonedMatches,
             DateSignup = DateSignup,
             Birthdate = Birthdate,
             Nationality = NationalityId is null ? null : Nationality?.Name,

@@ -15,6 +15,8 @@ public interface IUserRepository
     Task UpdatePassword(User user, string actualPassword, string newPassword);
     Task<User> GetByLogin(string login);
     Task UpdateScore(User user, int newScore);
+    Task<User?> UpdateRankedStats(User user);
+    Task<List<User>> GetLeaderboardUsers(int limit = 100);
     Task<List<HistoryGame>> GetAllHistoryGames(long id);
     Task<HistoryGame> GetHistoryGame(long id);
     Task<int> GetNumberOfGamePlayedByUser(long id);

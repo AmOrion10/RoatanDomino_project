@@ -5,6 +5,7 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
@@ -50,6 +51,32 @@ public class MessageFrameEventHandler
     public event Action<ResponseDto> SendTableInviteResponseEvent;
     public event Action<ResponseObjectDto<UserDto>> UpdateProfileAvatarResponseEvent;
     public event Action<ResponseDto> DeleteAccountResponseEvent;
+    public event Action<ResponseObjectDto<LeaderboardDto>> GetLeaderboardResponseEvent;
+    public event Action<ResponseObjectDto<TeamsListDto>> GetTeamsResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> GetMyTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> CreateTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> UpdateTeamSettingsResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> JoinOrRequestTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> RespondTeamJoinRequestResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> InviteToTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> RespondTeamInviteResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> PromoteOrDemoteMemberResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> KickTeamMemberResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> LeaveTeamResponseEvent;
+    public event Action<ResponseObjectDto<TeamLeaderboardDto>> GetTeamLeaderboardResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> SendTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> RespondTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<SpectatorMatchSnapshotDto>> JoinAsSpectatorResponseEvent;
+    public event Action<ResponseDto> LeaveSpectatorResponseEvent;
+    public event Action<ResponseObjectDto<DirectChallengeActionResponseDto>> SendDirectChallengeResponseEvent;
+    public event Action<ResponseObjectDto<DirectChallengeActionResponseDto>> RespondDirectChallengeResponseEvent;
+    public event Action<ResponseObjectDto<ChatMessageDto>> SendSocialChatMessageResponseEvent;
+    public event Action<ResponseObjectDto<ChatHistoryDto>> GetChatHistoryResponseEvent;
+    public event Action<ResponseObjectDto<OpenTeamChallengesDto>> GetOpenTeamChallengesResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> PostOpenTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> CancelOpenTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeDto>> RequestAcceptTeamChallengeResponseEvent;
+    public event Action<ResponseObjectDto<TeamChallengeActionResponseDto>> AcceptOpenTeamChallengeResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -68,6 +95,11 @@ public class MessageFrameEventHandler
     public event Action<PossibleMovesDto> PossiblesMovesEvent;
     public event Action<NumberOfDominoPerPlayerDto> NumberOfDominoPerPlayerEvent;
     public event Action<EndGameDto> EndGameEvent;
+    public event Action<MatchEloBreakdownDto> MatchEloBreakdownEvent;
+    public event Action<TeamChallengeDto> TeamChallengeNotificationEvent;
+    public event Action<SpectatorCountUpdateDto> SpectatorCountUpdatedEvent;
+    public event Action<DirectChallengeDto> DirectChallengeNotificationEvent;
+    public event Action<ChatMessageDto> ChatMessageReceivedEvent;
     public event Action<ReceiveChatMessageDto> ReceiveChatMessageEvent;
     public event Action<ChatDto> JoinChatEvent;
     public event Action<ChatDto> LeaveChatEvent;
@@ -171,6 +203,84 @@ public class MessageFrameEventHandler
             case FrameCommandType.DeleteAccount:
                 DeleteAccountResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
                 break;
+            case FrameCommandType.GetLeaderboard:
+                GetLeaderboardResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LeaderboardDto>>());
+                break;
+            case FrameCommandType.GetTeams:
+                GetTeamsResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamsListDto>>());
+                break;
+            case FrameCommandType.GetMyTeam:
+                GetMyTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.CreateTeam:
+                CreateTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.UpdateTeamSettings:
+                UpdateTeamSettingsResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.JoinOrRequestTeam:
+                JoinOrRequestTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.RespondTeamJoinRequest:
+                RespondTeamJoinRequestResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.InviteToTeam:
+                InviteToTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.RespondTeamInvite:
+                RespondTeamInviteResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.PromoteOrDemoteMember:
+                PromoteOrDemoteMemberResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.KickTeamMember:
+                KickTeamMemberResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.LeaveTeam:
+                LeaveTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.GetTeamLeaderboard:
+                GetTeamLeaderboardResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamLeaderboardDto>>());
+                break;
+            case FrameCommandType.SendTeamChallenge:
+                SendTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.RespondTeamChallenge:
+                RespondTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.JoinAsSpectator:
+                JoinAsSpectatorResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<SpectatorMatchSnapshotDto>>());
+                break;
+            case FrameCommandType.LeaveSpectator:
+                LeaveSpectatorResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseDto>());
+                break;
+            case FrameCommandType.SendDirectChallenge:
+                SendDirectChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<DirectChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.RespondDirectChallenge:
+                RespondDirectChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<DirectChallengeActionResponseDto>>());
+                break;
+            case FrameCommandType.SendChatMessage:
+                SendSocialChatMessageResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ChatMessageDto>>());
+                break;
+            case FrameCommandType.GetChatHistory:
+                GetChatHistoryResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<ChatHistoryDto>>());
+                break;
+            case FrameCommandType.GetOpenTeamChallenges:
+                GetOpenTeamChallengesResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<OpenTeamChallengesDto>>());
+                break;
+            case FrameCommandType.PostOpenTeamChallenge:
+                PostOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.CancelOpenTeamChallenge:
+                CancelOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.RequestAcceptTeamChallenge:
+                RequestAcceptTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeDto>>());
+                break;
+            case FrameCommandType.AcceptOpenTeamChallenge:
+                AcceptOpenTeamChallengeResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamChallengeActionResponseDto>>());
+                break;
         }
 
         switch (frame.CommandType)
@@ -222,6 +332,21 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.EndGame:
                 EndGameEvent?.Invoke(frame.GetObjectFromMessage<EndGameDto>());
+                break;
+            case FrameCommandType.MatchEloBreakdown:
+                MatchEloBreakdownEvent?.Invoke(frame.GetObjectFromMessage<MatchEloBreakdownDto>());
+                break;
+            case FrameCommandType.TeamChallengeNotification:
+                TeamChallengeNotificationEvent?.Invoke(frame.GetObjectFromMessage<TeamChallengeDto>());
+                break;
+            case FrameCommandType.SpectatorCountUpdated:
+                SpectatorCountUpdatedEvent?.Invoke(frame.GetObjectFromMessage<SpectatorCountUpdateDto>());
+                break;
+            case FrameCommandType.DirectChallengeNotification:
+                DirectChallengeNotificationEvent?.Invoke(frame.GetObjectFromMessage<DirectChallengeDto>());
+                break;
+            case FrameCommandType.ChatMessageReceived:
+                ChatMessageReceivedEvent?.Invoke(frame.GetObjectFromMessage<ChatMessageDto>());
                 break;
             case FrameCommandType.GameGeneralTimer:
                 GameGeneralTimerEvent?.Invoke(frame.GetObjectFromMessage<TimerDto>());
