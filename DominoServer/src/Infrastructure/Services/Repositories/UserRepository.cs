@@ -452,6 +452,42 @@ public class UserRepository(ApplicationDbContext dbContext, INationalityReposito
             .ToListAsync();
         if (codes.Count > 0) dbContext.ResetPasswordCode.RemoveRange(codes);
 
+        List<TeamJoinRequestEntity> teamRequests = await dbContext.TeamJoinRequests
+            .Where(r => r.UserId == userId)
+            .ToListAsync();
+        if (teamRequests.Count > 0) dbContext.TeamJoinRequests.RemoveRange(teamRequests);
+
+        List<TeamInviteEntity> teamInvites = await dbContext.TeamInvites
+            .Where(i => i.InvitedUserId == userId || i.InvitedByUserId == userId)
+            .ToListAsync();
+        if (teamInvites.Count > 0) dbContext.TeamInvites.RemoveRange(teamInvites);
+
+        TeamMemberEntity? membership = await dbContext.TeamMembers
+            .FirstOrDefaultAsync(m => m.UserId == userId);
+        if (membership is not null)
+        {
+            long deletedFromTeamId = membership.TeamId;
+            bool wasCaptain = membership.Role == DominoCommon.com.domino.common.Scripts.Enums.TeamRole.Captain;
+            dbContext.TeamMembers.Remove(membership);
+            await dbContext.SaveChangesAsync();
+
+            List<TeamMemberEntity> remaining = await dbContext.TeamMembers
+                .Where(m => m.TeamId == deletedFromTeamId)
+                .OrderByDescending(m => m.Role)
+                .ThenBy(m => m.JoinedAtUtc)
+                .ThenBy(m => m.UserId)
+                .ToListAsync();
+            if (remaining.Count == 0)
+            {
+                TeamEntity? emptyTeam = await dbContext.Teams.FirstOrDefaultAsync(t => t.Id == deletedFromTeamId);
+                if (emptyTeam is not null) dbContext.Teams.Remove(emptyTeam);
+            }
+            else if (wasCaptain)
+            {
+                remaining[0].Role = DominoCommon.com.domino.common.Scripts.Enums.TeamRole.Captain;
+            }
+        }
+
         AvatarEntity? avatarToRemove = entity.Avatar;
         entity.AvatarId = null;
         entity.Avatar = null;

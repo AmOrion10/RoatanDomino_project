@@ -4,6 +4,7 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 
 namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
@@ -204,5 +205,38 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame
 
         public static MessageFrame MatchEloBreakdownFrame(MatchEloBreakdownDto dto)
             => new MessageFrame(FrameCommandType.MatchEloBreakdown, dto.ToJson());
+
+        public static MessageFrame GetTeamsFrame(GetTeamsRequestDto dto = null)
+            => new MessageFrame(FrameCommandType.GetTeams, (dto ?? new GetTeamsRequestDto()).ToJson());
+
+        public static MessageFrame GetMyTeamFrame()
+            => new MessageFrame(FrameCommandType.GetMyTeam, string.Empty);
+
+        public static MessageFrame CreateTeamFrame(CreateTeamDto dto)
+            => new MessageFrame(FrameCommandType.CreateTeam, dto.ToJson());
+
+        public static MessageFrame UpdateTeamSettingsFrame(UpdateTeamSettingsDto dto)
+            => new MessageFrame(FrameCommandType.UpdateTeamSettings, dto.ToJson());
+
+        public static MessageFrame JoinOrRequestTeamFrame(JoinOrRequestTeamDto dto)
+            => new MessageFrame(FrameCommandType.JoinOrRequestTeam, dto.ToJson());
+
+        public static MessageFrame RespondTeamJoinRequestFrame(RespondTeamJoinRequestDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamJoinRequest, dto.ToJson());
+
+        public static MessageFrame InviteToTeamFrame(InviteToTeamDto dto)
+            => new MessageFrame(FrameCommandType.InviteToTeam, dto.ToJson());
+
+        public static MessageFrame RespondTeamInviteFrame(RespondTeamInviteDto dto)
+            => new MessageFrame(FrameCommandType.RespondTeamInvite, dto.ToJson());
+
+        public static MessageFrame PromoteOrDemoteMemberFrame(PromoteOrDemoteMemberDto dto)
+            => new MessageFrame(FrameCommandType.PromoteOrDemoteMember, dto.ToJson());
+
+        public static MessageFrame KickTeamMemberFrame(KickTeamMemberDto dto)
+            => new MessageFrame(FrameCommandType.KickTeamMember, dto.ToJson());
+
+        public static MessageFrame LeaveTeamFrame()
+            => new MessageFrame(FrameCommandType.LeaveTeam, string.Empty);
     }
 }

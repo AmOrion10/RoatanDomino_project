@@ -88,5 +88,18 @@ namespace DominoCommon.com.domino.common.Scripts.Networking.Frame
         // Elo Ranking & Player Leaderboard
         GetLeaderboard,
         MatchEloBreakdown,
+
+        // Teams / Crews System
+        GetTeams,
+        GetMyTeam,
+        CreateTeam,
+        UpdateTeamSettings,
+        JoinOrRequestTeam,
+        RespondTeamJoinRequest,
+        InviteToTeam,
+        RespondTeamInvite,
+        PromoteOrDemoteMember,
+        KickTeamMember,
+        LeaveTeam,
     }
 }

@@ -435,6 +435,63 @@ public class Program
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN average_turn_seconds DOUBLE NOT NULL DEFAULT 0"); } catch { }
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN online_matches_last_7_days INT NOT NULL DEFAULT 0"); } catch { }
                 try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN last_online_match_utc DATETIME NULL"); } catch { }
+
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS Teams (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(64) NOT NULL,
+                            tag VARCHAR(8) NOT NULL,
+                            team_elo INT NOT NULL DEFAULT 1000,
+                            team_wins INT NOT NULL DEFAULT 0,
+                            team_losses INT NOT NULL DEFAULT 0,
+                            max_members INT NOT NULL DEFAULT 12,
+                            join_policy INT NOT NULL DEFAULT 0,
+                            min_elo INT NOT NULL DEFAULT 100,
+                            activity_requirement INT NOT NULL DEFAULT 0,
+                            created_at_utc DATETIME NOT NULL
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamMembers (
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            role INT NOT NULL DEFAULT 0,
+                            joined_at_utc DATETIME NOT NULL,
+                            PRIMARY KEY (team_id, user_id),
+                            UNIQUE KEY UX_TeamMembers_UserId (user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamJoinRequests (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            team_id BIGINT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            created_at_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamJoinRequests_TeamUser (team_id, user_id)
+                        )");
+                }
+                catch { }
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        CREATE TABLE IF NOT EXISTS TeamInvites (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            team_id BIGINT NOT NULL,
+                            invited_user_id BIGINT NOT NULL,
+                            invited_by_user_id BIGINT NOT NULL,
+                            created_at_utc DATETIME NOT NULL,
+                            UNIQUE KEY UX_TeamInvites_TeamInvited (team_id, invited_user_id)
+                        )");
+                }
+                catch { }
             }
 
             if (!await db.Dominos.AnyAsync())

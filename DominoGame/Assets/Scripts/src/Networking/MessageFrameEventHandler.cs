@@ -5,6 +5,7 @@ using DominoCommon.com.domino.common.Scripts.Networking.Dto.Chat;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Friends;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Game;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.Lobby;
+using DominoCommon.com.domino.common.Scripts.Networking.Dto.Teams;
 using DominoCommon.com.domino.common.Scripts.Networking.Dto.User;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame;
 using DominoCommon.com.domino.common.Scripts.Networking.Frame.MessageFrame;
@@ -51,6 +52,17 @@ public class MessageFrameEventHandler
     public event Action<ResponseObjectDto<UserDto>> UpdateProfileAvatarResponseEvent;
     public event Action<ResponseDto> DeleteAccountResponseEvent;
     public event Action<ResponseObjectDto<LeaderboardDto>> GetLeaderboardResponseEvent;
+    public event Action<ResponseObjectDto<TeamsListDto>> GetTeamsResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> GetMyTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> CreateTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> UpdateTeamSettingsResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> JoinOrRequestTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> RespondTeamJoinRequestResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> InviteToTeamResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> RespondTeamInviteResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> PromoteOrDemoteMemberResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> KickTeamMemberResponseEvent;
+    public event Action<ResponseObjectDto<MyTeamDetailsDto>> LeaveTeamResponseEvent;
 
     public event Action<PlayerDto> PlayerJoinedLobbyEvent;
     public event Action<PlayerDto> PlayerLeftLobbyEvent;
@@ -175,6 +187,39 @@ public class MessageFrameEventHandler
                 break;
             case FrameCommandType.GetLeaderboard:
                 GetLeaderboardResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<LeaderboardDto>>());
+                break;
+            case FrameCommandType.GetTeams:
+                GetTeamsResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<TeamsListDto>>());
+                break;
+            case FrameCommandType.GetMyTeam:
+                GetMyTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.CreateTeam:
+                CreateTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.UpdateTeamSettings:
+                UpdateTeamSettingsResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.JoinOrRequestTeam:
+                JoinOrRequestTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.RespondTeamJoinRequest:
+                RespondTeamJoinRequestResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.InviteToTeam:
+                InviteToTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.RespondTeamInvite:
+                RespondTeamInviteResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.PromoteOrDemoteMember:
+                PromoteOrDemoteMemberResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.KickTeamMember:
+                KickTeamMemberResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
+                break;
+            case FrameCommandType.LeaveTeam:
+                LeaveTeamResponseEvent?.Invoke(frame.GetObjectFromMessage<ResponseObjectDto<MyTeamDetailsDto>>());
                 break;
         }
 

@@ -46,6 +46,14 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<ResetPasswordCodeEntity> ResetPasswordCode { get; set; }
 
+    public DbSet<TeamEntity> Teams { get; set; }
+
+    public DbSet<TeamMemberEntity> TeamMembers { get; set; }
+
+    public DbSet<TeamJoinRequestEntity> TeamJoinRequests { get; set; }
+
+    public DbSet<TeamInviteEntity> TeamInvites { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AvatarEntity>(entity =>
@@ -437,6 +445,103 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(d => d.User)
                 .WithMany(d => d.UserTournaments)
                 .HasForeignKey(d => d.UserId);
+        });
+
+        modelBuilder.Entity<TeamEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("Teams");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Tag).HasColumnName("tag");
+            entity.Property(e => e.TeamElo).HasDefaultValue(1000).HasColumnName("team_elo");
+            entity.Property(e => e.TeamWins).HasDefaultValue(0).HasColumnName("team_wins");
+            entity.Property(e => e.TeamLosses).HasDefaultValue(0).HasColumnName("team_losses");
+            entity.Property(e => e.MaxMembers).HasDefaultValue(12).HasColumnName("max_members");
+            entity.Property(e => e.JoinPolicy).HasColumnName("join_policy");
+            entity.Property(e => e.MinElo).HasDefaultValue(100).HasColumnName("min_elo");
+            entity.Property(e => e.ActivityRequirement).HasColumnName("activity_requirement");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+
+            entity.HasMany(e => e.Members)
+                .WithOne(m => m.Team)
+                .HasForeignKey(m => m.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.JoinRequests)
+                .WithOne(r => r.Team)
+                .HasForeignKey(r => r.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Invites)
+                .WithOne(i => i.Team)
+                .HasForeignKey(i => i.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TeamMemberEntity>(entity =>
+        {
+            entity.HasKey(e => new { e.TeamId, e.UserId });
+
+            entity.ToTable("TeamMembers");
+
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.JoinedAtUtc).HasColumnName("joined_at_utc");
+
+            entity.HasIndex(e => e.UserId).IsUnique();
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TeamJoinRequestEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("TeamJoinRequests");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+
+            entity.HasIndex(e => new { e.TeamId, e.UserId }).IsUnique();
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TeamInviteEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable("TeamInvites");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.InvitedUserId).HasColumnName("invited_user_id");
+            entity.Property(e => e.InvitedByUserId).HasColumnName("invited_by_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+
+            entity.HasIndex(e => new { e.TeamId, e.InvitedUserId }).IsUnique();
+
+            entity.HasOne(e => e.InvitedUser)
+                .WithMany()
+                .HasForeignKey(e => e.InvitedUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.InvitedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.InvitedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         });
     }
 }

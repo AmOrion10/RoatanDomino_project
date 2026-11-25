@@ -1,11 +1,12 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 
 using Infrastructure.Services.FrameHandlers;
 
 namespace Infrastructure.Services;
 
 public class MessageFrameHandlers(IMessageFrameHandler handler, LoggingFrameHandlers loggingFrameHandlers, LobbyFrameHandlers lobbyFrameHandlers, 
-    ChatFrameHandlers chatFrameHandlers, ProfileFrameHandlers profileFrameHandlers, GameFrameHandlers gameFrameHandlers, FriendFrameHandlers friendFrameHandlers)
+    ChatFrameHandlers chatFrameHandlers, ProfileFrameHandlers profileFrameHandlers, GameFrameHandlers gameFrameHandlers, FriendFrameHandlers friendFrameHandlers,
+    TeamFrameHandlers teamFrameHandlers)
 {
     public void RegisterHandlers()
     {
@@ -15,5 +16,6 @@ public class MessageFrameHandlers(IMessageFrameHandler handler, LoggingFrameHand
         profileFrameHandlers.RegisterHandlers(handler);
         gameFrameHandlers.RegisterHandlers(handler);
         friendFrameHandlers.RegisterHandlers(handler);
+        teamFrameHandlers.RegisterHandlers(handler);
     }
 }

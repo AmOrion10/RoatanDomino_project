@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<FriendFrameHandlers>();
         services.AddScoped<ProfileFrameHandlers>();
         services.AddScoped<LoggingFrameHandlers>();
+        services.AddScoped<TeamFrameHandlers>();
 
         services.AddScoped<IMailSender, MailSender>();
 
@@ -44,6 +45,7 @@ public static class DependencyInjection
         services.AddScoped<SocialAuthService>();
         services.AddScoped<PresenceService>();
         services.AddScoped<LeaderboardService>();
+        services.AddScoped<TeamService>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IFriendRequestRepository, FriendRequestRepository>();
